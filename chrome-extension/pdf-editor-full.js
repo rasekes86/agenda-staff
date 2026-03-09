@@ -229,11 +229,31 @@ function createElementDiv(el, idx, scale) {
   div.style.top = (el.y * scale) + 'px';
   
   if (el.type === 'text') {
-    div.textContent = el.text;
-    div.style.fontSize = ((el.size || 14) * scale) + 'px';
-    div.style.color = el.color || '#000';
-    div.style.minWidth = '20px';
-    div.style.minHeight = '20px';
+    // Create a span for the text content
+    const textSpan = document.createElement('span');
+    textSpan.className = 'pdf-element-text-content';
+    textSpan.textContent = el.text;
+    textSpan.style.color = el.color || '#000';
+    div.appendChild(textSpan);
+    
+    // Set width and height if available, otherwise calculate from font size
+    if (el.width && el.height) {
+      div.style.width = (el.width * scale) + 'px';
+      div.style.height = (el.height * scale) + 'px';
+      // Calculate font size based on container height
+      const scaledFontSize = Math.max(8, (el.height * 0.8) * scale);
+      textSpan.style.fontSize = scaledFontSize + 'px';
+    } else {
+      // Initial size based on text length and font size
+      const fontSize = el.size || 14;
+      const textWidth = el.text.length * fontSize * 0.6;
+      const textHeight = fontSize * 1.4;
+      el.width = Math.max(30, textWidth);
+      el.height = Math.max(20, textHeight);
+      div.style.width = (el.width * scale) + 'px';
+      div.style.height = (el.height * scale) + 'px';
+      textSpan.style.fontSize = (fontSize * scale) + 'px';
+    }
   } else if (el.type === 'image' || el.type === 'signature') {
     const img = document.createElement('img');
     img.src = el.src;
@@ -315,7 +335,7 @@ function makeResizable(div, el, scale) {
   const handles = div.querySelectorAll('.resize-handle');
   let isResizing = false;
   let currentHandle = null;
-  let startX, startY, startWidth, startHeight, startFontSize, startXPos, startYPos;
+  let startX, startY, startWidth, startHeight, startXPos, startYPos;
   
   handles.forEach(handle => {
     handle.addEventListener('mousedown', (e) => {
@@ -324,18 +344,8 @@ function makeResizable(div, el, scale) {
       currentHandle = handle.dataset.handle;
       startX = e.clientX;
       startY = e.clientY;
-      
-      // Store initial values
-      if (el.type === 'text') {
-        startFontSize = el.size || 14;
-        // Calculate text dimensions
-        const rect = div.getBoundingClientRect();
-        startWidth = rect.width / scale;
-        startHeight = rect.height / scale;
-      } else {
-        startWidth = el.width;
-        startHeight = el.height;
-      }
+      startWidth = el.width;
+      startHeight = el.height;
       startXPos = el.x;
       startYPos = el.y;
       
@@ -350,70 +360,81 @@ function makeResizable(div, el, scale) {
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
     
-    if (el.type === 'text') {
-      // For text: scale font size based on movement
-      let newFontSize = startFontSize;
-      
-      // Use the larger of dx or dy for scaling
-      const delta = Math.max(Math.abs(dx), Math.abs(dy));
-      const scaleFactor = 1 + (dx > 0 ? delta / 200 : -delta / 200);
-      newFontSize = Math.max(8, Math.min(72, startFontSize * scaleFactor));
-      
-      el.size = newFontSize;
-      div.style.fontSize = (newFontSize * scale) + 'px';
-      
+    let newWidth = startWidth;
+    let newHeight = startHeight;
+    let newX = startXPos;
+    let newY = startYPos;
+    
+    // Handle each corner differently
+    switch (currentHandle) {
+      case 'se': // bottom-right
+        newWidth = Math.max(30, startWidth + dx / scale);
+        newHeight = Math.max(20, startHeight + dy / scale);
+        break;
+      case 'sw': // bottom-left
+        newWidth = Math.max(30, startWidth - dx / scale);
+        newHeight = Math.max(20, startHeight + dy / scale);
+        newX = startXPos + (startWidth - newWidth);
+        break;
+      case 'ne': // top-right
+        newWidth = Math.max(30, startWidth + dx / scale);
+        newHeight = Math.max(20, startHeight - dy / scale);
+        newY = startYPos + (startHeight - newHeight);
+        break;
+      case 'nw': // top-left
+        newWidth = Math.max(30, startWidth - dx / scale);
+        newHeight = Math.max(20, startHeight - dy / scale);
+        newX = startXPos + (startWidth - newWidth);
+        newY = startYPos + (startHeight - newHeight);
+        break;
+    }
+    
+    // Maintain aspect ratio (use the larger change)
+    const widthChange = Math.abs(newWidth - startWidth);
+    const heightChange = Math.abs(newHeight - startHeight);
+    const aspectRatio = startWidth / startHeight;
+    
+    if (widthChange > heightChange) {
+      newHeight = newWidth / aspectRatio;
     } else {
-      // For images/signatures: resize width and height
-      let newWidth = startWidth;
-      let newHeight = startHeight;
-      let newX = startXPos;
-      let newY = startYPos;
-      
-      // Handle each corner differently
-      switch (currentHandle) {
-        case 'se': // bottom-right
-          newWidth = Math.max(20, startWidth + dx / scale);
-          newHeight = Math.max(20, startHeight + dy / scale);
-          break;
-        case 'sw': // bottom-left
-          newWidth = Math.max(20, startWidth - dx / scale);
-          newHeight = Math.max(20, startHeight + dy / scale);
-          newX = startXPos + (startWidth - newWidth);
-          break;
-        case 'ne': // top-right
-          newWidth = Math.max(20, startWidth + dx / scale);
-          newHeight = Math.max(20, startHeight - dy / scale);
-          newY = startYPos + (startHeight - newHeight);
-          break;
-        case 'nw': // top-left
-          newWidth = Math.max(20, startWidth - dx / scale);
-          newHeight = Math.max(20, startHeight - dy / scale);
-          newX = startXPos + (startWidth - newWidth);
-          newY = startYPos + (startHeight - newHeight);
-          break;
+      newWidth = newHeight * aspectRatio;
+    }
+    
+    // Recalculate position if needed
+    if (currentHandle === 'nw' || currentHandle === 'sw') {
+      newX = startXPos + (startWidth - newWidth);
+    }
+    if (currentHandle === 'nw' || currentHandle === 'ne') {
+      newY = startYPos + (startHeight - newHeight);
+    }
+    
+    el.width = newWidth;
+    el.height = newHeight;
+    el.x = newX;
+    el.y = newY;
+    
+    // For text: auto-calculate font size based on container height
+    if (el.type === 'text') {
+      el.size = Math.max(8, Math.min(96, newHeight * 0.8));
+      const textSpan = div.querySelector('.pdf-element-text-content');
+      if (textSpan) {
+        textSpan.style.fontSize = (el.size * scale) + 'px';
       }
-      
-      // Maintain aspect ratio for images
-      const aspectRatio = startWidth / startHeight;
-      if (Math.abs(dx) > Math.abs(dy)) {
-        newHeight = newWidth / aspectRatio;
-      } else {
-        newWidth = newHeight * aspectRatio;
-      }
-      
-      el.width = newWidth;
-      el.height = newHeight;
-      el.x = newX;
-      el.y = newY;
-      
-      // Update DOM
+    }
+    
+    // Update DOM - container size and position
+    div.style.width = (newWidth * scale) + 'px';
+    div.style.height = (newHeight * scale) + 'px';
+    div.style.left = (newX * scale) + 'px';
+    div.style.top = (newY * scale) + 'px';
+    
+    // For images: update img size
+    if (el.type === 'image' || el.type === 'signature') {
       const img = div.querySelector('img');
       if (img) {
         img.style.width = (newWidth * scale) + 'px';
         img.style.height = (newHeight * scale) + 'px';
       }
-      div.style.left = (newX * scale) + 'px';
-      div.style.top = (newY * scale) + 'px';
     }
   });
   
@@ -422,7 +443,13 @@ function makeResizable(div, el, scale) {
     isResizing = false;
     div.classList.remove('resizing');
     div.classList.remove('selected');
-    showStatus('Tamaño actualizado', 'success');
+    
+    // For text, update the stored font size
+    if (el.type === 'text') {
+      showStatus('Texto redimensionado - Tamaño letra: ' + Math.round(el.size) + 'px', 'success');
+    } else {
+      showStatus('Tamaño actualizado', 'success');
+    }
   });
 }
 
@@ -462,11 +489,17 @@ function confirmText() {
     return;
   }
   
+  // Calculate initial width and height based on text and font size
+  const textWidth = Math.max(30, text.length * size * 0.6);
+  const textHeight = Math.max(20, size * 1.4);
+  
   elements[currentPage].push({
     type: 'text',
     text: text,
-    x: pageWidth / 2 - 50,
-    y: pageHeight / 2,
+    x: pageWidth / 2 - textWidth / 2,
+    y: pageHeight / 2 - textHeight / 2,
+    width: textWidth,
+    height: textHeight,
     size: size,
     color: color
   });

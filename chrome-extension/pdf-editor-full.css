@@ -162,8 +162,19 @@ body {
 .pdf-element-text {
   background: rgba(255, 255, 0, 0.2);
   color: #000;
-  white-space: pre-wrap;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  overflow: hidden;
+}
+
+.pdf-element-text-content {
+  white-space: nowrap;
   font-family: sans-serif;
+  font-weight: 500;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pdf-element-image,
