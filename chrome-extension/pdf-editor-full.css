@@ -1,0 +1,503 @@
+/* PDF Editor Full Screen - AGENDA STAFF v5.17.0 */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #1e293b;
+  color: #f1f5f9;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 20px;
+  background: #0f172a;
+  border-bottom: 1px solid #334155;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.editor-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #3b82f6;
+}
+
+.editor-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-left: 20px;
+  flex-wrap: wrap;
+}
+
+.toolbar-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.toolbar-btn.primary { background: #3b82f6; color: white; }
+.toolbar-btn.primary:hover { background: #2563eb; }
+.toolbar-btn.secondary { background: #334155; color: #f1f5f9; }
+.toolbar-btn.secondary:hover { background: #475569; }
+.toolbar-btn.danger { background: #dc2626; color: white; }
+.toolbar-btn.danger:hover { background: #b91c1c; }
+.toolbar-btn.success { background: #10b981; color: white; }
+.toolbar-btn.success:hover { background: #059669; }
+.toolbar-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.toolbar-spacer { flex: 1; }
+
+.editor-main {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.editor-sidebar {
+  width: 240px;
+  background: #0f172a;
+  border-right: 1px solid #334155;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.sidebar-section {
+  background: #1e293b;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.sidebar-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 10px;
+}
+
+.sidebar-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 6px;
+  background: #334155;
+  color: #f1f5f9;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 6px;
+}
+
+.sidebar-btn:hover { background: #475569; }
+.sidebar-btn.active { background: #3b82f6; }
+
+.sidebar-info {
+  font-size: 13px;
+  color: #94a3b8;
+  line-height: 1.6;
+}
+
+.sidebar-info p { margin-bottom: 4px; }
+
+.editor-canvas-area {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 20px;
+  overflow: auto;
+  background: #1e293b;
+}
+
+.canvas-container {
+  position: relative;
+  background: white;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+}
+
+.canvas-container canvas { display: block; }
+
+.elements-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.pdf-element {
+  position: absolute;
+  cursor: move;
+  pointer-events: auto;
+  border: 2px dashed transparent;
+  padding: 4px 8px;
+  border-radius: 4px;
+  min-width: 20px;
+  min-height: 16px;
+}
+
+.pdf-element:hover,
+.pdf-element.selected {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.pdf-element-text {
+  background: rgba(255, 255, 0, 0.2);
+  color: #000;
+  white-space: pre-wrap;
+  font-family: sans-serif;
+}
+
+.pdf-element-image,
+.pdf-element-signature { background: transparent; padding: 2px; }
+
+.pdf-element img {
+  display: block;
+  pointer-events: none;
+}
+
+.pdf-element-delete {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  width: 22px;
+  height: 22px;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.pdf-element:hover .pdf-element-delete,
+.pdf-element.selected .pdf-element-delete { display: flex; }
+
+/* Resize handles */
+.resize-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  background: #3b82f6;
+  border: 2px solid white;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 10;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+.pdf-element:hover .resize-handle,
+.pdf-element.selected .resize-handle {
+  opacity: 1;
+}
+
+.resize-handle-nw { top: -7px; left: -7px; cursor: nwse-resize; }
+.resize-handle-ne { top: -7px; right: -7px; cursor: nesw-resize; }
+.resize-handle-sw { bottom: -7px; left: -7px; cursor: nesw-resize; }
+.resize-handle-se { bottom: -7px; right: -7px; cursor: nwse-resize; }
+
+.pdf-element.resizing {
+  user-select: none;
+}
+
+.pdf-element.resizing * {
+  pointer-events: none;
+}
+
+/* Upload area */
+.upload-wrapper {
+  position: relative;
+  width: 600px;
+  height: 400px;
+}
+
+.upload-area {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 3px dashed #475569;
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: transparent;
+}
+
+.upload-area:hover {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.05);
+}
+
+.upload-area.drag-over {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.15);
+}
+
+.upload-icon { font-size: 64px; margin-bottom: 16px; }
+.upload-text { font-size: 18px; color: #94a3b8; }
+.upload-hint { font-size: 13px; color: #64748b; margin-top: 8px; }
+
+/* File input visible but transparent */
+.file-input-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 10;
+}
+
+.page-nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #1e293b;
+  border-radius: 8px;
+}
+
+.page-nav button {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 6px;
+  background: #334155;
+  color: #f1f5f9;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.page-nav button:hover { background: #475569; }
+.page-nav button:disabled { opacity: 0.3; cursor: not-allowed; }
+.page-info { font-size: 14px; color: #94a3b8; }
+
+.zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.zoom-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 6px;
+  background: #334155;
+  color: #f1f5f9;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.zoom-btn:hover { background: #475569; }
+.zoom-level { font-size: 13px; color: #94a3b8; min-width: 50px; text-align: center; }
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.7);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-overlay.show { display: flex; }
+
+.modal {
+  background: #1e293b;
+  border-radius: 12px;
+  padding: 20px;
+  width: 450px;
+  max-width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.modal h3 { margin-bottom: 16px; font-size: 16px; }
+
+.modal textarea {
+  width: 100%;
+  height: 80px;
+  padding: 12px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #f1f5f9;
+  font-size: 14px;
+  resize: none;
+  margin-bottom: 12px;
+}
+
+.modal-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.modal input[type="number"] {
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #f1f5f9;
+  font-size: 14px;
+}
+
+.modal input[type="color"] {
+  width: 50px;
+  height: 40px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.modal-actions button {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.modal-actions .btn-cancel { background: #334155; color: #f1f5f9; }
+.modal-actions .btn-add { background: #3b82f6; color: white; }
+
+.signature-search-input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #f1f5f9;
+  font-size: 14px;
+  margin-bottom: 12px;
+  resize: vertical;
+  min-height: 80px;
+  font-family: inherit;
+}
+
+.signature-results {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+}
+
+.signature-item {
+  padding: 12px;
+  border-bottom: 1px solid #334155;
+  cursor: pointer;
+  transition: background 0.2s;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.signature-item:hover { background: #1e293b; }
+.signature-item:last-child { border-bottom: none; }
+.signature-loading { padding: 20px; text-align: center; color: #94a3b8; }
+.signature-empty { padding: 20px; text-align: center; color: #64748b; }
+
+.signature-count {
+  padding: 10px 12px;
+  background: #10b981;
+  color: white;
+  font-size: 13px;
+  font-weight: 500;
+  border-bottom: 1px solid #334155;
+}
+
+.signature-add-icon {
+  background: #3b82f6;
+  color: white;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.signature-modal {
+  width: 500px;
+  max-width: 95%;
+}
+
+.btn-search {
+  background: #3b82f6;
+  color: white;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.btn-search:hover { background: #2563eb; }
+
+/* Status message */
+.status-msg {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 24px;
+  background: #334155;
+  color: #f1f5f9;
+  border-radius: 8px;
+  font-size: 14px;
+  z-index: 1001;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.status-msg.show { opacity: 1; }
+.status-msg.success { background: #10b981; }
+.status-msg.error { background: #dc2626; }
