@@ -1,5 +1,5 @@
 // ============================================
-// AGENDA STAFF v5.17.2 - MULTI-SIGNATURE SEARCH
+// AGENDA STAFF v5.17.5 - MULTI-WORD TO PDF
 // ============================================
 
 const SUPABASE_URL = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
@@ -36,7 +36,7 @@ let mergePdfs = [];
 let splitPdfFile = null;
 
 // Word to PDF state
-let wordFile = null;
+let wordFiles = [];
 
 // PDF Editor state
 let editorPdfBytes = null;
@@ -1876,103 +1876,158 @@ function handleWordDragLeave(e) {
 function handleWordDrop(e) {
   e.preventDefault();
   $('wordDropzone').classList.remove('drag-over');
-  const files = e.dataTransfer.files;
+  const files = Array.from(e.dataTransfer.files).filter(f => {
+    const ext = f.name.split('.').pop().toLowerCase();
+    return ['docx', 'doc'].includes(ext);
+  });
   if (files.length > 0) {
-    processWordFile(files[0]);
+    addWordFiles(files);
   }
 }
 
 function handleWordFileSelect(e) {
-  const file = e.target.files[0];
-  if (file) processWordFile(file);
+  const files = Array.from(e.target.files);
+  if (files.length > 0) {
+    addWordFiles(files);
+  }
 }
 
-function processWordFile(file) {
-  const validTypes = [
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'application/msword'
-  ];
-  const ext = file.name.split('.').pop().toLowerCase();
-  
-  if (!validTypes.includes(file.type) && !['docx', 'doc'].includes(ext)) {
-    showToast('Por favor, selecciona un archivo Word (.docx o .doc)');
+async function addWordFiles(files) {
+  for (const file of files) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!['docx', 'doc'].includes(ext)) {
+      showToast(`${file.name} no es un archivo Word válido`);
+      continue;
+    }
+    
+    const arrayBuffer = await file.arrayBuffer();
+    wordFiles.push({ name: file.name, data: arrayBuffer });
+  }
+  renderWordPreview();
+}
+
+function renderWordPreview() {
+  if (wordFiles.length === 0) {
+    $('wordPreviewArea').style.display = 'none';
+    $('wordDropzone').style.display = 'flex';
     return;
   }
   
-  wordFile = file;
-  $('wordFileInfo').innerHTML = `<span style="font-size:16px">📝</span> ${file.name}`;
   $('wordPreviewArea').style.display = 'block';
   $('wordDropzone').style.display = 'none';
+  $('wordPreviewList').innerHTML = wordFiles.map((file, i) => `
+    <div class="pdf-preview-item" data-index="${i}">
+      <span class="pdf-icon">📝</span>
+      <span class="pdf-preview-name">${file.name}</span>
+      <button class="pdf-remove-btn" data-index="${i}">✕</button>
+    </div>
+  `).join('');
+  
+  document.querySelectorAll('#wordPreviewList .pdf-remove-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const index = parseInt(e.target.dataset.index);
+      wordFiles.splice(index, 1);
+      renderWordPreview();
+    });
+  });
 }
 
 function clearWordFile() {
-  wordFile = null;
+  wordFiles = [];
   $('wordPreviewArea').style.display = 'none';
-  $('wordDropzone').style.display = 'block';
+  $('wordDropzone').style.display = 'flex';
   $('wordFileInput').value = '';
 }
 
 async function convertWordToPdf() {
-  if (!wordFile) {
-    showToast('Selecciona un archivo Word');
+  if (wordFiles.length === 0) {
+    showToast('Selecciona al menos un archivo Word');
     return;
   }
   
   const btn = $('btnWordToPdf');
   btn.disabled = true;
-  btn.querySelector('.btn-text').textContent = 'Convirtiendo...';
-  btn.querySelector('.btn-loader').style.display = 'inline-block';
+  
+  const totalFiles = wordFiles.length;
+  let successCount = 0;
+  let errorCount = 0;
   
   try {
-    // Read the Word file
-    const arrayBuffer = await wordFile.arrayBuffer();
-    
-    // Check if mammoth is available (use window.mammoth for global access)
+    // Check if mammoth is available
     const mammothLib = window.mammoth;
     if (!mammothLib) {
       throw new Error('La librería mammoth no está cargada. Recarga la extensión.');
     }
     
-    const result = await mammothLib.convertToHtml({ arrayBuffer });
-    const html = result.value;
-    
-    // Create PDF from HTML using jspdf
+    // Check if jsPDF is available
     if (typeof window.jspdf === 'undefined') {
       throw new Error('La librería jsPDF no está cargada. Recarga la extensión.');
     }
     
     const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
     
-    // Parse HTML and add to PDF
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = html;
-    tempDiv.style.width = '170mm';
-    document.body.appendChild(tempDiv);
-    
-    // Extract text content
-    const textContent = tempDiv.innerText || tempDiv.textContent;
-    const lines = doc.splitTextToSize(textContent, 180);
-    
-    let y = 20;
-    const pageHeight = doc.internal.pageSize.height;
-    
-    for (let i = 0; i < lines.length; i++) {
-      if (y > pageHeight - 20) {
-        doc.addPage();
-        y = 20;
+    for (let i = 0; i < wordFiles.length; i++) {
+      const wordFile = wordFiles[i];
+      btn.querySelector('.btn-text').textContent = `Convirtiendo ${i + 1}/${totalFiles}...`;
+      
+      try {
+        // Convert Word to HTML
+        const result = await mammothLib.convertToHtml({ arrayBuffer: wordFile.data });
+        const html = result.value;
+        
+        // Create PDF
+        const doc = new jsPDF();
+        
+        // Parse HTML and add to PDF
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = html;
+        tempDiv.style.width = '170mm';
+        document.body.appendChild(tempDiv);
+        
+        // Extract text content
+        const textContent = tempDiv.innerText || tempDiv.textContent;
+        const lines = doc.splitTextToSize(textContent, 180);
+        
+        let y = 20;
+        const pageHeight = doc.internal.pageSize.height;
+        
+        for (let j = 0; j < lines.length; j++) {
+          if (y > pageHeight - 20) {
+            doc.addPage();
+            y = 20;
+          }
+          doc.text(lines[j], 15, y);
+          y += 7;
+        }
+        
+        document.body.removeChild(tempDiv);
+        
+        // Download PDF
+        const fileName = wordFile.name.replace(/\.(docx|doc)$/i, '.pdf');
+        doc.save(fileName);
+        
+        successCount++;
+        
+        // Small delay between downloads to prevent browser blocking
+        if (i < wordFiles.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+        
+      } catch (fileErr) {
+        console.error(`Error converting ${wordFile.name}:`, fileErr);
+        errorCount++;
       }
-      doc.text(lines[i], 15, y);
-      y += 7;
     }
     
-    document.body.removeChild(tempDiv);
+    // Show result
+    if (successCount === totalFiles) {
+      showToast(`✅ ${successCount} PDFs creados correctamente`);
+    } else if (successCount > 0) {
+      showToast(`✅ ${successCount} convertidos, ❌ ${errorCount} errores`);
+    } else {
+      showToast('❌ Error al convertir los archivos');
+    }
     
-    // Download PDF
-    const fileName = wordFile.name.replace(/\.(docx|doc)$/i, '.pdf');
-    doc.save(fileName);
-    
-    showToast('✅ PDF creado correctamente');
     clearWordFile();
     
   } catch (err) {
