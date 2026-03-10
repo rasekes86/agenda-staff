@@ -7,7 +7,8 @@
   <link rel="stylesheet" href="sidepanel.css">
   <script src="jspdf.umd.min.js"></script>
   <script src="pdf-lib.min.js"></script>
-  <script src="mammoth.browser.min.js"></script>
+  <script src="docx-preview.min.js"></script>
+  <script src="html2canvas.min.js"></script>
 </head>
 <body>
   <div class="container">
@@ -341,12 +342,12 @@
           <div class="pdf-tab-content" id="wordToPdfTab">
             <div class="pdf-dropzone" id="wordDropzone">
               <div class="pdf-dropzone-icon">📝</div>
-              <div class="pdf-dropzone-text">Selecciona un documento Word</div>
-              <div class="pdf-dropzone-hint">DOCX, DOC</div>
-              <input type="file" id="wordFileInput" accept=".docx,.doc" hidden>
+              <div class="pdf-dropzone-text">Selecciona documentos Word</div>
+              <div class="pdf-dropzone-hint">DOCX (múltiples archivos)</div>
+              <input type="file" id="wordFileInput" accept=".docx" multiple hidden>
             </div>
             <div class="pdf-preview-area" id="wordPreviewArea" style="display: none;">
-              <div class="pdf-file-info" id="wordFileInfo"></div>
+              <div class="pdf-preview-list" id="wordPreviewList"></div>
               <button class="pdf-clear-btn" id="wordClearBtn">✕ Limpiar</button>
             </div>
             <button class="pdf-convert-btn" id="btnWordToPdf">
