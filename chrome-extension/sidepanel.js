@@ -1,5 +1,5 @@
 // ============================================
-// AGENDA STAFF v5.17.6 - VISUAL WORD TO PDF
+// AGENDA STAFF v5.17.7 - BUG FIXES
 // ============================================
 
 const SUPABASE_URL = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
@@ -1947,6 +1947,7 @@ async function convertWordToPdf() {
   
   const btn = $('btnWordToPdf');
   btn.disabled = true;
+  btn.querySelector('.btn-loader').style.display = 'inline-block';
   
   const totalFiles = wordFiles.length;
   let successCount = 0;
@@ -1974,26 +1975,26 @@ async function convertWordToPdf() {
       const wordFile = wordFiles[i];
       btn.querySelector('.btn-text').textContent = `Convirtiendo ${i + 1}/${totalFiles}...`;
       
+      let renderContainer = null;
+      
       try {
         // Create hidden container for rendering
-        const renderContainer = document.createElement('div');
-        renderContainer.id = 'word-render-container';
+        renderContainer = document.createElement('div');
+        renderContainer.id = 'word-render-container-' + i;
         renderContainer.style.cssText = `
-          position: fixed;
-          left: -9999px;
+          position: absolute;
+          left: -99999px;
           top: 0;
           width: 794px;
           background: white;
-          padding: 40px;
-          font-family: 'Calibri', 'Arial', sans-serif;
-          z-index: -9999;
+          z-index: -99999;
         `;
         document.body.appendChild(renderContainer);
         
         // Render Word document with docx-preview
         await docx.renderAsync(wordFile.data, renderContainer, null, {
           className: 'docx-render',
-          inWrapper: false,
+          inWrapper: true,
           ignoreWidth: false,
           ignoreHeight: false,
           ignoreFonts: false,
@@ -2005,12 +2006,17 @@ async function convertWordToPdf() {
           renderEndnotes: true
         });
         
-        // Wait for images to load
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Wait for images and fonts to load
+        await new Promise(resolve => setTimeout(resolve, 800));
         
-        // Get all pages (sections created by docx-preview)
-        const sections = renderContainer.querySelectorAll('.docx-wrapper > section');
-        const pages = sections.length > 0 ? sections : [renderContainer];
+        // Get all sections/pages from docx-preview
+        const wrapper = renderContainer.querySelector('.docx-wrapper');
+        const sections = wrapper ? wrapper.querySelectorAll('section') : [renderContainer];
+        
+        if (sections.length === 0) {
+          // Fallback: use the whole container
+          sections = [renderContainer];
+        }
         
         // Create PDF with A4 dimensions
         const pdf = new jsPDF({
@@ -2021,68 +2027,81 @@ async function convertWordToPdf() {
         
         const pageWidth = 210;
         const pageHeight = 297;
-        const margin = 10;
+        const margin = 5;
+        const contentWidth = pageWidth - (margin * 2);
+        const contentHeight = pageHeight - (margin * 2);
         
-        for (let p = 0; p < pages.length; p++) {
-          if (p > 0) {
-            pdf.addPage();
-          }
+        let firstPage = true;
+        
+        for (let p = 0; p < sections.length; p++) {
+          const pageElement = sections[p];
           
-          const pageElement = pages[p];
+          // Get the actual rendered height
+          const renderedHeight = pageElement.scrollHeight || 1123; // Default A4 height in px
+          const renderedWidth = pageElement.scrollWidth || 794;
           
-          // Capture page as image using html2canvas
+          // Capture section as image using html2canvas
           const canvas = await html2canvas(pageElement, {
             scale: 2,
             useCORS: true,
+            allowTaint: true,
             logging: false,
             backgroundColor: '#ffffff',
-            windowWidth: 794,
-            windowHeight: pageElement.scrollHeight
+            width: renderedWidth,
+            height: renderedHeight,
+            windowWidth: renderedWidth,
+            windowHeight: renderedHeight
           });
           
-          // Calculate dimensions to fit in PDF
-          const imgWidth = pageWidth - (margin * 2);
+          // Calculate dimensions
+          const imgWidth = contentWidth;
           const imgHeight = (canvas.height * imgWidth) / canvas.width;
           
-          // Add image to PDF
-          const imgData = canvas.toDataURL('image/jpeg', 0.95);
-          
-          // If content is taller than page, split across multiple pages
-          let remainingHeight = imgHeight;
-          let sourceY = 0;
-          const maxImgHeightPerPage = pageHeight - (margin * 2);
-          
-          while (remainingHeight > 0) {
-            if (sourceY > 0) {
-              pdf.addPage();
+          // Add image to PDF, splitting if necessary
+          if (imgHeight <= contentHeight) {
+            // Fits on one page
+            if (!firstPage) pdf.addPage();
+            firstPage = false;
+            
+            const imgData = canvas.toDataURL('image/jpeg', 0.9);
+            pdf.addImage(imgData, 'JPEG', margin, margin, imgWidth, imgHeight);
+          } else {
+            // Need to split across multiple pages
+            const availableHeight = contentHeight;
+            const ratio = canvas.width / imgWidth;
+            const pageHeightPx = availableHeight * ratio;
+            
+            let currentY = 0;
+            
+            while (currentY < canvas.height) {
+              if (!firstPage) pdf.addPage();
+              firstPage = false;
+              
+              const sectionHeight = Math.min(pageHeightPx, canvas.height - currentY);
+              
+              // Create temp canvas for this section
+              const tempCanvas = document.createElement('canvas');
+              tempCanvas.width = canvas.width;
+              tempCanvas.height = sectionHeight;
+              const ctx = tempCanvas.getContext('2d');
+              ctx.fillStyle = '#ffffff';
+              ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+              ctx.drawImage(canvas, 0, currentY, canvas.width, sectionHeight, 0, 0, canvas.width, sectionHeight);
+              
+              const sectionImg = tempCanvas.toDataURL('image/jpeg', 0.9);
+              const sectionHeightMm = sectionHeight / ratio;
+              pdf.addImage(sectionImg, 'JPEG', margin, margin, imgWidth, sectionHeightMm);
+              
+              currentY += sectionHeight;
             }
-            
-            const currentHeight = Math.min(remainingHeight, maxImgHeightPerPage);
-            const sourceHeight = (currentHeight * canvas.width) / imgWidth;
-            
-            // Create temporary canvas for this portion
-            const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = canvas.width;
-            tempCanvas.height = sourceHeight * (canvas.height / imgHeight);
-            const ctx = tempCanvas.getContext('2d');
-            ctx.drawImage(
-              canvas,
-              0, sourceY * (canvas.height / imgHeight),
-              canvas.width, tempCanvas.height,
-              0, 0,
-              canvas.width, tempCanvas.height
-            );
-            
-            const partialImg = tempCanvas.toDataURL('image/jpeg', 0.95);
-            pdf.addImage(partialImg, 'JPEG', margin, margin, imgWidth, currentHeight);
-            
-            sourceY += sourceHeight;
-            remainingHeight -= currentHeight;
           }
         }
         
         // Clean up
-        document.body.removeChild(renderContainer);
+        if (renderContainer && renderContainer.parentNode) {
+          document.body.removeChild(renderContainer);
+        }
+        renderContainer = null;
         
         // Download PDF
         const fileName = wordFile.name.replace(/\.docx$/i, '.pdf');
@@ -2092,17 +2111,17 @@ async function convertWordToPdf() {
         
         // Small delay between conversions
         if (i < wordFiles.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 300));
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
         
       } catch (fileErr) {
         console.error(`Error converting ${wordFile.name}:`, fileErr);
         errorCount++;
+        showToast(`Error en ${wordFile.name}: ${fileErr.message}`);
         
         // Clean up if error
-        const container = document.getElementById('word-render-container');
-        if (container) {
-          document.body.removeChild(container);
+        if (renderContainer && renderContainer.parentNode) {
+          document.body.removeChild(renderContainer);
         }
       }
     }
@@ -2676,7 +2695,11 @@ function closeSignaturesModal() {
 function resetSignatureState() {
   signatureSearchTerm = '';
   signatureFile = null;
+  if (signaturePreviewUrl && signaturePreviewUrl.startsWith('blob:')) {
+    URL.revokeObjectURL(signaturePreviewUrl);
+  }
   signaturePreviewUrl = null;
+  
   $('signatureSearchInput').value = '';
   $('signaturesResults').innerHTML = `
     <div class="signatures-empty">
@@ -2686,7 +2709,24 @@ function resetSignatureState() {
   `;
   $('signaturesUploadSection').style.display = 'none';
   $('signaturePreviewArea').style.display = 'none';
+  $('signatureDropzone').style.display = 'block';
   $('newSignatureName').value = '';
+  $('signatureFileInput').value = '';
+  
+  // Reset button state
+  const btn = $('btnUploadSignature');
+  if (btn) {
+    btn.disabled = false;
+    const btnText = btn.querySelector('.btn-text');
+    const btnLoader = btn.querySelector('.btn-loader');
+    if (btnText) btnText.textContent = 'Guardar Firma';
+    if (btnLoader) btnLoader.style.display = 'none';
+  }
+  
+  // Clear any global selection callback
+  if (window.selectSignatureForEditor) {
+    window.selectSignatureForEditor = null;
+  }
 }
 
 // Search signatures in Supabase (supports multiple names, one per line)
@@ -2925,8 +2965,10 @@ async function uploadSignature() {
 
   const btn = $('btnUploadSignature');
   btn.disabled = true;
-  btn.querySelector('.btn-text').textContent = 'Subiendo...';
-  btn.querySelector('.btn-loader').style.display = 'inline-block';
+  const btnText = btn.querySelector('.btn-text');
+  const btnLoader = btn.querySelector('.btn-loader');
+  if (btnText) btnText.textContent = 'Subiendo...';
+  if (btnLoader) btnLoader.style.display = 'inline-block';
 
   try {
     // Convert image to base64
@@ -2938,7 +2980,6 @@ async function uploadSignature() {
     });
 
     console.log('Subiendo firma:', name);
-    console.log('User ID:', currentUser?.id);
 
     // Insert into signatures table
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -2980,17 +3021,25 @@ async function uploadSignature() {
 
     showToast('✅ Firma guardada correctamente');
     
-    // Reset and close
-    resetSignatureState();
+    // Reset button state before closing
+    btn.disabled = false;
+    if (btnText) btnText.textContent = 'Guardar Firma';
+    if (btnLoader) btnLoader.style.display = 'none';
+    
+    // Reset state completely
+    signatureFile = null;
+    signaturePreviewUrl = null;
+    
+    // Close modal
     closeSignaturesModal();
 
   } catch (err) {
     console.error('Upload error:', err);
     showToast('Error: ' + err.message);
-  } finally {
+    // Reset button on error
     btn.disabled = false;
-    btn.querySelector('.btn-text').textContent = 'Guardar Firma';
-    btn.querySelector('.btn-loader').style.display = 'none';
+    if (btnText) btnText.textContent = 'Guardar Firma';
+    if (btnLoader) btnLoader.style.display = 'none';
   }
 }
 
