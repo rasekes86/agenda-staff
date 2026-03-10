@@ -1,5 +1,5 @@
 // ============================================
-// AGENDA STAFF v5.17.7 - BUG FIXES
+// AGENDA STAFF v5.17.8 - WORD TO PDF FIX
 // ============================================
 
 const SUPABASE_URL = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
@@ -1947,16 +1947,20 @@ async function convertWordToPdf() {
   
   const btn = $('btnWordToPdf');
   btn.disabled = true;
-  btn.querySelector('.btn-loader').style.display = 'inline-block';
+  const btnText = btn.querySelector('.btn-text');
+  const btnLoader = btn.querySelector('.btn-loader');
+  if (btnText) btnText.textContent = 'Preparando...';
+  if (btnLoader) btnLoader.style.display = 'inline-block';
   
   const totalFiles = wordFiles.length;
   let successCount = 0;
   let errorCount = 0;
   
   try {
-    // Check if docx-preview is available
-    if (typeof docx === 'undefined' || !docx.renderAsync) {
-      throw new Error('La librería docx-preview no está cargada. Recarga la extensión.');
+    // Check if mammoth is available (it's a global variable)
+    const mammothLib = window.mammoth || (typeof mammoth !== 'undefined' ? mammoth : null);
+    if (!mammothLib) {
+      throw new Error('La librería mammoth no está cargada. Recarga la extensión.');
     }
     
     // Check if html2canvas is available
@@ -1973,50 +1977,100 @@ async function convertWordToPdf() {
     
     for (let i = 0; i < wordFiles.length; i++) {
       const wordFile = wordFiles[i];
-      btn.querySelector('.btn-text').textContent = `Convirtiendo ${i + 1}/${totalFiles}...`;
+      if (btnText) btnText.textContent = `Convirtiendo ${i + 1}/${totalFiles}...`;
       
       let renderContainer = null;
       
       try {
-        // Create hidden container for rendering
+        // Convert DOCX to HTML using mammoth
+        const arrayBuffer = wordFile.data;
+        
+        // Use mammoth to convert
+        const result = await mammothLib.convertToHtml({ arrayBuffer: arrayBuffer }, {
+          styleMap: [
+            "p[style-name='Heading 1'] => h1:fresh",
+            "p[style-name='Heading 2'] => h2:fresh",
+            "p[style-name='Heading 3'] => h3:fresh",
+            "p[style-name='Title'] => h1.title:fresh",
+            "b => strong",
+            "i => em",
+            "u => u",
+            "strike => s"
+          ]
+        });
+        
+        const html = result.value;
+        console.log('Mammoth conversion done for:', wordFile.name);
+        
+        if (result.messages && result.messages.length > 0) {
+          console.log('Mammoth warnings:', result.messages);
+        }
+        
+        if (!html || html.trim() === '') {
+          throw new Error('El documento está vacío o no se pudo leer');
+        }
+        
+        // Create styled container for rendering
         renderContainer = document.createElement('div');
-        renderContainer.id = 'word-render-container-' + i;
+        renderContainer.id = 'word-render-container-' + Date.now();
         renderContainer.style.cssText = `
           position: absolute;
           left: -99999px;
           top: 0;
           width: 794px;
+          padding: 40px;
           background: white;
+          font-family: 'Calibri', 'Arial', sans-serif;
+          font-size: 11pt;
+          line-height: 1.6;
+          color: #000;
           z-index: -99999;
         `;
+        
+        // Apply comprehensive styles
+        renderContainer.innerHTML = `
+          <style>
+            #${renderContainer.id} { box-sizing: border-box; }
+            #${renderContainer.id} * { box-sizing: border-box; max-width: 100%; }
+            #${renderContainer.id} h1 { font-size: 24pt; font-weight: bold; margin: 12pt 0 6pt 0; color: #000; }
+            #${renderContainer.id} h2 { font-size: 18pt; font-weight: bold; margin: 10pt 0 4pt 0; color: #000; }
+            #${renderContainer.id} h3 { font-size: 14pt; font-weight: bold; margin: 8pt 0 4pt 0; color: #000; }
+            #${renderContainer.id} h1.title { font-size: 28pt; text-align: center; margin-bottom: 12pt; }
+            #${renderContainer.id} p { margin: 6pt 0; text-align: justify; }
+            #${renderContainer.id} strong, #${renderContainer.id} b { font-weight: bold; }
+            #${renderContainer.id} em, #${renderContainer.id} i { font-style: italic; }
+            #${renderContainer.id} u { text-decoration: underline; }
+            #${renderContainer.id} s { text-decoration: line-through; }
+            #${renderContainer.id} table { border-collapse: collapse; width: 100%; margin: 10pt 0; }
+            #${renderContainer.id} table td, #${renderContainer.id} table th { 
+              border: 1px solid #000; padding: 4pt 8pt; vertical-align: top; 
+            }
+            #${renderContainer.id} table th { font-weight: bold; background: #f0f0f0; }
+            #${renderContainer.id} ul, #${renderContainer.id} ol { margin: 6pt 0; padding-left: 24pt; }
+            #${renderContainer.id} li { margin: 2pt 0; }
+            #${renderContainer.id} img { max-width: 100%; height: auto; display: block; margin: 10pt auto; }
+            #${renderContainer.id} br { line-height: 1.6; }
+          </style>
+          ${html}
+        `;
+        
         document.body.appendChild(renderContainer);
         
-        // Render Word document with docx-preview
-        await docx.renderAsync(wordFile.data, renderContainer, null, {
-          className: 'docx-render',
-          inWrapper: true,
-          ignoreWidth: false,
-          ignoreHeight: false,
-          ignoreFonts: false,
-          breakPages: true,
-          useBase64URL: true,
-          renderHeaders: true,
-          renderFooters: true,
-          renderFootnotes: true,
-          renderEndnotes: true
-        });
-        
-        // Wait for images and fonts to load
-        await new Promise(resolve => setTimeout(resolve, 800));
-        
-        // Get all sections/pages from docx-preview
-        const wrapper = renderContainer.querySelector('.docx-wrapper');
-        const sections = wrapper ? wrapper.querySelectorAll('section') : [renderContainer];
-        
-        if (sections.length === 0) {
-          // Fallback: use the whole container
-          sections = [renderContainer];
+        // Wait for images to load
+        const images = renderContainer.querySelectorAll('img');
+        if (images.length > 0) {
+          await Promise.all(Array.from(images).map(img => {
+            if (img.complete) return Promise.resolve();
+            return new Promise((resolve) => {
+              img.onload = resolve;
+              img.onerror = resolve;
+              setTimeout(resolve, 2000);
+            });
+          }));
         }
+        
+        // Small delay for rendering
+        await new Promise(resolve => setTimeout(resolve, 200));
         
         // Create PDF with A4 dimensions
         const pdf = new jsPDF({
@@ -2027,74 +2081,64 @@ async function convertWordToPdf() {
         
         const pageWidth = 210;
         const pageHeight = 297;
-        const margin = 5;
+        const margin = 15;
         const contentWidth = pageWidth - (margin * 2);
         const contentHeight = pageHeight - (margin * 2);
         
-        let firstPage = true;
+        // Get total height
+        const totalHeight = renderContainer.scrollHeight;
+        const totalWidth = renderContainer.scrollWidth;
         
-        for (let p = 0; p < sections.length; p++) {
-          const pageElement = sections[p];
-          
-          // Get the actual rendered height
-          const renderedHeight = pageElement.scrollHeight || 1123; // Default A4 height in px
-          const renderedWidth = pageElement.scrollWidth || 794;
-          
-          // Capture section as image using html2canvas
-          const canvas = await html2canvas(pageElement, {
-            scale: 2,
-            useCORS: true,
-            allowTaint: true,
-            logging: false,
-            backgroundColor: '#ffffff',
-            width: renderedWidth,
-            height: renderedHeight,
-            windowWidth: renderedWidth,
-            windowHeight: renderedHeight
-          });
-          
-          // Calculate dimensions
-          const imgWidth = contentWidth;
-          const imgHeight = (canvas.height * imgWidth) / canvas.width;
-          
-          // Add image to PDF, splitting if necessary
-          if (imgHeight <= contentHeight) {
-            // Fits on one page
-            if (!firstPage) pdf.addPage();
-            firstPage = false;
-            
-            const imgData = canvas.toDataURL('image/jpeg', 0.9);
-            pdf.addImage(imgData, 'JPEG', margin, margin, imgWidth, imgHeight);
-          } else {
-            // Need to split across multiple pages
-            const availableHeight = contentHeight;
-            const ratio = canvas.width / imgWidth;
-            const pageHeightPx = availableHeight * ratio;
-            
-            let currentY = 0;
-            
-            while (currentY < canvas.height) {
-              if (!firstPage) pdf.addPage();
-              firstPage = false;
-              
-              const sectionHeight = Math.min(pageHeightPx, canvas.height - currentY);
-              
-              // Create temp canvas for this section
-              const tempCanvas = document.createElement('canvas');
-              tempCanvas.width = canvas.width;
-              tempCanvas.height = sectionHeight;
-              const ctx = tempCanvas.getContext('2d');
-              ctx.fillStyle = '#ffffff';
-              ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
-              ctx.drawImage(canvas, 0, currentY, canvas.width, sectionHeight, 0, 0, canvas.width, sectionHeight);
-              
-              const sectionImg = tempCanvas.toDataURL('image/jpeg', 0.9);
-              const sectionHeightMm = sectionHeight / ratio;
-              pdf.addImage(sectionImg, 'JPEG', margin, margin, imgWidth, sectionHeightMm);
-              
-              currentY += sectionHeight;
-            }
+        console.log('Rendering dimensions:', totalWidth, 'x', totalHeight);
+        
+        // Capture the entire content
+        const canvas = await html2canvas(renderContainer, {
+          scale: 2,
+          useCORS: true,
+          allowTaint: true,
+          logging: false,
+          backgroundColor: '#ffffff',
+          width: totalWidth,
+          height: totalHeight,
+          windowWidth: totalWidth,
+          windowHeight: totalHeight
+        });
+        
+        console.log('Canvas created:', canvas.width, 'x', canvas.height);
+        
+        // Calculate image dimensions
+        const imgWidth = contentWidth;
+        const imgHeight = (canvas.height * imgWidth) / canvas.width;
+        
+        // Split into pages
+        const ratio = canvas.width / imgWidth;
+        const pageHeightPx = contentHeight * ratio;
+        
+        let currentY = 0;
+        let pageNum = 0;
+        
+        while (currentY < canvas.height) {
+          if (pageNum > 0) {
+            pdf.addPage();
           }
+          
+          const sectionHeight = Math.min(pageHeightPx, canvas.height - currentY);
+          
+          // Create temp canvas for this page section
+          const tempCanvas = document.createElement('canvas');
+          tempCanvas.width = canvas.width;
+          tempCanvas.height = sectionHeight;
+          const ctx = tempCanvas.getContext('2d');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+          ctx.drawImage(canvas, 0, currentY, canvas.width, sectionHeight, 0, 0, canvas.width, sectionHeight);
+          
+          const sectionImg = tempCanvas.toDataURL('image/jpeg', 0.92);
+          const sectionHeightMm = sectionHeight / ratio;
+          pdf.addImage(sectionImg, 'JPEG', margin, margin, imgWidth, sectionHeightMm);
+          
+          currentY += sectionHeight;
+          pageNum++;
         }
         
         // Clean up
@@ -2108,10 +2152,11 @@ async function convertWordToPdf() {
         pdf.save(fileName);
         
         successCount++;
+        console.log('PDF saved:', fileName);
         
         // Small delay between conversions
         if (i < wordFiles.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await new Promise(resolve => setTimeout(resolve, 300));
         }
         
       } catch (fileErr) {
@@ -2120,9 +2165,11 @@ async function convertWordToPdf() {
         showToast(`Error en ${wordFile.name}: ${fileErr.message}`);
         
         // Clean up if error
-        if (renderContainer && renderContainer.parentNode) {
-          document.body.removeChild(renderContainer);
-        }
+        try {
+          if (renderContainer && renderContainer.parentNode) {
+            document.body.removeChild(renderContainer);
+          }
+        } catch (e) {}
       }
     }
     
@@ -2142,8 +2189,8 @@ async function convertWordToPdf() {
     showToast('Error: ' + err.message);
   } finally {
     btn.disabled = false;
-    btn.querySelector('.btn-text').textContent = 'Convertir a PDF →';
-    btn.querySelector('.btn-loader').style.display = 'none';
+    if (btnText) btnText.textContent = 'Convertir a PDF →';
+    if (btnLoader) btnLoader.style.display = 'none';
   }
 }
 
