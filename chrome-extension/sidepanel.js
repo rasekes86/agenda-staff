@@ -1,5 +1,5 @@
 // ============================================
-// AGENDA STAFF v5.17.30 - SIGNATURE SEARCH FIX
+// AGENDA STAFF v5.18.0 - STICKY SIDEBAR
 // ============================================
 
 const SUPABASE_URL = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
