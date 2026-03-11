@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Calendario Colaborativo</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <h1 class="title">Calendario</h1>
+      <div class="status-indicator">
+        <span class="status-dot" id="statusDot"></span>
+        <span class="status-text" id="statusText">Conectando...</span>
+      </div>
+    </header>
+
+    <!-- Lista de días y eventos -->
+    <div class="days-section">
+      <div class="days-header">
+        <h3>Próximos días</h3>
+        <button class="btn-add" id="btnAddEvent">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          Añadir
+        </button>
+      </div>
+      <div class="days-list" id="daysList">
+        <!-- Se genera dinámicamente -->
+      </div>
+    </div>
+
+    <!-- Mini calendario -->
+    <div class="mini-calendar">
+      <div class="cal-nav">
+        <button class="cal-btn" id="btnPrevMonth">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="15 18 9 12 15 6"></polyline>
+          </svg>
+        </button>
+        <span class="cal-month" id="calMonth"></span>
+        <button class="cal-btn" id="btnNextMonth">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
+        </button>
+        <button class="cal-today" id="btnToday">Hoy</button>
+      </div>
+      <div class="cal-grid" id="calGrid"></div>
+    </div>
+
+    <!-- Modal -->
+    <div class="modal-overlay" id="modalOverlay">
+      <div class="modal">
+        <div class="modal-header">
+          <h3 id="modalTitle">Nuevo Evento</h3>
+          <button class="modal-close" id="btnCloseModal">&times;</button>
+        </div>
+        <form id="eventForm">
+          <div class="form-group">
+            <label>Título</label>
+            <input type="text" id="inputTitle" placeholder="Nombre del evento" required>
+          </div>
+          <div class="form-group">
+            <label>Fecha</label>
+            <input type="date" id="inputDate" required>
+          </div>
+          <div class="form-group">
+            <label>Hora (opcional)</label>
+            <input type="time" id="inputTime">
+          </div>
+          <div class="form-group">
+            <label>Descripción (opcional)</label>
+            <textarea id="inputDesc" rows="2" placeholder="Detalles..."></textarea>
+          </div>
+          <div class="form-group">
+            <label>Color</label>
+            <div class="colors" id="colorPicker">
+              <input type="radio" name="color" value="#3b82f6" id="c1" checked>
+              <label for="c1" style="background:#3b82f6"></label>
+              <input type="radio" name="color" value="#10b981" id="c2">
+              <label for="c2" style="background:#10b981"></label>
+              <input type="radio" name="color" value="#f59e0b" id="c3">
+              <label for="c3" style="background:#f59e0b"></label>
+              <input type="radio" name="color" value="#ef4444" id="c4">
+              <label for="c4" style="background:#ef4444"></label>
+              <input type="radio" name="color" value="#8b5cf6" id="c5">
+              <label for="c5" style="background:#8b5cf6"></label>
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-sec" id="btnCancel">Cancelar</button>
+            <button type="submit" class="btn btn-pri">Guardar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>
