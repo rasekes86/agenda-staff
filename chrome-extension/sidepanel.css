@@ -2469,3 +2469,177 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Bulk result item skipped */
+.bulk-result-item.skipped {
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--warn);
+}
+
+/* ============================================
+   BULK DUPLICATE MODAL
+   ============================================ */
+
+.bulk-duplicate-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.bulk-duplicate-content {
+  background: var(--bg);
+  border-radius: 12px;
+  width: 90%;
+  max-width: 360px;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.bulk-duplicate-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--bor);
+  text-align: center;
+}
+
+.bulk-duplicate-header h3 {
+  font-size: 15px;
+  color: var(--warn);
+}
+
+.bulk-duplicate-body {
+  padding: 16px;
+}
+
+.bulk-duplicate-body p {
+  font-size: 13px;
+  color: var(--txt);
+  margin-bottom: 12px;
+}
+
+.bulk-duplicate-list {
+  max-height: 150px;
+  overflow-y: auto;
+  background: var(--bg2);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 12px;
+}
+
+.bulk-duplicate-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  font-size: 12px;
+  border-radius: 4px;
+  margin-bottom: 4px;
+}
+
+.bulk-duplicate-item:last-child {
+  margin-bottom: 0;
+}
+
+.bulk-duplicate-name {
+  font-weight: 500;
+  color: var(--txt);
+}
+
+.bulk-duplicate-status {
+  font-size: 10px;
+  color: var(--warn);
+  background: rgba(245, 158, 11, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.bulk-duplicate-more {
+  text-align: center;
+  font-size: 11px;
+  color: var(--txt3);
+  padding: 6px;
+}
+
+.bulk-duplicate-question {
+  font-weight: 500;
+  color: var(--txt);
+}
+
+.bulk-duplicate-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 16px;
+  border-top: 1px solid var(--bor);
+}
+
+.bulk-duplicate-btn {
+  padding: 10px 12px;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.bulk-duplicate-btn.replace {
+  background: var(--pri);
+  color: white;
+}
+
+.bulk-duplicate-btn.replace:hover {
+  background: var(--pri-h);
+}
+
+.bulk-duplicate-btn.keep {
+  background: var(--succ);
+  color: white;
+}
+
+.bulk-duplicate-btn.keep:hover {
+  background: #059669;
+}
+
+.bulk-duplicate-btn.skip {
+  background: var(--bg3);
+  color: var(--txt);
+}
+
+.bulk-duplicate-btn.skip:hover {
+  background: var(--bor);
+}
+
+.bulk-duplicate-btn.cancel {
+  background: transparent;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+}
+
+.bulk-duplicate-btn.cancel:hover {
+  background: var(--danger);
+  color: white;
+}

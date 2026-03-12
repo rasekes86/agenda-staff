@@ -2690,7 +2690,8 @@ async function searchSignatures() {
           signatures.forEach(sig => {
             if (!allSignatures.find(s => s.id === sig.id)) {
               allSignatures.push(sig);
-              foundNames.push(sig.name.toLowerCase());
+              // Store in uppercase for comparison
+              foundNames.push(sig.name.toUpperCase());
             }
           });
         }
@@ -2713,10 +2714,10 @@ async function searchSignatures() {
 // Render signatures with missing names in red (for sidepanel)
 function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames) {
   // Determine which searched terms were NOT found
-  const normalizedFoundNames = foundNames.map(n => n.toLowerCase());
+  const normalizedFoundNames = foundNames.map(n => n.toUpperCase());
   const missingNames = searchedTerms.filter(term => {
-    // Normalize term to lowercase for comparison
-    const normalizedTerm = term.toLowerCase();
+    // Normalize term to uppercase for comparison
+    const normalizedTerm = term.toUpperCase();
     // Check if term matches any found name (partial match)
     return !normalizedFoundNames.some(found => found.includes(normalizedTerm) || normalizedTerm.includes(found));
   });
@@ -2727,11 +2728,13 @@ function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames
   if (signatures.length > 0) {
     html += `<div class="signature-found-header">✓ Encontradas (${signatures.length})</div>`;
     signatures.forEach(sig => {
+      // Display name in uppercase
+      const displayName = sig.name.toUpperCase();
       html += `
-        <div class="signature-result-item signature-found" data-id="${sig.id}" data-url="${sig.image_url}" data-name="${esc(sig.name)}" title="Clic para ${window.selectSignatureForEditor ? 'seleccionar' : 'descargar'}">
-          <span class="signature-result-name">${esc(sig.name)}</span>
+        <div class="signature-result-item signature-found" data-id="${sig.id}" data-url="${sig.image_url}" data-name="${esc(displayName)}" title="Clic para ${window.selectSignatureForEditor ? 'seleccionar' : 'descargar'}">
+          <span class="signature-result-name">${esc(displayName)}</span>
           <div class="signature-actions">
-            <button class="signature-delete-btn" data-id="${sig.id}" data-name="${esc(sig.name)}" title="Eliminar firma">🗑️</button>
+            <button class="signature-delete-btn" data-id="${sig.id}" data-name="${esc(displayName)}" title="Eliminar firma">🗑️</button>
             <svg class="signature-download-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
               <polyline points="7 10 12 15 17 10"></polyline>
@@ -2747,10 +2750,12 @@ function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames
   if (missingNames.length > 0) {
     html += `<div class="signature-missing-header">⚠ No encontradas (${missingNames.length})</div>`;
     missingNames.forEach(name => {
+      // Display in uppercase
+      const displayName = name.toUpperCase();
       html += `
         <div class="signature-result-item signature-missing">
-          <span class="signature-missing-name">${esc(name)}</span>
-          <button class="signature-upload-btn-sidepanel" data-name="${esc(name)}">📤 Subir</button>
+          <span class="signature-missing-name">${esc(displayName)}</span>
+          <button class="signature-upload-btn-sidepanel" data-name="${esc(displayName)}">📤 Subir</button>
         </div>
       `;
     });
@@ -2893,9 +2898,12 @@ function renderSignatureResults(signatures, isAlphabetical = false) {
   let currentLetter = '';
   
   signatures.forEach(sig => {
+    // Display name in uppercase
+    const displayName = sig.name.toUpperCase();
+    
     // Add letter separator for alphabetical view
     if (isAlphabetical) {
-      const firstLetter = sig.name.charAt(0).toUpperCase();
+      const firstLetter = displayName.charAt(0);
       if (firstLetter !== currentLetter) {
         currentLetter = firstLetter;
         html += `<div class="signature-letter-sep">${currentLetter}</div>`;
@@ -2904,8 +2912,8 @@ function renderSignatureResults(signatures, isAlphabetical = false) {
     
     // Simple item: just name, clickable to download or select for editor
     html += `
-      <div class="signature-result-item" data-id="${sig.id}" data-url="${sig.image_url}" data-name="${esc(sig.name)}" title="Clic para ${window.selectSignatureForEditor ? 'seleccionar' : 'descargar'}">
-        <span class="signature-result-name">${esc(sig.name)}</span>
+      <div class="signature-result-item" data-id="${sig.id}" data-url="${sig.image_url}" data-name="${esc(displayName)}" title="Clic para ${window.selectSignatureForEditor ? 'seleccionar' : 'descargar'}">
+        <span class="signature-result-name">${esc(displayName)}</span>
         <svg class="signature-download-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
           <polyline points="7 10 12 15 17 10"></polyline>
@@ -3084,7 +3092,7 @@ async function uploadSignature() {
       },
       body: JSON.stringify({
         id,
-        name: name.toLowerCase(),
+        name: name.toUpperCase(),
         image_url: base64Image,
         user_id: currentUser.id,
         user_name: currentUser.name
@@ -3184,6 +3192,31 @@ async function handleBulkUpload(files) {
   const totalFiles = files.length;
   if (totalFiles === 0) return;
 
+  // Extract file names (uppercase, without extension)
+  const fileData = [];
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const fileName = file.name.replace(/\.[^/.]+$/, '').toUpperCase().trim();
+    fileData.push({ file, fileName, base64: null });
+  }
+
+  // Check for existing signatures with same names
+  showToast('Verificando firmas existentes...');
+  
+  const existingSignatures = await checkExistingSignatures(fileData.map(f => f.fileName));
+  
+  // If there are duplicates, ask user what to do
+  let actionForDuplicates = 'ask'; // 'ask', 'replace', 'keep', 'skip'
+  const duplicates = fileData.filter(f => existingSignatures[f.fileName]);
+  
+  if (duplicates.length > 0) {
+    actionForDuplicates = await askDuplicateAction(duplicates, existingSignatures);
+    if (actionForDuplicates === 'cancel') {
+      showToast('Carga cancelada');
+      return;
+    }
+  }
+
   // Show progress UI
   $('bulkProgress').style.display = 'block';
   $('bulkResults').style.display = 'block';
@@ -3193,18 +3226,53 @@ async function handleBulkUpload(files) {
 
   let successCount = 0;
   let errorCount = 0;
-  const results = [];
+  let skippedCount = 0;
+  let replacedCount = 0;
 
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i];
-    
-    // Get name from filename (without extension)
-    const fileName = file.name.replace(/\.[^/.]+$/, '').toUpperCase();
+  for (let i = 0; i < fileData.length; i++) {
+    const { file, fileName } = fileData[i];
+    const existing = existingSignatures[fileName];
     
     // Update progress
     const progress = ((i + 1) / totalFiles) * 100;
     $('bulkProgressFill').style.width = `${progress}%`;
     $('bulkProgressText').textContent = `${i + 1} / ${totalFiles}`;
+
+    // Handle duplicates based on user choice
+    if (existing) {
+      if (actionForDuplicates === 'skip') {
+        skippedCount++;
+        $('bulkResults').innerHTML += `
+          <div class="bulk-result-item skipped">
+            <span class="bulk-result-icon">⊘</span>
+            <span class="bulk-result-name">${esc(fileName)} (ya existe)</span>
+          </div>
+        `;
+        continue;
+      } else if (actionForDuplicates === 'keep') {
+        skippedCount++;
+        $('bulkResults').innerHTML += `
+          <div class="bulk-result-item skipped">
+            <span class="bulk-result-icon">→</span>
+            <span class="bulk-result-name">${esc(fileName)} (mantenida)</span>
+          </div>
+        `;
+        continue;
+      } else if (actionForDuplicates === 'replace') {
+        // Will replace - delete old first
+        try {
+          await fetch(`${SUPABASE_URL}/rest/v1/signatures?id=eq.${existing.id}`, {
+            method: 'DELETE',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${session.access_token}`
+            }
+          });
+        } catch (err) {
+          console.error('Error deleting old signature:', err);
+        }
+      }
+    }
 
     try {
       // Convert to base64
@@ -3229,7 +3297,7 @@ async function handleBulkUpload(files) {
         },
         body: JSON.stringify({
           id,
-          name: fileName,
+          name: fileName.toUpperCase(),
           image_url: base64,
           user_id: currentUser.id,
           user_name: currentUser.name
@@ -3243,19 +3311,20 @@ async function handleBulkUpload(files) {
       }
 
       successCount++;
-      results.push({ name: fileName, success: true });
+      if (existing && actionForDuplicates === 'replace') {
+        replacedCount++;
+      }
       
       // Add to results display
       $('bulkResults').innerHTML += `
         <div class="bulk-result-item success">
           <span class="bulk-result-icon">✓</span>
-          <span class="bulk-result-name">${esc(fileName)}</span>
+          <span class="bulk-result-name">${esc(fileName)}${existing && actionForDuplicates === 'replace' ? ' (reemplazada)' : ''}</span>
         </div>
       `;
 
     } catch (err) {
       errorCount++;
-      results.push({ name: fileName, success: false, error: err.message });
       
       // Add to results display
       $('bulkResults').innerHTML += `
@@ -3267,18 +3336,107 @@ async function handleBulkUpload(files) {
     }
 
     // Small delay to avoid rate limiting
-    if (i < files.length - 1) {
+    if (i < fileData.length - 1) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
   }
 
   // Final summary
-  const summaryMsg = `Carga completada: ${successCount} exitosas, ${errorCount} errores`;
-  showToast(summaryMsg);
+  let summaryMsg = `✓ ${successCount} subidas`;
+  if (replacedCount > 0) summaryMsg += `, ${replacedCount} reemplazadas`;
+  if (skippedCount > 0) summaryMsg += `, ${skippedCount} omitidas`;
+  if (errorCount > 0) summaryMsg += `, ${errorCount} errores`;
   
-  // Update progress text with summary
+  showToast(summaryMsg);
   $('bulkProgressText').textContent = summaryMsg;
 
   // Clear file input for next batch
   $('bulkFileInput').value = '';
+}
+
+// Check if signatures with given names already exist
+async function checkExistingSignatures(names) {
+  const existing = {};
+  
+  if (!session) return existing;
+  
+  try {
+    // Query all signatures to check for duplicates (case-insensitive)
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=id,name`, {
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${session.access_token}`
+      }
+    });
+    
+    if (response.ok) {
+      const allSigs = await response.json();
+      
+      // Create a map of uppercase names to signature info
+      allSigs.forEach(sig => {
+        const upperName = sig.name.toUpperCase();
+        existing[upperName] = sig;
+      });
+    }
+  } catch (err) {
+    console.error('Error checking existing signatures:', err);
+  }
+  
+  return existing;
+}
+
+// Show dialog asking what to do with duplicates
+async function askDuplicateAction(duplicates, existingSignatures) {
+  return new Promise((resolve) => {
+    // Create modal HTML
+    const modalHtml = `
+      <div class="bulk-duplicate-modal" id="duplicateModal">
+        <div class="bulk-duplicate-content">
+          <div class="bulk-duplicate-header">
+            <h3>⚠️ Firmas duplicadas encontradas</h3>
+          </div>
+          <div class="bulk-duplicate-body">
+            <p>Se encontraron <strong>${duplicates.length}</strong> firma(s) que ya existen:</p>
+            <div class="bulk-duplicate-list">
+              ${duplicates.slice(0, 5).map(d => `
+                <div class="bulk-duplicate-item">
+                  <span class="bulk-duplicate-name">${esc(d.fileName)}</span>
+                  <span class="bulk-duplicate-status">ya existe</span>
+                </div>
+              `).join('')}
+              ${duplicates.length > 5 ? `<div class="bulk-duplicate-more">...y ${duplicates.length - 5} más</div>` : ''}
+            </div>
+            <p class="bulk-duplicate-question">¿Qué deseas hacer con los duplicados?</p>
+          </div>
+          <div class="bulk-duplicate-actions">
+            <button class="bulk-duplicate-btn replace" data-action="replace">
+              🔄 Reemplazar todas
+            </button>
+            <button class="bulk-duplicate-btn keep" data-action="keep">
+              ✓ Mantener existentes
+            </button>
+            <button class="bulk-duplicate-btn skip" data-action="skip">
+              ⊘ Saltar duplicados
+            </button>
+            <button class="bulk-duplicate-btn cancel" data-action="cancel">
+              ✕ Cancelar todo
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    // Add modal to page
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    const modal = document.getElementById('duplicateModal');
+    
+    // Handle button clicks
+    modal.querySelectorAll('.bulk-duplicate-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const action = btn.dataset.action;
+        modal.remove();
+        resolve(action);
+      });
+    });
+  });
 }
