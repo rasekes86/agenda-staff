@@ -2310,3 +2310,162 @@ body {
 
 .btn-download-signature:hover { background: var(--pri); color: white; }
 .btn-delete-signature:hover { background: var(--danger); color: white; }
+
+/* ============================================
+   BULK UPLOAD SIGNATURES
+   ============================================ */
+
+.signatures-bulk-section {
+  background: var(--bg2);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.signatures-bulk-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--bg3);
+}
+
+.signatures-bulk-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--txt);
+}
+
+.btn-toggle-bulk {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: var(--pri);
+  color: white;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.btn-toggle-bulk:hover {
+  background: var(--pri-dark);
+  transform: translateY(-1px);
+}
+
+.signatures-bulk-content {
+  padding: 12px;
+}
+
+.signatures-bulk-hint {
+  font-size: 12px;
+  color: var(--txt3);
+  margin-bottom: 10px;
+  text-align: center;
+}
+
+.signatures-bulk-dropzone {
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: var(--bg);
+}
+
+.signatures-bulk-dropzone:hover {
+  border-color: var(--pri);
+  background: rgba(59, 130, 246, 0.05);
+}
+
+.signatures-bulk-dropzone.drag-over {
+  border-color: var(--success);
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.signatures-bulk-icon {
+  font-size: 32px;
+  margin-bottom: 8px;
+}
+
+.signatures-bulk-text {
+  font-size: 13px;
+  color: var(--txt2);
+  margin-bottom: 4px;
+}
+
+.signatures-bulk-hint-detail {
+  font-size: 11px;
+  color: var(--txt3);
+}
+
+/* Bulk Progress */
+.bulk-progress {
+  margin-top: 12px;
+}
+
+.bulk-progress-bar {
+  height: 8px;
+  background: var(--bg3);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.bulk-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--pri), var(--success));
+  border-radius: 4px;
+  transition: width 0.3s ease;
+  width: 0%;
+}
+
+.bulk-progress-text {
+  text-align: center;
+  font-size: 12px;
+  color: var(--txt2);
+  margin-top: 6px;
+}
+
+/* Bulk Results */
+.bulk-results {
+  margin-top: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--bg);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.bulk-result-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  border-radius: 4px;
+  margin-bottom: 4px;
+}
+
+.bulk-result-item.success {
+  background: rgba(16, 185, 129, 0.1);
+  color: var(--success);
+}
+
+.bulk-result-item.error {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--danger);
+}
+
+.bulk-result-icon {
+  font-size: 14px;
+}
+
+.bulk-result-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

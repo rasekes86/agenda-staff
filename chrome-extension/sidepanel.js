@@ -2572,6 +2572,43 @@ function setupSignatureListeners() {
 
   // Upload signature
   $('btnUploadSignature').addEventListener('click', uploadSignature);
+
+  // Bulk upload toggle
+  $('btnToggleBulk').addEventListener('click', () => {
+    const content = $('signaturesBulkContent');
+    const isVisible = content.style.display !== 'none';
+    content.style.display = isVisible ? 'none' : 'block';
+  });
+
+  // Bulk dropzone click
+  $('bulkDropzone').addEventListener('click', () => {
+    $('bulkFileInput').click();
+  });
+
+  // Bulk file input change
+  $('bulkFileInput').addEventListener('change', (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      handleBulkUpload(e.target.files);
+    }
+  });
+
+  // Bulk drag and drop
+  $('bulkDropzone').addEventListener('dragover', (e) => {
+    e.preventDefault();
+    $('bulkDropzone').classList.add('drag-over');
+  });
+
+  $('bulkDropzone').addEventListener('dragleave', () => {
+    $('bulkDropzone').classList.remove('drag-over');
+  });
+
+  $('bulkDropzone').addEventListener('drop', (e) => {
+    e.preventDefault();
+    $('bulkDropzone').classList.remove('drag-over');
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleBulkUpload(e.dataTransfer.files);
+    }
+  });
 }
 
 function closeSignaturesModal() {
@@ -3132,4 +3169,116 @@ async function deleteSignature(id) {
     console.error('Delete error:', err);
     showToast('Error al eliminar la firma');
   }
+}
+
+// ============================================
+// BULK UPLOAD SIGNATURES
+// ============================================
+
+async function handleBulkUpload(files) {
+  if (!session || !currentUser) {
+    showToast('Debes iniciar sesión para subir firmas');
+    return;
+  }
+
+  const totalFiles = files.length;
+  if (totalFiles === 0) return;
+
+  // Show progress UI
+  $('bulkProgress').style.display = 'block';
+  $('bulkResults').style.display = 'block';
+  $('bulkResults').innerHTML = '';
+  $('bulkProgressFill').style.width = '0%';
+  $('bulkProgressText').textContent = `0 / ${totalFiles}`;
+
+  let successCount = 0;
+  let errorCount = 0;
+  const results = [];
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    
+    // Get name from filename (without extension)
+    const fileName = file.name.replace(/\.[^/.]+$/, '').toUpperCase();
+    
+    // Update progress
+    const progress = ((i + 1) / totalFiles) * 100;
+    $('bulkProgressFill').style.width = `${progress}%`;
+    $('bulkProgressText').textContent = `${i + 1} / ${totalFiles}`;
+
+    try {
+      // Convert to base64
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      // Generate unique ID
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+
+      // Upload to Supabase
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify({
+          id,
+          name: fileName,
+          image_url: base64,
+          user_id: currentUser.id,
+          user_name: currentUser.name
+        })
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error('Upload error for', fileName, ':', errText);
+        throw new Error('Error al subir');
+      }
+
+      successCount++;
+      results.push({ name: fileName, success: true });
+      
+      // Add to results display
+      $('bulkResults').innerHTML += `
+        <div class="bulk-result-item success">
+          <span class="bulk-result-icon">✓</span>
+          <span class="bulk-result-name">${esc(fileName)}</span>
+        </div>
+      `;
+
+    } catch (err) {
+      errorCount++;
+      results.push({ name: fileName, success: false, error: err.message });
+      
+      // Add to results display
+      $('bulkResults').innerHTML += `
+        <div class="bulk-result-item error">
+          <span class="bulk-result-icon">✗</span>
+          <span class="bulk-result-name">${esc(fileName)}</span>
+        </div>
+      `;
+    }
+
+    // Small delay to avoid rate limiting
+    if (i < files.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+
+  // Final summary
+  const summaryMsg = `Carga completada: ${successCount} exitosas, ${errorCount} errores`;
+  showToast(summaryMsg);
+  
+  // Update progress text with summary
+  $('bulkProgressText').textContent = summaryMsg;
+
+  // Clear file input for next batch
+  $('bulkFileInput').value = '';
 }

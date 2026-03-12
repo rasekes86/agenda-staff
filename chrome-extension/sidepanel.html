@@ -490,6 +490,36 @@
             </div>
           </div>
           
+          <!-- Bulk Upload Section -->
+          <div class="signatures-bulk-section" id="signaturesBulkSection">
+            <div class="signatures-bulk-header">
+              <span class="signatures-bulk-title">📦 Carga Masiva</span>
+              <button class="btn-toggle-bulk" id="btnToggleBulk" title="Subir múltiples firmas">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+              </button>
+            </div>
+            <div class="signatures-bulk-content" id="signaturesBulkContent" style="display: none;">
+              <div class="signatures-bulk-hint">Sube múltiples firmas. El nombre del archivo será el nombre de la firma.</div>
+              <div class="signatures-bulk-dropzone" id="bulkDropzone">
+                <div class="signatures-bulk-icon">📁</div>
+                <div class="signatures-bulk-text">Arrastra imágenes o haz clic</div>
+                <div class="signatures-bulk-hint-detail">PNG, JPG, WEBP (múltiples)</div>
+                <input type="file" id="bulkFileInput" accept="image/*" multiple hidden>
+              </div>
+              <div class="bulk-progress" id="bulkProgress" style="display: none;">
+                <div class="bulk-progress-bar">
+                  <div class="bulk-progress-fill" id="bulkProgressFill"></div>
+                </div>
+                <div class="bulk-progress-text" id="bulkProgressText">0 / 0</div>
+              </div>
+              <div class="bulk-results" id="bulkResults" style="display: none;"></div>
+            </div>
+          </div>
+
           <!-- Upload Section (shown when no results) -->
           <div class="signatures-upload-section" id="signaturesUploadSection" style="display: none;">
             <div class="signatures-upload-header">No se encontró la firma</div>
