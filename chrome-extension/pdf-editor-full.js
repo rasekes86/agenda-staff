@@ -1,5 +1,5 @@
 // ============================================
-// PDF EDITOR FULL SCREEN - AGENDA STAFF v5.18.1
+// PDF EDITOR FULL SCREEN - AGENDA STAFF v5.21.0
 // ============================================
 
 const SUPABASE_URL = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
@@ -107,6 +107,11 @@ function setupEventListeners() {
   // Upload button in header
   $('btnUpload').addEventListener('click', () => fileInput.click());
   
+  // New window button - open another PDF editor instance
+  $('btnNewWindow').addEventListener('click', () => {
+    window.open('pdf-editor-full.html', '_blank', 'width=1400,height=900');
+  });
+  
   // Other buttons
   $('btnSave').addEventListener('click', savePdf);
   $('btnClear').addEventListener('click', clearEditor);
@@ -138,6 +143,14 @@ function setupEventListeners() {
   $('signatureSearchInput').addEventListener('keypress', (e) => {
     if (e.key === 'Enter') searchSignatures();
   });
+  
+  // New window button - open another PDF editor instance
+  const btnNewWindow = $('btnNewWindow');
+  if (btnNewWindow) {
+    btnNewWindow.addEventListener('click', () => {
+      window.open(window.location.href, '_blank', 'width=1400,height=900');
+    });
+  }
 }
 
 // Tool tabs switching

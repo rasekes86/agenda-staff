@@ -17,10 +17,11 @@
   let startX = 0;
   let startY = 0;
   let isSelecting = false;
+  let isCapturing = false; // Flag to prevent double capture
   
   // Crear overlay
   function createOverlay() {
-    // Overlay principal
+    // Overlay principal - SIN fondo para evitar sombra en captura
     overlay = document.createElement('div');
     overlay.id = '__screenshot_overlay__';
     overlay.style.cssText = `
@@ -29,9 +30,23 @@
       left: 0;
       width: 100%;
       height: 100%;
-      background: rgba(0, 0, 0, 0.3);
+      background: transparent;
       cursor: crosshair;
       z-index: 2147483647;
+    `;
+    
+    // Máscara oscura separada que se puede ocultar
+    const mask = document.createElement('div');
+    mask.id = '__screenshot_mask__';
+    mask.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.3);
+      pointer-events: none;
+      z-index: -1;
     `;
     
     // Selección
@@ -64,6 +79,7 @@
     `;
     instructions.textContent = 'Arrastra para seleccionar el área · ESC para cancelar';
     
+    overlay.appendChild(mask);
     overlay.appendChild(selection);
     overlay.appendChild(instructions);
     document.body.appendChild(overlay);
@@ -77,6 +93,7 @@
   
   function handleMouseDown(e) {
     if (e.button !== 0) return; // Solo click izquierdo
+    if (isCapturing) return; // Prevenir doble captura
     
     isSelecting = true;
     startX = e.clientX;
@@ -107,7 +124,7 @@
   }
   
   function handleMouseUp(e) {
-    if (!isSelecting) return;
+    if (!isSelecting || isCapturing) return;
     isSelecting = false;
     
     const rect = selection.getBoundingClientRect();
@@ -135,14 +152,23 @@
   }
   
   async function captureSelection(rect) {
+    // Prevenir doble captura
+    if (isCapturing) return;
+    isCapturing = true;
+    
     // Mostrar mensaje de procesamiento
     const instructions = document.getElementById('__screenshot_instructions__');
     if (instructions) {
       instructions.textContent = 'Procesando captura...';
     }
     
-    // Ocultar overlay temporalmente para capturar
+    // Ocultar TODO el overlay y máscara antes de capturar
     overlay.style.display = 'none';
+    const mask = document.getElementById('__screenshot_mask__');
+    if (mask) mask.style.display = 'none';
+    
+    // Forzar repintado del navegador
+    await new Promise(resolve => setTimeout(resolve, 50));
     
     // Calcular ratio de dispositivo (para pantallas HiDPI)
     const dpr = window.devicePixelRatio || 1;
@@ -178,6 +204,7 @@
       overlay.remove();
     }
     window.__screenshotSelectorActive = false;
+    isCapturing = false;
     document.removeEventListener('keydown', handleKeyDown);
   }
   
