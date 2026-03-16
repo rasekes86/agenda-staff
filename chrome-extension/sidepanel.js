@@ -2208,14 +2208,59 @@ function addTextToPdf() {
       return;
     }
     
-    editorElements[editorCurrentPage].push({
-      type: 'text',
-      text,
-      x: 50,
-      y: 50,
-      size,
-      color
-    });
+    // Detect DNI/NIE patterns and split text
+    const dniPatterns = [
+      /\b\d{8}[A-Za-z]\b/g,           // DNI: 12345678A
+      /\b[XYZ]\d{7}[A-Za-z]\b/g,      // NIE: X1234567A
+      /\b\d{8}-[A-Za-z]\b/g,          // DNI con guión: 12345678-A
+      /\b[XYZ]\d{7}-[A-Za-z]\b/g      // NIE con guión: X1234567-A
+    ];
+    
+    let foundDni = null;
+    let textWithoutDni = text;
+    
+    // Search for DNI/NIE in text
+    for (const pattern of dniPatterns) {
+      const match = text.match(pattern);
+      if (match) {
+        foundDni = match[0];
+        textWithoutDni = text.replace(pattern, '').replace(/\s+/g, ' ').trim();
+        break;
+      }
+    }
+    
+    if (foundDni && textWithoutDni) {
+      // Create two separate text elements
+      editorElements[editorCurrentPage].push({
+        type: 'text',
+        text: textWithoutDni,
+        x: 50,
+        y: 50,
+        size,
+        color
+      });
+      
+      editorElements[editorCurrentPage].push({
+        type: 'text',
+        text: foundDni,
+        x: 50,
+        y: 50 + size + 5, // Position below the name
+        size,
+        color
+      });
+      
+      showToast('Texto separado: Nombre + DNI/NIE');
+    } else {
+      // Single text element
+      editorElements[editorCurrentPage].push({
+        type: 'text',
+        text,
+        x: 50,
+        y: 50,
+        size,
+        color
+      });
+    }
     
     closeModal();
     renderEditorPage();

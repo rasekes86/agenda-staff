@@ -685,14 +685,59 @@ function confirmTextWithPosition() {
   const posX = textModal && textModal.dataset.posX ? parseFloat(textModal.dataset.posX) : activeDoc.pageWidth / 2 - 50;
   const posY = textModal && textModal.dataset.posY ? parseFloat(textModal.dataset.posY) : activeDoc.pageHeight / 2;
   
-  activeDoc.elements[activeDoc.currentPage].push({
-    type: 'text',
-    text: text,
-    x: posX,
-    y: posY,
-    size: size,
-    color: color
-  });
+  // Detect DNI/NIE patterns and split text
+  const dniPatterns = [
+    /\b\d{8}[A-Za-z]\b/g,           // DNI: 12345678A
+    /\b[XYZ]\d{7}[A-Za-z]\b/g,      // NIE: X1234567A
+    /\b\d{8}-[A-Za-z]\b/g,          // DNI con guión: 12345678-A
+    /\b[XYZ]\d{7}-[A-Za-z]\b/g      // NIE con guión: X1234567-A
+  ];
+  
+  let foundDni = null;
+  let textWithoutDni = text;
+  
+  // Search for DNI/NIE in text
+  for (const pattern of dniPatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      foundDni = match[0];
+      textWithoutDni = text.replace(pattern, '').replace(/\s+/g, ' ').trim();
+      break;
+    }
+  }
+  
+  if (foundDni && textWithoutDni) {
+    // Create two separate text elements
+    activeDoc.elements[activeDoc.currentPage].push({
+      type: 'text',
+      text: textWithoutDni,
+      x: posX,
+      y: posY,
+      size: size,
+      color: color
+    });
+    
+    activeDoc.elements[activeDoc.currentPage].push({
+      type: 'text',
+      text: foundDni,
+      x: posX,
+      y: posY + size + 5, // Position below the name
+      size: size,
+      color: color
+    });
+    
+    showStatus('Texto separado: Nombre + DNI/NIE', 'success');
+  } else {
+    // Single text element
+    activeDoc.elements[activeDoc.currentPage].push({
+      type: 'text',
+      text: text,
+      x: posX,
+      y: posY,
+      size: size,
+      color: color
+    });
+  }
   
   if (textModal) {
     textModal.classList.remove('show');
@@ -702,7 +747,6 @@ function confirmTextWithPosition() {
   
   updateTabModified(activeDoc.id, true);
   renderPage();
-  showStatus('Texto añadido', 'success');
 }
 
 function addCurrentDate() {
