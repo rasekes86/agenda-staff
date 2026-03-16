@@ -282,17 +282,54 @@
           <button class="pdf-modal-close" id="closePdfModal">&times;</button>
         </div>
         <div class="pdf-modal-content">
-          <!-- Tabs -->
-          <div class="pdf-tabs">
-            <button class="pdf-tab active" data-tab="imgToPdf">Imagen → PDF</button>
-            <button class="pdf-tab" data-tab="wordToPdf">Word → PDF</button>
-            <button class="pdf-tab" data-tab="editPdf">Editor PDF</button>
-            <button class="pdf-tab" data-tab="mergePdf">Juntar</button>
-            <button class="pdf-tab" data-tab="splitPdf">Separar</button>
+          <!-- Tabs - Two rows layout -->
+          <div class="pdf-tabs-container">
+            <!-- Row 1: Full Screen Editor -->
+            <button class="pdf-tab fullscreen-tab active" data-tab="editPdf">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+              </svg>
+              Pantalla Completa
+            </button>
+            
+            <!-- Row 2: Other tools in 2x2 grid -->
+            <div class="pdf-tabs-secondary">
+              <button class="pdf-tab" data-tab="imgToPdf">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                  <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                  <polyline points="21 15 16 10 5 21"></polyline>
+                </svg>
+                Img→PDF
+              </button>
+              <button class="pdf-tab" data-tab="wordToPdf">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                </svg>
+                Word→PDF
+              </button>
+              <button class="pdf-tab" data-tab="mergePdf">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                  <line x1="8" y1="21" x2="16" y2="21"></line>
+                  <line x1="12" y1="17" x2="12" y2="21"></line>
+                </svg>
+                Juntar
+              </button>
+              <button class="pdf-tab" data-tab="splitPdf">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="6" cy="6" r="3"></circle>
+                  <circle cx="6" cy="18" r="3"></circle>
+                  <line x1="20" y1="4" x2="8.12" y2="15.88"></line>
+                </svg>
+                Separar
+              </button>
+            </div>
           </div>
           
           <!-- Tab 1: Image to PDF -->
-          <div class="pdf-tab-content active" id="imgToPdfTab">
+          <div class="pdf-tab-content" id="imgToPdfTab">
             <div class="pdf-dropzone" id="pdfDropzone">
               <div class="pdf-dropzone-icon">📁</div>
               <div class="pdf-dropzone-text">Selecciona imágenes o arrástralas aquí</div>
@@ -355,45 +392,50 @@
             </button>
           </div>
           
-          <!-- Tab 3: PDF Editor -->
-          <div class="pdf-tab-content" id="editPdfTab">
+          <!-- Tab 3: PDF Editor (default active) -->
+          <div class="pdf-tab-content active" id="editPdfTab">
             <div class="pdf-editor-container">
-              <div class="pdf-editor-toolbar">
-                <button class="pdf-editor-btn" id="btnAddText" title="Añadir texto">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M4 7V4h16v3"></path>
-                    <path d="M9 20h6"></path>
-                    <path d="M12 4v16"></path>
-                  </svg>
-                  Texto
-                </button>
-                <button class="pdf-editor-btn" id="btnAddImage" title="Añadir imagen">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                    <polyline points="21 15 16 10 5 21"></polyline>
-                  </svg>
-                  Imagen
-                </button>
-                <button class="pdf-editor-btn" id="btnAddSignature" title="Añadir firma">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
-                  </svg>
-                  Firma
-                </button>
-                <div class="pdf-editor-spacer"></div>
-                <button class="pdf-editor-btn success" id="btnOpenFullEditor" title="Abrir editor en pantalla completa">
+              <!-- Toolbar in two rows: Full Screen on top, other 4 in 2x2 grid -->
+              <div class="pdf-editor-toolbar-wrapper">
+                <!-- Row 1: Full Screen Editor - Big button -->
+                <button class="pdf-editor-btn-fullscreen" id="btnOpenFullEditor" title="Abrir editor en pantalla completa">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
                   </svg>
                   Pantalla Completa
                 </button>
-                <button class="pdf-editor-btn danger" id="btnClearEditor" title="Limpiar todo">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="3 6 5 6 21 6"></polyline>
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                  </svg>
-                </button>
+                <!-- Row 2: Other tools in 2x2 grid -->
+                <div class="pdf-editor-toolbar-grid">
+                  <button class="pdf-editor-btn" id="btnAddText" title="Añadir texto">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M4 7V4h16v3"></path>
+                      <path d="M9 20h6"></path>
+                      <path d="M12 4v16"></path>
+                    </svg>
+                    Texto
+                  </button>
+                  <button class="pdf-editor-btn" id="btnAddImage" title="Añadir imagen">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                      <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                      <polyline points="21 15 16 10 5 21"></polyline>
+                    </svg>
+                    Imagen
+                  </button>
+                  <button class="pdf-editor-btn" id="btnAddSignature" title="Añadir firma">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
+                    </svg>
+                    Firma
+                  </button>
+                  <button class="pdf-editor-btn danger" id="btnClearEditor" title="Limpiar todo">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="3 6 5 6 21 6"></polyline>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                    Papelera
+                  </button>
+                </div>
               </div>
               <div class="pdf-editor-pages" id="pdfEditorPages">
                 <div class="pdf-editor-upload" id="pdfEditorUpload">
