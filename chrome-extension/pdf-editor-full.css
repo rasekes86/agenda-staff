@@ -221,6 +221,52 @@ body {
   background: #fbbf24;
 }
 
+/* Clipboard section styles */
+.clipboard-info {
+  background: #3b82f6;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.clipboard-count {
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.copy-btn {
+  background: #0891b2 !important;
+}
+
+.copy-btn:hover {
+  background: #0e7490 !important;
+}
+
+.paste-btn {
+  background: #7c3aed !important;
+}
+
+.paste-btn:hover:not(:disabled) {
+  background: #6d28d9 !important;
+}
+
+.paste-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.clear-clipboard-btn {
+  background: #dc2626 !important;
+  font-size: 12px !important;
+  padding: 6px 10px !important;
+}
+
+.clear-clipboard-btn:hover {
+  background: #b91c1c !important;
+}
+
 .editor-main {
   flex: 1;
   display: flex;

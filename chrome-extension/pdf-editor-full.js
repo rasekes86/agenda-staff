@@ -1,6 +1,6 @@
 // ============================================
-// PDF EDITOR FULL SCREEN - AGENDA STAFF v5.22.2
-// Multi-document support with tabs - FIXED
+// PDF EDITOR FULL SCREEN - AGENDA STAFF v5.23.0
+// Multi-document support with tabs + Copy/Paste between docs
 // ============================================
 
 const SUPABASE_URL = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
@@ -23,6 +23,9 @@ let addedSignaturesCount = 0;
 // Session for authentication
 let session = null;
 let currentUser = null;
+
+// Clipboard for copying elements between documents
+let clipboardElements = null;
 
 // Helper function
 const $ = id => document.getElementById(id);
@@ -186,6 +189,22 @@ function setupEventListeners() {
     signatureSearchInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') searchSignatures();
     });
+  }
+  
+  // Clipboard buttons
+  const btnCopyElements = $('btnCopyElements');
+  if (btnCopyElements) {
+    btnCopyElements.addEventListener('click', copyCurrentPageElements);
+  }
+  
+  const btnPasteElements = $('btnPasteElements');
+  if (btnPasteElements) {
+    btnPasteElements.addEventListener('click', pasteElementsToCurrentPage);
+  }
+  
+  const btnClearClipboard = $('btnClearClipboard');
+  if (btnClearClipboard) {
+    btnClearClipboard.addEventListener('click', clearClipboard);
   }
 }
 
@@ -1837,5 +1856,87 @@ async function mergePdfs() {
     showStatus('Error: ' + err.message, 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.innerHTML = 'Juntar PDFs'; }
+  }
+}
+
+// ============================================
+// CLIPBOARD - Copy/Paste Elements Between Docs
+// ============================================
+
+function copyCurrentPageElements() {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) {
+    showStatus('Primero carga un PDF', 'error');
+    return;
+  }
+  
+  const pageElements = activeDoc.elements[activeDoc.currentPage] || [];
+  
+  if (pageElements.length === 0) {
+    showStatus('No hay elementos en esta página para copiar', 'error');
+    return;
+  }
+  
+  // Deep copy elements
+  clipboardElements = JSON.parse(JSON.stringify(pageElements));
+  
+  updateClipboardUI();
+  showStatus(`${pageElements.length} elemento(s) copiado(s) al portapapeles`, 'success');
+}
+
+function pasteElementsToCurrentPage() {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) {
+    showStatus('Primero carga un PDF', 'error');
+    return;
+  }
+  
+  if (!clipboardElements || clipboardElements.length === 0) {
+    showStatus('No hay elementos en el portapapeles', 'error');
+    return;
+  }
+  
+  // Paste elements with offset to avoid overlap
+  const offset = 20;
+  const pastedElements = JSON.parse(JSON.stringify(clipboardElements));
+  
+  pastedElements.forEach((el, index) => {
+    // Add offset to position
+    el.x = Math.min(el.x + (offset * (index % 5)), activeDoc.pageWidth - 100);
+    el.y = Math.min(el.y + (offset * Math.floor(index / 5)), activeDoc.pageHeight - 50);
+    
+    // Add to current page
+    if (!activeDoc.elements[activeDoc.currentPage]) {
+      activeDoc.elements[activeDoc.currentPage] = [];
+    }
+    activeDoc.elements[activeDoc.currentPage].push(el);
+  });
+  
+  updateTabModified(activeDoc.id, true);
+  renderPage();
+  showStatus(`${pastedElements.length} elemento(s) pegado(s)`, 'success');
+}
+
+function clearClipboard() {
+  clipboardElements = null;
+  updateClipboardUI();
+  showStatus('Portapapeles limpiado', 'success');
+}
+
+function updateClipboardUI() {
+  const clipboardInfo = $('clipboardInfo');
+  const clipboardCount = $('clipboardCount');
+  const btnPasteElements = $('btnPasteElements');
+  const btnClearClipboard = $('btnClearClipboard');
+  
+  if (clipboardElements && clipboardElements.length > 0) {
+    if (clipboardInfo) clipboardInfo.style.display = 'block';
+    if (clipboardCount) clipboardCount.textContent = `${clipboardElements.length} elementos copiados`;
+    if (btnPasteElements) btnPasteElements.disabled = false;
+    if (btnClearClipboard) btnClearClipboard.style.display = 'flex';
+  } else {
+    if (clipboardInfo) clipboardInfo.style.display = 'none';
+    if (btnPasteElements) btnPasteElements.disabled = true;
+    if (btnClearClipboard) btnClearClipboard.style.display = 'none';
   }
 }
