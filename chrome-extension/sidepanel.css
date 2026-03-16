@@ -1223,50 +1223,16 @@ body {
 
 .pdf-modal-content { padding: 16px; }
 
-/* PDF Tabs - Two Rows Layout */
-.pdf-tabs-container {
+/* PDF Tabs */
+.pdf-tabs {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 16px;
+  gap: 4px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
 }
 
-/* Row 1: Full Screen Editor - Big button */
-.pdf-tab.fullscreen-tab {
-  width: 100%;
-  padding: 14px 16px;
-  background: var(--pri);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  transition: all 0.2s;
-}
-
-.pdf-tab.fullscreen-tab:hover {
-  background: var(--pri-h);
-}
-
-.pdf-tab.fullscreen-tab.active {
-  background: #1d4ed8;
-  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.4);
-}
-
-/* Row 2: Other tools in 2x2 grid */
-.pdf-tabs-secondary {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-}
-
-.pdf-tabs-secondary .pdf-tab {
-  padding: 10px 8px;
+.pdf-tab {
+  padding: 8px 12px;
   background: var(--bg2);
   border: 1px solid var(--bor);
   border-radius: 6px;
@@ -1274,24 +1240,19 @@ body {
   font-weight: 500;
   color: var(--txt);
   cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
   transition: all 0.2s;
 }
 
-.pdf-tabs-secondary .pdf-tab:hover {
+.pdf-tab:hover {
   background: var(--bg3);
   border-color: var(--pri);
   color: var(--pri);
 }
 
-.pdf-tabs-secondary .pdf-tab.active {
-  background: rgba(59, 130, 246, 0.1);
+.pdf-tab.active {
+  background: var(--pri);
   border-color: var(--pri);
-  color: var(--pri);
+  color: white;
 }
 
 .pdf-tab-content { display: none; }
