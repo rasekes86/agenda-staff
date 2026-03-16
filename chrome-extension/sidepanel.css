@@ -1255,7 +1255,7 @@ body {
   color: white;
 }
 
-.pdf-tab-content { display: none; }
+.pdf-tab-content { display: block; }
 .pdf-tab-content.active { display: block; }
 
 /* PDF Dropzone */
