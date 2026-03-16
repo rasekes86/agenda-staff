@@ -1,5 +1,5 @@
 // ============================================
-// PDF EDITOR FULL SCREEN - AGENDA STAFF v5.22.0
+// PDF EDITOR FULL SCREEN - AGENDA STAFF v5.22.1
 // Multi-document support with tabs
 // ============================================
 
@@ -110,14 +110,16 @@ function setupEventListeners() {
   const uploadArea = $('uploadArea');
   const uploadWrapper = $('uploadWrapper');
   
-  // File input change
+  // File input change - handle multiple files
   fileInput.addEventListener('change', (e) => {
     if (e.target.files && e.target.files.length > 0) {
-      loadPdf(e.target.files[0]);
+      const files = Array.from(e.target.files);
+      handleMultipleFiles(files);
+      e.target.value = ''; // Reset input
     }
   });
   
-  // Drag and drop
+  // Drag and drop - handle multiple files
   uploadWrapper.addEventListener('dragover', (e) => {
     e.preventDefault();
     uploadArea.classList.add('drag-over');
@@ -132,7 +134,8 @@ function setupEventListeners() {
     e.preventDefault();
     uploadArea.classList.remove('drag-over');
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      loadPdf(e.dataTransfer.files[0]);
+      const files = Array.from(e.dataTransfer.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+      handleMultipleFiles(files);
     }
   });
   
@@ -207,7 +210,7 @@ function setupMultiDocumentTabs() {
   });
 }
 
-function loadPdfAsNewTab(file) {
+function loadPdfAsNewTab(file, switchToIt = true) {
   if (!file.name.toLowerCase().endsWith('.pdf')) {
     showStatus('Solo se permiten archivos PDF', 'error');
     return;
@@ -221,6 +224,11 @@ function loadPdfAsNewTab(file) {
     try {
       const pdfjsLib = window.pdfjsLib;
       const pdfLib = window.PDFLib;
+      
+      if (!pdfjsLib || !pdfLib) {
+        showStatus('Error: Las librerías PDF no están cargadas', 'error');
+        return;
+      }
       
       const loadingTask = pdfjsLib.getDocument({ data: pdfBytes.slice() });
       const pdfJsDoc = await loadingTask.promise;
@@ -254,15 +262,28 @@ function loadPdfAsNewTab(file) {
       // Create tab
       createTab(newDoc);
       
-      // Switch to new tab
-      switchToTab(documents.length - 1);
+      // Hide upload wrapper if visible
+      const uploadWrapper = $('uploadWrapper');
+      if (uploadWrapper) {
+        uploadWrapper.style.display = 'none';
+      }
+      
+      // Switch to new tab if requested (first file)
+      if (switchToIt || documents.length === 1) {
+        switchToTab(documents.length - 1);
+      }
       
       showStatus(`${file.name} cargado (${totalPages} pág.)`, 'success');
       
     } catch (err) {
       console.error('Error loading PDF:', err);
-      showStatus('Error al cargar: ' + file.name, 'error');
+      showStatus('Error al cargar: ' + file.name + ' - ' + err.message, 'error');
     }
+  };
+  
+  reader.onerror = (err) => {
+    console.error('FileReader error:', err);
+    showStatus('Error leyendo archivo: ' + file.name, 'error');
   };
   
   reader.readAsArrayBuffer(file);
@@ -365,11 +386,11 @@ function closeTab(docId) {
 function showUploadArea() {
   $('canvasArea').innerHTML = `
     <div class="upload-wrapper" id="uploadWrapper">
-      <input type="file" class="file-input-overlay" id="fileInput" accept=".pdf">
+      <input type="file" class="file-input-overlay" id="fileInput" accept=".pdf" multiple>
       <div class="upload-area" id="uploadArea">
         <div class="upload-icon">📄</div>
-        <div class="upload-text">Arrastra un PDF aquí o haz clic para seleccionar</div>
-        <div class="upload-hint">Puedes cargar múltiples PDFs a la vez</div>
+        <div class="upload-text">Arrastra PDFs aquí o haz clic para seleccionar</div>
+        <div class="upload-hint">Puedes cargar varios PDFs a la vez</div>
       </div>
     </div>
   `;
@@ -386,7 +407,9 @@ function showUploadArea() {
   
   fileInput.addEventListener('change', (e) => {
     if (e.target.files && e.target.files.length > 0) {
-      loadPdf(e.target.files[0]);
+      const files = Array.from(e.target.files);
+      handleMultipleFiles(files);
+      e.target.value = '';
     }
   });
   
@@ -404,7 +427,8 @@ function showUploadArea() {
     e.preventDefault();
     uploadArea.classList.remove('drag-over');
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      loadPdf(e.dataTransfer.files[0]);
+      const files = Array.from(e.dataTransfer.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+      handleMultipleFiles(files);
     }
   });
 }
@@ -457,75 +481,30 @@ function setupToolTabs() {
 // MAIN PDF LOADING
 // ============================================
 
+// Handle multiple files at once
+function handleMultipleFiles(files) {
+  if (!files || files.length === 0) return;
+  
+  const pdfFiles = files.filter(f => f.name.toLowerCase().endsWith('.pdf'));
+  
+  if (pdfFiles.length === 0) {
+    showStatus('No se encontraron archivos PDF', 'error');
+    return;
+  }
+  
+  showStatus(`Cargando ${pdfFiles.length} PDF${pdfFiles.length > 1 ? 's' : ''}...`);
+  
+  // Load all files as new tabs
+  pdfFiles.forEach((file, index) => {
+    setTimeout(() => {
+      loadPdfAsNewTab(file, index === 0);
+    }, index * 100); // Stagger loading slightly
+  });
+}
+
 async function loadPdf(file) {
-  if (!file.name.toLowerCase().endsWith('.pdf')) {
-    showStatus('Por favor, selecciona un archivo PDF', 'error');
-    return;
-  }
-  
-  const pdfjsLib = window.pdfjsLib;
-  const pdfLib = window.PDFLib;
-  
-  if (!pdfjsLib || !pdfLib) {
-    showStatus('Error: Las librerías no están cargadas', 'error');
-    return;
-  }
-  
-  showStatus('Cargando PDF...');
-  
-  try {
-    const arrayBuffer = await file.arrayBuffer();
-    const pdfBytes = new Uint8Array(arrayBuffer);
-    
-    const loadingTask = pdfjsLib.getDocument({ data: pdfBytes.slice() });
-    const pdfJsDoc = await loadingTask.promise;
-    const totalPages = pdfJsDoc.numPages;
-    
-    const { PDFDocument } = pdfLib;
-    const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
-    
-    // Get page dimensions
-    const page = pdfDoc.getPage(0);
-    const { width, height } = page.getSize();
-    
-    // Create or update document state
-    let docId;
-    if (documents.length === 0) {
-      // First document
-      const newDoc = createDocState('doc_' + (++tabCounter));
-      newDoc.pdfJsDoc = pdfJsDoc;
-      newDoc.pdfDoc = pdfDoc;
-      newDoc.pdfBytes = pdfBytes;
-      newDoc.originalPdfBytes = new Uint8Array(arrayBuffer);
-      newDoc.fileName = file.name;
-      newDoc.totalPages = totalPages;
-      newDoc.pageWidth = width;
-      newDoc.pageHeight = height;
-      
-      for (let i = 1; i <= totalPages; i++) {
-        newDoc.elements[i] = [];
-      }
-      
-      documents.push(newDoc);
-      docId = newDoc.id;
-      
-      // Create tab
-      createTab(newDoc);
-      
-      // Switch to it
-      switchToTab(0);
-    } else {
-      // Add as new tab
-      loadPdfAsNewTab(file);
-      return;
-    }
-    
-    showStatus(`PDF cargado: ${totalPages} página${totalPages > 1 ? 's' : ''}`, 'success');
-    
-  } catch (err) {
-    console.error('Error loading PDF:', err);
-    showStatus('Error al cargar: ' + err.message, 'error');
-  }
+  // Now just redirects to the multi-file handler
+  handleMultipleFiles([file]);
 }
 
 async function renderPage() {
