@@ -1260,38 +1260,7 @@ function setupPdfListeners() {
   $('btnPdf').addEventListener('click', openPdfModal);
   $('closePdfModal').addEventListener('click', closePdfModal);
   
-  // Tab switching
-  document.querySelectorAll('.pdf-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.pdf-tab').forEach(t => t.classList.remove('active'));
-      document.querySelectorAll('.pdf-tab-content').forEach(c => c.classList.remove('active'));
-      tab.classList.add('active');
-      const tabId = tab.dataset.tab + 'Tab';
-      $(tabId).classList.add('active');
-    });
-  });
-  
-  // Tab 1: Image to PDF
-  $('pdfDropzone').addEventListener('click', () => $('pdfFileInput').click());
-  $('pdfFileInput').addEventListener('change', handlePdfFileSelect);
-  $('pdfDropzone').addEventListener('dragover', handlePdfDragOver);
-  $('pdfDropzone').addEventListener('dragleave', handlePdfDragLeave);
-  $('pdfDropzone').addEventListener('drop', handlePdfDrop);
-  $('pdfClearBtn').addEventListener('click', clearPdfFiles);
-  $('btnPortrait').addEventListener('click', () => selectOrientation('portrait'));
-  $('btnLandscape').addEventListener('click', () => selectOrientation('landscape'));
-  $('btnConvertPdf').addEventListener('click', convertToPdf);
-  
-  // Tab 2: Word to PDF
-  $('wordDropzone').addEventListener('click', () => $('wordFileInput').click());
-  $('wordFileInput').addEventListener('change', handleWordFileSelect);
-  $('wordDropzone').addEventListener('dragover', handleWordDragOver);
-  $('wordDropzone').addEventListener('dragleave', handleWordDragLeave);
-  $('wordDropzone').addEventListener('drop', handleWordDrop);
-  $('wordClearBtn').addEventListener('click', clearWordFile);
-  $('btnWordToPdf').addEventListener('click', convertWordToPdf);
-  
-  // Tab 3: PDF Editor
+  // PDF Editor (simplified - no tabs)
   $('pdfEditorUpload').addEventListener('click', () => $('editorFileInput').click());
   $('editorFileInput').addEventListener('change', handleEditorFileSelect);
   $('pdfEditorUpload').addEventListener('dragover', (e) => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); });
@@ -1305,24 +1274,6 @@ function setupPdfListeners() {
   $('btnNextPage').addEventListener('click', () => navigateEditorPage(1));
   $('btnSavePdf').addEventListener('click', saveEditedPdf);
   $('btnOpenFullEditor').addEventListener('click', openFullPdfEditor);
-  
-  // Tab 4: Merge PDFs
-  $('mergeDropzone').addEventListener('click', () => $('mergeFileInput').click());
-  $('mergeFileInput').addEventListener('change', handleMergeFileSelect);
-  $('mergeDropzone').addEventListener('dragover', handleMergeDragOver);
-  $('mergeDropzone').addEventListener('dragleave', handleMergeDragLeave);
-  $('mergeDropzone').addEventListener('drop', handleMergeDrop);
-  $('mergeClearBtn').addEventListener('click', clearMergeFiles);
-  $('btnMergePdf').addEventListener('click', mergePdfsAction);
-  
-  // Tab 5: Split PDF
-  $('splitDropzone').addEventListener('click', () => $('splitFileInput').click());
-  $('splitFileInput').addEventListener('change', handleSplitFileSelect);
-  $('splitDropzone').addEventListener('dragover', handleSplitDragOver);
-  $('splitDropzone').addEventListener('dragleave', handleSplitDragLeave);
-  $('splitDropzone').addEventListener('drop', handleSplitDrop);
-  $('splitClearBtn').addEventListener('click', clearSplitFile);
-  $('btnSplitPdf').addEventListener('click', splitPdfAction);
 }
 
 function openPdfModal() {
@@ -1333,22 +1284,6 @@ function openPdfModal() {
   document.querySelector('.header').style.display = 'none';
   document.querySelector('.days-section').style.display = 'none';
   document.querySelector('.mini-calendar').style.display = 'none';
-  
-  // Activate "Editor PDF" tab by default (third tab)
-  document.querySelectorAll('.pdf-tab').forEach((t, i) => {
-    if (i === 2) { // Index 2 = third tab (Editor PDF)
-      t.classList.add('active');
-    } else {
-      t.classList.remove('active');
-    }
-  });
-  document.querySelectorAll('.pdf-tab-content').forEach((c, i) => {
-    if (i === 2) { // Index 2 = editPdfTab
-      c.classList.add('active');
-    } else {
-      c.classList.remove('active');
-    }
-  });
 }
 
 function closePdfModal() {
