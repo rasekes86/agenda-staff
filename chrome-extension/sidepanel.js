@@ -1,5 +1,5 @@
 // ============================================
-// AGENDA STAFF v5.23.19 - STICKY SIDEBAR
+// AGENDA STAFF v5.23.20 - STICKY SIDEBAR
 // ============================================
 
 const SUPABASE_URL = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
@@ -448,7 +448,7 @@ async function api(method, body, query = '') {
 // ============================================
 
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('AGENDA STAFF v5.23.19 iniciado...');
+  console.log('AGENDA STAFF v5.23.20 iniciado...');
   
   // Configure PDF.js worker after library is loaded
   if (typeof pdfjsLib !== 'undefined') {
@@ -2007,6 +2007,12 @@ async function loadPdfForEditor(file) {
     return;
   }
   
+  // Ensure modal is open
+  const pdfModal = $('pdfModal');
+  if (pdfModal && !pdfModal.classList.contains('show')) {
+    openPdfModal();
+  }
+  
   try {
     const arrayBuffer = await file.arrayBuffer();
     editorPdfBytes = new Uint8Array(arrayBuffer);
@@ -2026,10 +2032,14 @@ async function loadPdfForEditor(file) {
     // Render first page
     await renderEditorPage();
     
-    // Show UI
-    $('pdfEditorUpload').style.display = 'none';
-    $('pdfEditorNav').style.display = 'flex';
-    $('btnSavePdf').style.display = 'flex';
+    // Show UI (with null checks)
+    const uploadEl = $('pdfEditorUpload');
+    const navEl = $('pdfEditorNav');
+    const saveBtn = $('btnSavePdf');
+    
+    if (uploadEl) uploadEl.style.display = 'none';
+    if (navEl) navEl.style.display = 'flex';
+    if (saveBtn) saveBtn.style.display = 'flex';
     
     showToast(`PDF cargado: ${editorTotalPages} páginas`);
     
