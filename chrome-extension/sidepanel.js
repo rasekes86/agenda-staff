@@ -1,5 +1,5 @@
 // ============================================
-// AGENDA STAFF v5.23.12 - STICKY SIDEBAR
+// AGENDA STAFF v5.23.14 - STICKY SIDEBAR
 // ============================================
 
 const SUPABASE_URL = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
@@ -448,7 +448,7 @@ async function api(method, body, query = '') {
 // ============================================
 
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('AGENDA STAFF v5.23.12 iniciado...');
+  console.log('AGENDA STAFF v5.23.14 iniciado...');
   
   // Configure PDF.js worker after library is loaded
   if (typeof pdfjsLib !== 'undefined') {
@@ -2607,6 +2607,9 @@ function setupSignatureListeners() {
   // View all signatures button
   $('btnViewAllSignatures').addEventListener('click', loadAllSignatures);
 
+  // Preview all signatures button
+  $('btnPreviewSignatures').addEventListener('click', previewAllSignatures);
+
   // Dropzone click
   $('signatureDropzone').addEventListener('click', () => {
     $('signatureFileInput').click();
@@ -3064,6 +3067,144 @@ async function loadAllSignatures() {
     `;
     $('signaturesUploadSection').style.display = 'block';
   }
+}
+
+// Preview all signatures with images in a grid
+async function previewAllSignatures() {
+  // Show loading
+  $('signaturesResults').innerHTML = '<div class="signatures-loading"></div>';
+  $('signaturesUploadSection').style.display = 'none';
+
+  try {
+    // Query all signatures ordered by name
+    const query = `?select=*&order=name.asc`;
+    const url = `${SUPABASE_URL}/rest/v1/signatures${query}`;
+
+    const res = await fetch(url, {
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${session.access_token}`
+      }
+    });
+
+    if (!res.ok) {
+      if (res.status === 404) {
+        $('signaturesResults').innerHTML = `
+          <div class="signatures-empty">
+            <div class="signatures-empty-icon">📭</div>
+            <div class="signatures-empty-text">No hay firmas guardadas</div>
+          </div>
+        `;
+        return;
+      }
+      throw new Error('Error al cargar firmas');
+    }
+
+    const signatures = await res.json();
+
+    if (!signatures || signatures.length === 0) {
+      $('signaturesResults').innerHTML = `
+        <div class="signatures-empty">
+          <div class="signatures-empty-icon">📭</div>
+          <div class="signatures-empty-text">No hay firmas guardadas</div>
+        </div>
+      `;
+      return;
+    }
+
+    // Render signatures in preview grid
+    let html = `
+      <div class="signatures-preview-header">
+        <span>📷 Vista previa de firmas (${signatures.length})</span>
+        <button class="btn-close-preview" id="btnClosePreview" title="Cerrar vista previa">✕</button>
+      </div>
+      <div class="signatures-preview-grid">
+    `;
+
+    signatures.forEach(sig => {
+      const displayName = sig.name || 'Sin nombre';
+      html += `
+        <div class="signature-preview-card" data-id="${sig.id}" data-name="${esc(displayName)}">
+          <div class="signature-preview-image-container">
+            <img src="${sig.image_url}" alt="${esc(displayName)}" class="signature-preview-image" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 50%22><text x=%2250%%22 y=%2250%%22 text-anchor=%22middle%22 fill=%22%23999%22>Sin imagen</text></svg>'">
+          </div>
+          <div class="signature-preview-name">${esc(displayName)}</div>
+          <button class="signature-preview-delete" data-id="${sig.id}" data-name="${esc(displayName)}" title="Eliminar firma">🗑️</button>
+        </div>
+      `;
+    });
+
+    html += '</div>';
+    $('signaturesResults').innerHTML = html;
+
+    // Add click handler for close button
+    $('btnClosePreview').addEventListener('click', () => {
+      $('signaturesResults').innerHTML = `
+        <div class="signatures-empty">
+          <div class="signatures-empty-icon">🔍</div>
+          <div class="signatures-empty-text">Busca una firma o pulsa el botón de lista</div>
+        </div>
+      `;
+    });
+
+    // Add click handlers for delete buttons
+    document.querySelectorAll('.signature-preview-delete').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        const name = btn.dataset.name;
+        if (confirm(`¿Eliminar la firma de "${name}"?`)) {
+          try {
+            await deleteSignatureFromPreview(id, name);
+            // Remove the card from DOM
+            const card = btn.closest('.signature-preview-card');
+            if (card) {
+              card.style.opacity = '0';
+              card.style.transform = 'scale(0.8)';
+              setTimeout(() => {
+                card.remove();
+                // Update count
+                const header = document.querySelector('.signatures-preview-header span');
+                if (header) {
+                  const remaining = document.querySelectorAll('.signature-preview-card').length;
+                  header.textContent = `📷 Vista previa de firmas (${remaining})`;
+                }
+              }, 300);
+            }
+          } catch (err) {
+            showToast('Error al eliminar: ' + err.message);
+          }
+        }
+      });
+    });
+
+  } catch (err) {
+    console.error('Preview error:', err);
+    $('signaturesResults').innerHTML = `
+      <div class="signatures-empty">
+        <div class="signatures-empty-icon">⚠️</div>
+        <div class="signatures-empty-text">Error al cargar firmas</div>
+      </div>
+    `;
+  }
+}
+
+// Delete signature from preview mode
+async function deleteSignatureFromPreview(id, name) {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?id=eq.${id}`, {
+    method: 'DELETE',
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': `Bearer ${session.access_token}`,
+      'Prefer': 'return=minimal'
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al eliminar');
+  }
+
+  showToast(`Firma de "${name}" eliminada`);
 }
 
 function showSignaturesUploadSection(searchTerm) {
