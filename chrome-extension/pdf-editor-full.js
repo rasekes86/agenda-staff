@@ -1,5 +1,5 @@
 // ============================================
-// PDF EDITOR FULL SCREEN - AGENDA STAFF v5.23.16
+// PDF EDITOR FULL SCREEN - AGENDA STAFF v5.23.17
 // Fixed: Sidebar PDF tools layout (two rows), sticky document tabs
 // ============================================
 
