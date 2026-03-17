@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Editor PDF - AGENDA STAFF</title>
+  <script src="jspdf.umd.min.js"></script>
+  <script src="pdf-lib.min.js"></script>
+  <script src="pdf.min.js"></script>
+  <script src="mammoth.browser.min.js"></script>
+  <link rel="stylesheet" href="pdf-editor-full.css">
+</head>
+<body>
+  <header class="editor-header">
+    <span class="editor-title">📄 Editor PDF - AGENDA STAFF</span>
+    
+    <div class="header-left">
+      <button class="toolbar-btn primary" id="btnUpload" title="Cargar PDF">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="17 8 12 3 7 8"></polyline>
+          <line x1="12" y1="3" x2="12" y2="15"></line>
+        </svg>
+        Cargar PDF
+      </button>
+      
+      <div class="file-name" id="fileName" style="display:none;"></div>
+    </div>
+    
+    <div class="page-nav" id="pageNav" style="display:none;">
+      <button id="btnPrevPage" title="Página anterior">◀</button>
+      <span class="page-info">Página <span id="currentPageNum">1</span> de <span id="totalPagesNum">1</span></span>
+      <button id="btnNextPage" title="Página siguiente">▶</button>
+    </div>
+    
+    <div class="zoom-controls" id="zoomControls" style="display:none;">
+      <button class="zoom-btn" id="btnZoomOut" title="Alejar">−</button>
+      <span class="zoom-level" id="zoomLevel">100%</span>
+      <button class="zoom-btn" id="btnZoomIn" title="Acercar">+</button>
+    </div>
+    
+    <div class="toolbar-spacer"></div>
+    
+    <button class="toolbar-btn success" id="btnSave" disabled title="Guardar PDF">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+        <polyline points="17 21 17 13 7 13 7 21"></polyline>
+        <polyline points="7 3 7 8 15 8"></polyline>
+      </svg>
+      Guardar
+    </button>
+    
+    <button class="toolbar-btn danger" id="btnClear" title="Limpiar todo">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="3 6 5 6 21 6"></polyline>
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+      </svg>
+      Limpiar
+    </button>
+  </header>
+  
+  <!-- Document Tabs -->
+  <div class="document-tabs" id="documentTabs">
+    <div class="document-tabs-list" id="documentTabsList">
+      <!-- Tabs will be dynamically added here -->
+    </div>
+    <button class="document-add-tab" id="btnAddPdfTab" title="Añadir otro PDF">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="12" y1="5" x2="12" y2="19"></line>
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </svg>
+    </button>
+    <input type="file" id="multiFileInput" accept=".pdf" multiple hidden>
+  </div>
+  
+  <main class="editor-main">
+    <aside class="editor-sidebar">
+      <!-- Tool Tabs -->
+      <div class="tool-tabs">
+        <button class="tool-tab active" data-tool="editor">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+          </svg>
+          Editor
+        </button>
+        <button class="tool-tab" data-tool="split">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="6" cy="6" r="3"></circle>
+            <circle cx="6" cy="18" r="3"></circle>
+            <line x1="20" y1="4" x2="8.12" y2="15.88"></line>
+            <line x1="14.47" y1="14.48" x2="20" y2="20"></line>
+            <line x1="8.12" y1="8.12" x2="12" y2="12"></line>
+          </svg>
+          Separar
+        </button>
+        <button class="tool-tab" data-tool="imgToPdf">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+            <polyline points="21 15 16 10 5 21"></polyline>
+          </svg>
+          Imagen→PDF
+        </button>
+        <button class="tool-tab" data-tool="wordToPdf">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+          </svg>
+          Word→PDF
+        </button>
+        <button class="tool-tab" data-tool="merge">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+            <line x1="8" y1="21" x2="16" y2="21"></line>
+            <line x1="12" y1="17" x2="12" y2="21"></line>
+          </svg>
+          Juntar
+        </button>
+      </div>
+      
+      <!-- Editor Tool -->
+      <div class="tool-content active" id="toolEditor">
+        <div class="sidebar-section">
+          <div class="sidebar-title">Añadir elementos</div>
+          <button class="sidebar-btn" id="btnAddText">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 7V4h16v3"></path>
+              <path d="M9 20h6"></path>
+              <path d="M12 4v16"></path>
+            </svg>
+            Añadir texto
+          </button>
+          <button class="sidebar-btn" id="btnAddImage">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <circle cx="8.5" cy="8.5" r="1.5"></circle>
+              <polyline points="21 15 16 10 5 21"></polyline>
+            </svg>
+            Añadir imagen
+          </button>
+          <button class="sidebar-btn signature-btn" id="btnAddSignature">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
+            </svg>
+            Añadir firma
+          </button>
+          <button class="sidebar-btn date-btn" id="btnAddDate">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="16" y1="2" x2="16" y2="6"></line>
+              <line x1="8" y1="2" x2="8" y2="6"></line>
+              <line x1="3" y1="10" x2="21" y2="10"></line>
+            </svg>
+            Añadir fecha
+          </button>
+        </div>
+        
+        <div class="sidebar-section">
+          <div class="sidebar-title">Copiar entre documentos</div>
+          <div class="clipboard-info" id="clipboardInfo" style="display:none;">
+            <span class="clipboard-count" id="clipboardCount">0 elementos copiados</span>
+          </div>
+          <button class="sidebar-btn copy-btn" id="btnCopyElements" title="Copiar todos los elementos de esta página">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            Copiar elementos
+          </button>
+          <button class="sidebar-btn paste-btn" id="btnPasteElements" disabled title="Pegar elementos en esta página">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+              <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+            </svg>
+            Pegar elementos
+          </button>
+          <button class="sidebar-btn clear-clipboard-btn" id="btnClearClipboard" style="display:none;" title="Limpiar portapapeles">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+            Limpiar portapapeles
+          </button>
+        </div>
+        
+        <div class="sidebar-section">
+          <div class="sidebar-title">Instrucciones</div>
+          <div class="sidebar-info">
+            <p>• Carga un PDF con el botón superior</p>
+            <p>• Arrastra elementos para moverlos</p>
+            <p>• Esquinas azules = cambiar tamaño</p>
+            <p>• Click en ✕ para eliminar</p>
+            <p>• +/- para zoom</p>
+            <p>• <strong>Doble clic</strong> para añadir texto</p>
+            <p>• <strong>Copiar/Pegar</strong> entre documentos</p>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Split PDF Tool - Works on loaded PDF -->
+      <div class="tool-content" id="toolSplit">
+        <div class="sidebar-section">
+          <div class="sidebar-title">Separar PDF cargado</div>
+          <div class="pdf-loaded-info" id="splitPdfInfo" style="display:none;">
+            <span class="pdf-icon">📄</span>
+            <span id="splitPdfName"></span>
+            <span class="page-count" id="splitPdfPages">0 pág.</span>
+          </div>
+          <div class="no-pdf-warning" id="splitNoPdf">
+            <p>⚠️ Primero carga un PDF usando el botón "Cargar PDF"</p>
+          </div>
+          
+          <div class="split-options" id="splitOptions" style="display:none;">
+            <div class="split-mode-group">
+              <label class="split-mode-option">
+                <input type="radio" name="splitMode" value="single" checked>
+                <span>Páginas individuales</span>
+              </label>
+              <label class="split-mode-option">
+                <input type="radio" name="splitMode" value="blocks">
+                <span>Bloques de páginas</span>
+              </label>
+              <label class="split-mode-option">
+                <input type="radio" name="splitMode" value="ranges">
+                <span>Rangos personalizados</span>
+              </label>
+            </div>
+            
+            <div class="split-config" id="splitBlocksConfig" style="display:none;">
+              <label>Páginas por bloque:</label>
+              <input type="number" id="splitBlockSize" min="1" value="2" class="number-input">
+            </div>
+            
+            <div class="split-config" id="splitRangesConfig" style="display:none;">
+              <label>Rangos (uno por línea):</label>
+              <textarea id="splitRangesInput" placeholder="1-3&#10;4-6&#10;7-10" rows="3"></textarea>
+            </div>
+            
+            <div class="split-preview" id="splitPreview"></div>
+          </div>
+          
+          <button class="sidebar-btn primary" id="btnSplitPdf" disabled>Separar PDF</button>
+        </div>
+      </div>
+      
+      <!-- Image to PDF Tool - Creates new PDF -->
+      <div class="tool-content" id="toolImgToPdf">
+        <div class="sidebar-section">
+          <div class="sidebar-title">Crear PDF desde imágenes</div>
+          <div class="dropzone" id="imgDropzone">
+            <div class="dropzone-icon">📁</div>
+            <div class="dropzone-text">Arrastra imágenes o clic</div>
+            <div class="dropzone-hint">PNG, JPG, WEBP</div>
+            <input type="file" id="imgFileInput" accept="image/*" multiple hidden>
+          </div>
+          <div class="preview-list" id="imgPreviewList"></div>
+          
+          <div class="options-group">
+            <label>Orientación:</label>
+            <div class="option-btns">
+              <button class="option-btn active" data-orientation="portrait">Vertical</button>
+              <button class="option-btn" data-orientation="landscape">Horizontal</button>
+            </div>
+          </div>
+          
+          <div class="options-group">
+            <label>Tamaño:</label>
+            <select id="pageSize" class="select-input">
+              <option value="a4">A4</option>
+              <option value="letter">Carta</option>
+              <option value="legal">Legal</option>
+              <option value="fit">Ajustar a imagen</option>
+            </select>
+          </div>
+          
+          <button class="sidebar-btn primary" id="btnConvertImg">Crear PDF</button>
+        </div>
+      </div>
+      
+      <!-- Word to PDF Tool - Creates new PDF -->
+      <div class="tool-content" id="toolWordToPdf">
+        <div class="sidebar-section">
+          <div class="sidebar-title">Crear PDF desde Word</div>
+          <div class="dropzone" id="wordDropzone">
+            <div class="dropzone-icon">📝</div>
+            <div class="dropzone-text">Arrastra documentos Word</div>
+            <div class="dropzone-hint">DOCX (múltiples)</div>
+            <input type="file" id="wordFileInput" accept=".docx" multiple hidden>
+          </div>
+          <div class="preview-list" id="wordPreviewList"></div>
+          <button class="sidebar-btn primary" id="btnConvertWord">Crear PDFs</button>
+        </div>
+      </div>
+      
+      <!-- Merge PDFs Tool - Creates new PDF -->
+      <div class="tool-content" id="toolMerge">
+        <div class="sidebar-section">
+          <div class="sidebar-title">Juntar múltiples PDFs</div>
+          <div class="dropzone" id="mergeDropzone">
+            <div class="dropzone-icon">📑</div>
+            <div class="dropzone-text">Arrastra PDFs para juntar</div>
+            <div class="dropzone-hint">Archivos PDF (múltiples)</div>
+            <input type="file" id="mergeFileInput" accept=".pdf" multiple hidden>
+          </div>
+          <div class="preview-list" id="mergePreviewList"></div>
+          <button class="sidebar-btn primary" id="btnMergePdfs">Juntar PDFs</button>
+        </div>
+      </div>
+    </aside>
+    
+    <div class="editor-canvas-area" id="canvasArea">
+      <div class="upload-wrapper" id="uploadWrapper">
+        <input type="file" class="file-input-overlay" id="fileInput" accept=".pdf" multiple>
+        <div class="upload-area" id="uploadArea">
+          <div class="upload-icon">📄</div>
+          <div class="upload-text">Arrastra PDFs aquí o haz clic para seleccionar</div>
+          <div class="upload-hint">Puedes cargar varios PDFs a la vez</div>
+        </div>
+      </div>
+    </div>
+  </main>
+  
+  <!-- Text Modal -->
+  <div class="modal-overlay" id="textModal">
+    <div class="modal">
+      <h3>📝 Añadir texto</h3>
+      <textarea id="textInput" placeholder="Escribe el texto aquí..."></textarea>
+      <div class="modal-row">
+        <input type="number" id="textSize" placeholder="Tamaño" value="14" min="8" max="72">
+        <input type="color" id="textColor" value="#000000" title="Color">
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="cancelText">Cancelar</button>
+        <button class="btn-add" id="confirmText">Añadir</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Signature Modal -->
+  <div class="modal-overlay" id="signatureModal">
+    <div class="modal signature-modal">
+      <h3>✍️ Buscar firmas</h3>
+      <div class="signature-count" id="signatureCount" style="display:none;">
+        0 firmas añadidas - continúa añadiendo
+      </div>
+      <textarea class="signature-search-input" id="signatureSearchInput" placeholder="Escribe uno o más nombres (uno por línea):&#10;&#10;DURAN GARCIA, JONAS&#10;TAMAS, NICOLAE" rows="4"></textarea>
+      <button class="btn-search" id="btnSearchSignature">Buscar</button>
+      <div class="signature-results" id="signatureResults">
+        <div class="signature-empty">Escribe uno o más nombres (uno por línea)</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-done" id="closeSignatureModal">✓ He terminado</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Status message -->
+  <div class="status-msg" id="statusMsg"></div>
+  
+  <script src="pdf-editor-full.js"></script>
+</body>
+</html>

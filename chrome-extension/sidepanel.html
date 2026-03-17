@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AGENDA STAFF</title>
+  <link rel="stylesheet" href="sidepanel.css">
+  <script src="jspdf.umd.min.js"></script>
+  <script src="pdf-lib.min.js"></script>
+  <script src="mammoth.browser.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <!-- Pantalla de Login -->
+    <div class="auth-screen" id="authScreen">
+      <div class="auth-container">
+        <div class="auth-logo">📅</div>
+        <h2 class="auth-title">AGENDA STAFF</h2>
+        
+        <!-- Tabs -->
+        <div class="auth-tabs">
+          <button class="auth-tab active" data-tab="login">Iniciar Sesión</button>
+          <button class="auth-tab" data-tab="register">Registrar</button>
+        </div>
+        
+        <!-- Formulario Login -->
+        <form class="auth-form" id="loginForm">
+          <div class="form-group">
+            <label>Email</label>
+            <input type="email" id="loginEmail" placeholder="tu@email.com" required>
+          </div>
+          <div class="form-group">
+            <label>Contraseña</label>
+            <input type="password" id="loginPassword" placeholder="••••••••" required>
+          </div>
+          <button type="submit" class="btn btn-auth" id="btnLogin">
+            <span class="btn-text">Entrar</span>
+            <span class="btn-loader" style="display:none"></span>
+          </button>
+          <div class="auth-error" id="loginError"></div>
+        </form>
+        
+        <!-- Formulario Registro -->
+        <form class="auth-form" id="registerForm" style="display:none">
+          <div class="form-group">
+            <label>Nombre</label>
+            <input type="text" id="registerName" placeholder="Tu nombre" required>
+          </div>
+          <div class="form-group">
+            <label>Email</label>
+            <input type="email" id="registerEmail" placeholder="tu@email.com" required>
+          </div>
+          <div class="form-group">
+            <label>Contraseña (mín. 6 caracteres)</label>
+            <input type="password" id="registerPassword" placeholder="••••••••" required minlength="6">
+          </div>
+          <button type="submit" class="btn btn-auth" id="btnRegister">
+            <span class="btn-text">Crear Cuenta</span>
+            <span class="btn-loader" style="display:none"></span>
+          </button>
+          <div class="auth-error" id="registerError"></div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Pantalla Principal (oculta hasta login) -->
+    <div class="main-screen" id="mainScreen" style="display:none">
+      <!-- Reminder Banner -->
+      <div class="reminder-banner" id="reminderBanner">
+        <div class="reminder-icon">🔔</div>
+        <div class="reminder-content">
+          <div class="reminder-title" id="reminderTitle">Recordatorio</div>
+          <div class="reminder-time" id="reminderTime">12:00 PM</div>
+        </div>
+        <div class="reminder-actions">
+          <button class="reminder-btn done" id="btnReminderDone" title="Hecho">✓</button>
+          <button class="reminder-btn snooze" id="btnReminderSnooze5" title="Posponer 5 min">+5</button>
+          <button class="reminder-btn snooze" id="btnReminderSnooze15" title="Posponer 15 min">+15</button>
+        </div>
+      </div>
+      
+      <!-- Header -->
+      <header class="header">
+        <button class="btn-add" id="btnAddEvent">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          Añadir
+        </button>
+        <button class="btn-screenshot" id="btnScreenshot" title="Capturar área de pantalla">✂</button>
+        <button class="btn-pdf" id="btnPdf" title="Herramientas PDF">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+          </svg>
+        </button>
+        <button class="btn-signatures" id="btnSignatures" title="Gestor de firmas">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
+          </svg>
+        </button>
+        <button class="btn-toggle-cal" id="btnToggleCal" title="Mostrar/Ocultar calendario">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="16" y1="2" x2="16" y2="6"></line>
+            <line x1="8" y1="2" x2="8" y2="6"></line>
+            <line x1="3" y1="10" x2="21" y2="10"></line>
+          </svg>
+        </button>
+        <button class="btn-settings" id="btnSettings" title="Configuración de notificaciones">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+          </svg>
+        </button>
+        <div class="header-spacer"></div>
+        <div class="user-menu">
+          <button class="btn-user" id="btnUser" title="Menú de usuario">
+            <span class="user-avatar" id="userAvatar" data-status="sync">U</span>
+          </button>
+          <div class="user-dropdown" id="userDropdown">
+            <div class="user-info">
+              <strong id="userName">Usuario</strong>
+              <small id="userEmail">email@example.com</small>
+            </div>
+            <hr>
+            <button class="btn-logout" id="btnLogout">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                <polyline points="16 17 21 12 16 7"></polyline>
+                <line x1="21" y1="12" x2="9" y2="12"></line>
+              </svg>
+              Cerrar Sesión
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <!-- Lista de días y eventos -->
+      <div class="days-section">
+        <div class="days-list" id="daysList">
+          <!-- Se genera dinámicamente -->
+        </div>
+      </div>
+
+      <!-- Mini calendario (oculto por defecto) -->
+      <div class="mini-calendar hidden">
+        <div class="cal-nav">
+          <button class="cal-btn" id="btnPrevMonth">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="15 18 9 12 15 6"></polyline>
+            </svg>
+          </button>
+          <span class="cal-month" id="calMonth"></span>
+          <button class="cal-btn" id="btnNextMonth">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+          </button>
+          <button class="cal-today" id="btnToday">Hoy</button>
+        </div>
+        <div class="cal-weekdays">
+          <span>L</span><span>M</span><span>X</span><span>J</span><span>V</span><span>S</span><span>D</span>
+        </div>
+        <div class="cal-grid" id="calGrid">
+          <!-- Se genera dinámicamente -->
+        </div>
+        <div class="cal-tip" id="calTip"></div>
+      </div>
+
+      <!-- Modal -->
+      <div class="modal-overlay" id="modalOverlay">
+        <div class="modal">
+          <div class="modal-header">
+            <h3 id="modalTitle">Nuevo Evento</h3>
+            <button class="modal-close" id="btnCloseModal">&times;</button>
+          </div>
+          <form id="eventForm">
+            <div class="form-group">
+              <label>Título</label>
+              <input type="text" id="inputTitle" placeholder="Nombre del evento" required>
+            </div>
+            <div class="form-group">
+              <label>Fecha</label>
+              <input type="date" id="inputDate" required>
+            </div>
+            <div class="form-group">
+              <label>Hora (opcional)</label>
+              <input type="time" id="inputTime">
+            </div>
+            <div class="form-group">
+              <label>Descripción (opcional)</label>
+              <textarea id="inputDesc" rows="2" placeholder="Detalles..."></textarea>
+            </div>
+            <div class="checkbox-group">
+              <input type="checkbox" id="inputPublic">
+              <label for="inputPublic">Visible para todos</label>
+              <span class="public-hint">🌍 Público</span>
+            </div>
+            <div class="form-group">
+              <label>Color</label>
+              <div class="colors" id="colorPicker">
+                <input type="radio" name="color" value="#3b82f6" id="c1" checked>
+                <label for="c1" style="background:#3b82f6"></label>
+                <input type="radio" name="color" value="#10b981" id="c2">
+                <label for="c2" style="background:#10b981"></label>
+                <input type="radio" name="color" value="#f59e0b" id="c3">
+                <label for="c3" style="background:#f59e0b"></label>
+                <input type="radio" name="color" value="#ef4444" id="c4">
+                <label for="c4" style="background:#ef4444"></label>
+                <input type="radio" name="color" value="#8b5cf6" id="c5">
+                <label for="c5" style="background:#8b5cf6"></label>
+              </div>
+            </div>
+            <div class="modal-actions">
+              <button type="button" class="btn btn-sec" id="btnCancel">Cancelar</button>
+              <button type="submit" class="btn btn-pri">Guardar</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Settings Modal -->
+      <div class="settings-modal" id="settingsModal">
+        <div class="settings-header">
+          <h3>🔔 Notificaciones</h3>
+          <button class="settings-close" id="closeSettings">&times;</button>
+        </div>
+        <div class="settings-content">
+          <div class="settings-row">
+            <div class="settings-label">
+              <span>Activar notificaciones</span>
+              <small>Recibir avisos de eventos próximos</small>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="notifToggle" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          
+          <div class="settings-row">
+            <div class="settings-label">
+              <span>Avistar con antelación</span>
+              <small>Minutos antes del evento</small>
+            </div>
+            <select id="notifMinutes" class="settings-select">
+              <option value="1">1 minuto</option>
+              <option value="5" selected>5 minutos</option>
+              <option value="10">10 minutos</option>
+              <option value="15">15 minutos</option>
+              <option value="30">30 minutos</option>
+            </select>
+          </div>
+          
+          <div class="settings-row">
+            <div class="settings-label">
+              <span>Sonido de notificación</span>
+              <small>Tipo de sonido al avisar</small>
+            </div>
+            <select id="notifSound" class="settings-select">
+              <option value="bell">Campana</option>
+              <option value="chime">Timbre</option>
+              <option value="alert">Alerta</option>
+              <option value="gentle">Suave</option>
+              <option value="none">Sin sonido</option>
+            </select>
+          </div>
+          
+          <button class="btn btn-test" id="btnTestNotif">
+            🔔 Probar notificación
+          </button>
+        </div>
+      </div>
+
+      <!-- PDF Tools Modal -->
+      <div class="pdf-modal" id="pdfModal">
+        <div class="pdf-modal-header">
+          <h3>📄 Herramientas PDF</h3>
+          <button class="pdf-modal-close" id="closePdfModal">&times;</button>
+        </div>
+        <div class="pdf-modal-content">
+          <!-- Tab 1: PDF Editor -->
+          <div class="pdf-tab-content active" id="editPdfTab">
+            <div class="pdf-editor-container">
+              <!-- Toolbar in two rows: Full Screen on top, other 4 in 2x2 grid -->
+              <div class="pdf-editor-toolbar-wrapper">
+                <!-- Row 1: Full Screen Editor - Big button -->
+                <button class="pdf-editor-btn-fullscreen" id="btnOpenFullEditor" title="Abrir editor en pantalla completa">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
+                  </svg>
+                  Pantalla Completa
+                </button>
+                <!-- Row 2: Other tools in 2x2 grid -->
+                <div class="pdf-editor-toolbar-grid">
+                  <button class="pdf-editor-btn" id="btnAddText" title="Añadir texto">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M4 7V4h16v3"></path>
+                      <path d="M9 20h6"></path>
+                      <path d="M12 4v16"></path>
+                    </svg>
+                    Texto
+                  </button>
+                  <button class="pdf-editor-btn" id="btnAddImage" title="Añadir imagen">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                      <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                      <polyline points="21 15 16 10 5 21"></polyline>
+                    </svg>
+                    Imagen
+                  </button>
+                  <button class="pdf-editor-btn" id="btnAddSignature" title="Añadir firma">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
+                    </svg>
+                    Firma
+                  </button>
+                  <button class="pdf-editor-btn danger" id="btnClearEditor" title="Limpiar todo">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="3 6 5 6 21 6"></polyline>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                    Papelera
+                  </button>
+                </div>
+              </div>
+              <div class="pdf-editor-pages" id="pdfEditorPages">
+                <div class="pdf-editor-upload" id="pdfEditorUpload">
+                  <div class="pdf-editor-upload-icon">📄</div>
+                  <div class="pdf-editor-upload-text">Arrastra un PDF o haz clic para seleccionar</div>
+                  <input type="file" id="editorFileInput" accept=".pdf" hidden>
+                </div>
+              </div>
+              <div class="pdf-editor-nav" id="pdfEditorNav" style="display: none;">
+                <button class="pdf-nav-btn" id="btnPrevPage">◀</button>
+                <span class="pdf-page-info">Página <span id="currentPageNum">1</span> de <span id="totalPages">1</span></span>
+                <button class="pdf-nav-btn" id="btnNextPage">▶</button>
+              </div>
+            </div>
+            <button class="pdf-convert-btn" id="btnSavePdf" style="display: none;">
+              <span class="btn-text">Guardar PDF →</span>
+              <span class="btn-loader" style="display:none"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Signatures Modal -->
+      <div class="signatures-modal" id="signaturesModal">
+        <div class="signatures-modal-header">
+          <h3>✍️ Gestor de Firmas</h3>
+          <button class="signatures-modal-close" id="closeSignaturesModal">&times;</button>
+        </div>
+        <div class="signatures-modal-content">
+          <!-- Search Section -->
+          <div class="signatures-search">
+            <textarea id="signatureSearchInput" placeholder="Buscar firmas...&#10;(un nombre por línea)&#10;&#10;Ejemplo:&#10;BEDOYA CANO, ARBEY&#10;DURAN DELGADO, RADUEL" rows="4"></textarea>
+            <div class="signatures-search-btns">
+              <button class="btn-search-signature" id="btnSearchSignature" title="Buscar">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+              </button>
+              <button class="btn-view-all-signatures" id="btnViewAllSignatures" title="Ver todas">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="8" y1="6" x2="21" y2="6"></line>
+                  <line x1="8" y1="12" x2="21" y2="12"></line>
+                  <line x1="8" y1="18" x2="21" y2="18"></line>
+                  <line x1="3" y1="6" x2="3.01" y2="6"></line>
+                  <line x1="3" y1="12" x2="3.01" y2="12"></line>
+                  <line x1="3" y1="18" x2="3.01" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+          </div>
+          
+          <!-- Results Section -->
+          <div class="signatures-results" id="signaturesResults">
+            <div class="signatures-empty">
+              <div class="signatures-empty-icon">🔍</div>
+              <div class="signatures-empty-text">Busca una firma o pulsa el botón de lista</div>
+            </div>
+          </div>
+          
+          <!-- Bulk Upload Section -->
+          <div class="signatures-bulk-section" id="signaturesBulkSection">
+            <div class="signatures-bulk-header">
+              <span class="signatures-bulk-title">📦 Carga Masiva</span>
+              <button class="btn-toggle-bulk" id="btnToggleBulk" title="Subir múltiples firmas">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+              </button>
+            </div>
+            <div class="signatures-bulk-content" id="signaturesBulkContent" style="display: none;">
+              <div class="signatures-bulk-hint">Sube múltiples firmas. El nombre del archivo será el nombre de la firma.</div>
+              <div class="signatures-bulk-dropzone" id="bulkDropzone">
+                <div class="signatures-bulk-icon">📁</div>
+                <div class="signatures-bulk-text">Arrastra imágenes o haz clic</div>
+                <div class="signatures-bulk-hint-detail">PNG, JPG, WEBP (múltiples)</div>
+                <input type="file" id="bulkFileInput" accept="image/*" multiple hidden>
+              </div>
+              <div class="bulk-progress" id="bulkProgress" style="display: none;">
+                <div class="bulk-progress-bar">
+                  <div class="bulk-progress-fill" id="bulkProgressFill"></div>
+                </div>
+                <div class="bulk-progress-text" id="bulkProgressText">0 / 0</div>
+              </div>
+              <div class="bulk-results" id="bulkResults" style="display: none;"></div>
+            </div>
+          </div>
+
+          <!-- Upload Section (shown when no results) -->
+          <div class="signatures-upload-section" id="signaturesUploadSection" style="display: none;">
+            <div class="signatures-upload-header">No se encontró la firma</div>
+            <div class="signatures-upload-hint">¿Quieres subir una nueva firma?</div>
+            <div class="signatures-dropzone" id="signatureDropzone">
+              <div class="signatures-dropzone-icon">📝</div>
+              <div class="signatures-dropzone-text">Arrastra una imagen o haz clic</div>
+              <div class="signatures-dropzone-hint">PNG con fondo transparente (recomendado)</div>
+              <input type="file" id="signatureFileInput" accept="image/*" hidden>
+            </div>
+            <div class="signature-preview-area" id="signaturePreviewArea" style="display: none;">
+              <img id="signaturePreviewImg" src="" alt="Preview">
+              <button class="btn-clear-signature" id="btnClearSignature">✕ Cambiar</button>
+            </div>
+            <div class="signature-name-input">
+              <label>Nombre de la firma:</label>
+              <input type="text" id="newSignatureName" placeholder="Ej: Juan Pérez">
+            </div>
+            <button class="btn-upload-signature" id="btnUploadSignature">
+              <span class="btn-text">Guardar Firma</span>
+              <span class="btn-loader" style="display:none"></span>
+            </button>
+          </div>
+          
+          <!-- Loading State -->
+          <div class="signatures-loading" id="signaturesLoading" style="display: none;"></div>
+        </div>
+      </div>
+
+      <!-- Toast -->
+      <div class="toast" id="toast"></div>
+    </div>
+  </div>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>
