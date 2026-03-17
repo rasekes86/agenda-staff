@@ -1,5 +1,5 @@
 // ============================================
-// AGENDA STAFF v5.23.17 - STICKY SIDEBAR
+// AGENDA STAFF v5.23.18 - STICKY SIDEBAR
 // ============================================
 
 const SUPABASE_URL = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
@@ -448,7 +448,7 @@ async function api(method, body, query = '') {
 // ============================================
 
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('AGENDA STAFF v5.23.17 iniciado...');
+  console.log('AGENDA STAFF v5.23.18 iniciado...');
   
   // Configure PDF.js worker after library is loaded
   if (typeof pdfjsLib !== 'undefined') {
@@ -2038,9 +2038,8 @@ async function renderEditorPage() {
   if (!editorPdfDoc) return;
   
   const container = $('pdfEditorPages');
-  container.innerHTML = '';
   
-  // Get page dimensions
+  // Get page dimensions first (before clearing container)
   const page = editorPdfDoc.getPage(editorCurrentPage - 1);
   const { width, height } = page.getSize();
   
@@ -2062,6 +2061,7 @@ async function renderEditorPage() {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   
   // Try to render with pdf.js if available, otherwise show placeholder
+  let renderSuccess = false;
   if (typeof pdfjsLib !== 'undefined') {
     try {
       const pdfJsDoc = await pdfjsLib.getDocument(editorPdfBytes).promise;
@@ -2070,11 +2070,14 @@ async function renderEditorPage() {
       canvas.width = viewport.width;
       canvas.height = viewport.height;
       await pdfJsPage.render({ canvasContext: ctx, viewport }).promise;
+      renderSuccess = true;
     } catch (e) {
-      console.log('pdf.js render failed, using placeholder');
-      drawPlaceholder(ctx, canvas.width, canvas.height);
+      console.log('pdf.js render failed, using placeholder:', e);
     }
-  } else {
+  }
+  
+  // If pdf.js failed, draw placeholder
+  if (!renderSuccess) {
     drawPlaceholder(ctx, canvas.width, canvas.height);
   }
   
@@ -2095,6 +2098,9 @@ async function renderEditorPage() {
   });
   
   canvasContainer.appendChild(overlay);
+  
+  // Now clear and replace container content
+  container.innerHTML = '';
   container.appendChild(canvasContainer);
   
   // Update page info
@@ -2150,8 +2156,11 @@ function createEditorElement(el, idx) {
   deleteBtn.textContent = '✕';
   deleteBtn.onclick = (e) => {
     e.stopPropagation();
-    editorElements[editorCurrentPage].splice(idx, 1);
-    renderEditorPage();
+    // Ensure the page array exists
+    if (editorElements[editorCurrentPage]) {
+      editorElements[editorCurrentPage].splice(idx, 1);
+      renderEditorPage();
+    }
   };
   div.appendChild(deleteBtn);
   
@@ -2227,6 +2236,11 @@ function addTextToPdf() {
     if (!text) {
       showToast('Escribe un texto');
       return;
+    }
+    
+    // Ensure the elements array for current page exists
+    if (!editorElements[editorCurrentPage]) {
+      editorElements[editorCurrentPage] = [];
     }
     
     // DNI/NIE patterns
@@ -2362,6 +2376,11 @@ function addImageToPdf() {
     return;
   }
   
+  // Ensure the elements array for current page exists
+  if (!editorElements[editorCurrentPage]) {
+    editorElements[editorCurrentPage] = [];
+  }
+  
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'image/*';
@@ -2406,6 +2425,11 @@ async function addSignatureToPdf() {
     return;
   }
   
+  // Ensure the elements array for current page exists
+  if (!editorElements[editorCurrentPage]) {
+    editorElements[editorCurrentPage] = [];
+  }
+  
   // Open signature search modal
   $('signaturesModal').classList.add('show');
   resetSignatureState();
@@ -2421,6 +2445,11 @@ async function addSignatureToPdf() {
         const ratio = Math.min(maxSize / width, maxSize / height);
         width *= ratio;
         height *= ratio;
+      }
+      
+      // Ensure the page array exists
+      if (!editorElements[editorCurrentPage]) {
+        editorElements[editorCurrentPage] = [];
       }
       
       editorElements[editorCurrentPage].push({
