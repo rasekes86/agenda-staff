@@ -1,5 +1,5 @@
 // ============================================
-// AGENDA STAFF v5.18.0 - STICKY SIDEBAR
+// AGENDA STAFF v5.23.12 - STICKY SIDEBAR
 // ============================================
 
 const SUPABASE_URL = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
@@ -448,7 +448,16 @@ async function api(method, body, query = '') {
 // ============================================
 
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('AGENDA STAFF v5.10.0 iniciado...');
+  console.log('AGENDA STAFF v5.23.12 iniciado...');
+  
+  // Configure PDF.js worker after library is loaded
+  if (typeof pdfjsLib !== 'undefined') {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('pdf.worker.min.js');
+    console.log('PDF.js worker configured');
+  } else {
+    console.log('PDF.js library not loaded - PDF preview will use placeholder');
+  }
+  
   checkSession();
   setupListeners();
 });
