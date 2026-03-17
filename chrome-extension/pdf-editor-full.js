@@ -1,5 +1,5 @@
 // ============================================
-// PDF EDITOR FULL SCREEN - AGENDA STAFF v5.23.4
+// PDF EDITOR FULL SCREEN - AGENDA STAFF v5.23.16
 // Fixed: Sidebar PDF tools layout (two rows), sticky document tabs
 // ============================================
 
@@ -1101,6 +1101,17 @@ function showSignatureModal() {
   if (signatureCount) signatureCount.style.display = 'none';
 }
 
+// Helper function to remove DNI/NIE from a string
+// DNI format: 8 digits + 1 letter (e.g., 12345678A)
+// NIE format: X/Y/Z + 7 digits + 1 letter (e.g., X1234567A)
+function removeDniNie(text) {
+  return text
+    .replace(/\s*\d{8}[A-Za-z]\s*/gi, ' ')  // DNI: 8 digits + letter
+    .replace(/\s*[XYZ]\d{7}[A-Za-z]\s*/gi, ' ')  // NIE: X/Y/Z + 7 digits + letter
+    .replace(/\s+/g, ' ')  // Normalize multiple spaces to single space
+    .trim();
+}
+
 async function searchSignatures() {
   const signatureSearchInput = $('signatureSearchInput');
   const signatureResults = $('signatureResults');
@@ -1112,7 +1123,8 @@ async function searchSignatures() {
     return;
   }
   
-  const searchTerms = searchInput.split('\n').map(term => term.trim()).filter(term => term.length > 0);
+  // Remove DNI/NIE from each search term automatically
+  const searchTerms = searchInput.split('\n').map(term => removeDniNie(term.trim())).filter(term => term.length > 0);
   if (searchTerms.length === 0) return;
   
   if (signatureResults) signatureResults.innerHTML = '<div class="signature-loading">Buscando...</div>';
