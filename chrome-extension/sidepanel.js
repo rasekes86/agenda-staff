@@ -1,5 +1,5 @@
 // ============================================
-// AGENDA STAFF v5.23.14 - STICKY SIDEBAR
+// AGENDA STAFF v5.23.15 - STICKY SIDEBAR
 // ============================================
 
 const SUPABASE_URL = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
@@ -448,7 +448,7 @@ async function api(method, body, query = '') {
 // ============================================
 
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('AGENDA STAFF v5.23.14 iniciado...');
+  console.log('AGENDA STAFF v5.23.15 iniciado...');
   
   // Configure PDF.js worker after library is loaded
   if (typeof pdfjsLib !== 'undefined') {
@@ -2713,10 +2713,23 @@ function resetSignatureState() {
   $('newSignatureName').value = '';
 }
 
+// Helper function to remove DNI/NIE from a string
+// DNI format: 8 digits + 1 letter (e.g., 12345678A)
+// NIE format: X/Y/Z + 7 digits + 1 letter (e.g., X1234567A)
+function removeDniNie(text) {
+  // Remove DNI pattern: 8 digits followed by a letter
+  // Remove NIE pattern: X, Y, or Z followed by 7 digits and a letter
+  return text
+    .replace(/\s*\d{8}[A-Za-z]\s*/gi, ' ')  // DNI: 8 digits + letter
+    .replace(/\s*[XYZ]\d{7}[A-Za-z]\s*/gi, ' ')  // NIE: X/Y/Z + 7 digits + letter
+    .replace(/\s+/g, ' ')  // Normalize multiple spaces to single space
+    .trim();
+}
+
 // Search signatures in Supabase (one name per line - commas are part of the name)
 async function searchSignatures() {
   const searchInput = $('signatureSearchInput').value.trim();
-  
+
   if (!searchInput) {
     showToast('Introduce un nombre para buscar');
     return;
@@ -2724,30 +2737,31 @@ async function searchSignatures() {
 
   // Split ONLY by newlines (Enter) - commas can be part of the name!
   // Example: "GARCIA, JUAN" is ONE complete name, not two names
+  // Also remove DNI/NIE from each term automatically
   const searchTerms = searchInput.split('\n')
-    .map(term => term.trim())
+    .map(term => removeDniNie(term.trim()))
     .filter(term => term.length > 0);
-  
+
   if (searchTerms.length === 0) {
     showToast('Introduce un nombre para buscar');
     return;
   }
 
   signatureSearchTerm = searchInput;
-  
+
   // Show loading
   $('signaturesResults').innerHTML = '<div class="signatures-loading"></div>';
 
   try {
     let allSignatures = [];
     const foundNames = [];
-    
+
     // Search for each term
     for (const term of searchTerms) {
       // Query signatures table - search for exact or partial match
       const query = `?select=*&name=ilike.*${encodeURIComponent(term)}*&order=name.asc`;
       const url = `${SUPABASE_URL}/rest/v1/signatures${query}`;
-      
+
       const res = await fetch(url, {
         headers: {
           'apikey': SUPABASE_KEY,
@@ -2772,7 +2786,7 @@ async function searchSignatures() {
 
     // Sort alphabetically by name
     allSignatures.sort((a, b) => a.name.localeCompare(b.name));
-    
+
     // Render with missing names highlighted in red
     renderSignatureResultsWithMissing(allSignatures, searchTerms, foundNames);
 
