@@ -1,5 +1,5 @@
 // ============================================
-// AGENDA STAFF v5.23.18 - STICKY SIDEBAR
+// AGENDA STAFF v5.23.19 - STICKY SIDEBAR
 // ============================================
 
 const SUPABASE_URL = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
@@ -448,7 +448,7 @@ async function api(method, body, query = '') {
 // ============================================
 
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('AGENDA STAFF v5.23.18 iniciado...');
+  console.log('AGENDA STAFF v5.23.19 iniciado...');
   
   // Configure PDF.js worker after library is loaded
   if (typeof pdfjsLib !== 'undefined') {
@@ -1750,6 +1750,7 @@ async function handleScreenshotResult(dataUrl) {
     
     if (!blob || blob.size === 0) throw new Error('Blob vacío');
     
+    // Try clipboard first
     let clipboardSuccess = false;
     try {
       await navigator.clipboard.write([
@@ -1760,20 +1761,24 @@ async function handleScreenshotResult(dataUrl) {
       console.log('Clipboard no disponible:', clipErr.message);
     }
     
-    try {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `captura-${Date.now()}.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (downloadErr) {
-      console.log('Download error:', downloadErr.message);
+    // Only download if clipboard failed
+    if (!clipboardSuccess) {
+      try {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `captura-${Date.now()}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (downloadErr) {
+        console.log('Download error:', downloadErr.message);
+      }
+      showToast('✅ Captura descargada');
+    } else {
+      showToast('✅ Captura copiada al portapapeles');
     }
-    
-    showToast(clipboardSuccess ? '✅ Captura copiada y descargada' : '✅ Captura descargada');
   } catch (err) {
     console.error('Error processing screenshot:', err);
     showToast('Error al procesar: ' + err.message);
@@ -2035,77 +2040,96 @@ async function loadPdfForEditor(file) {
 }
 
 async function renderEditorPage() {
-  if (!editorPdfDoc) return;
+  if (!editorPdfDoc) {
+    console.error('renderEditorPage: No PDF document loaded');
+    return;
+  }
   
   const container = $('pdfEditorPages');
   
-  // Get page dimensions first (before clearing container)
-  const page = editorPdfDoc.getPage(editorCurrentPage - 1);
-  const { width, height } = page.getSize();
+  // Ensure elements array exists for current page
+  if (!editorElements[editorCurrentPage]) {
+    editorElements[editorCurrentPage] = [];
+  }
   
-  // Calculate scale to fit container (max width ~280px)
-  editorScale = Math.min(280 / width, 400 / height, 1);
-  
-  // Create canvas for rendering
-  const canvasContainer = document.createElement('div');
-  canvasContainer.className = 'pdf-canvas-container';
-  canvasContainer.style.position = 'relative';
-  
-  const canvas = document.createElement('canvas');
-  canvas.width = width * editorScale;
-  canvas.height = height * editorScale;
-  editorCanvas = canvas;
-  
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = 'white';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  
-  // Try to render with pdf.js if available, otherwise show placeholder
-  let renderSuccess = false;
-  if (typeof pdfjsLib !== 'undefined') {
-    try {
-      const pdfJsDoc = await pdfjsLib.getDocument(editorPdfBytes).promise;
-      const pdfJsPage = await pdfJsDoc.getPage(editorCurrentPage);
-      const viewport = pdfJsPage.getViewport({ scale: editorScale });
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      await pdfJsPage.render({ canvasContext: ctx, viewport }).promise;
-      renderSuccess = true;
-    } catch (e) {
-      console.log('pdf.js render failed, using placeholder:', e);
+  try {
+    // Get page dimensions first (before clearing container)
+    const page = editorPdfDoc.getPage(editorCurrentPage - 1);
+    const { width, height } = page.getSize();
+    
+    // Calculate scale to fit container (max width ~280px)
+    editorScale = Math.min(280 / width, 400 / height, 1);
+    
+    // Create canvas for rendering
+    const canvasContainer = document.createElement('div');
+    canvasContainer.className = 'pdf-canvas-container';
+    canvasContainer.style.position = 'relative';
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = width * editorScale;
+    canvas.height = height * editorScale;
+    editorCanvas = canvas;
+    
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Try to render with pdf.js if available, otherwise show placeholder
+    let renderSuccess = false;
+    if (typeof pdfjsLib !== 'undefined') {
+      try {
+        const pdfJsDoc = await pdfjsLib.getDocument(editorPdfBytes).promise;
+        const pdfJsPage = await pdfJsDoc.getPage(editorCurrentPage);
+        const viewport = pdfJsPage.getViewport({ scale: editorScale });
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        await pdfJsPage.render({ canvasContext: ctx, viewport }).promise;
+        renderSuccess = true;
+      } catch (e) {
+        console.log('pdf.js render failed, using placeholder:', e);
+      }
     }
+    
+    // If pdf.js failed, draw placeholder
+    if (!renderSuccess) {
+      drawPlaceholder(ctx, canvas.width, canvas.height);
+    }
+    
+    canvasContainer.appendChild(canvas);
+    
+    // Create overlay for elements
+    const overlay = document.createElement('div');
+    overlay.className = 'pdf-editor-overlay';
+    overlay.id = 'editorOverlay';
+    overlay.style.width = canvas.width + 'px';
+    overlay.style.height = canvas.height + 'px';
+    
+    // Render existing elements for this page
+    const pageElements = editorElements[editorCurrentPage] || [];
+    pageElements.forEach((el, idx) => {
+      const elDiv = createEditorElement(el, idx);
+      overlay.appendChild(elDiv);
+    });
+    
+    canvasContainer.appendChild(overlay);
+    
+    // Only clear container AFTER canvas is fully prepared
+    container.innerHTML = '';
+    container.appendChild(canvasContainer);
+    
+    // Update page info
+    $('currentPageNum').textContent = editorCurrentPage;
+    $('totalPages').textContent = editorTotalPages;
+    
+  } catch (err) {
+    console.error('Error rendering PDF page:', err);
+    // Show error message in container instead of leaving it empty
+    container.innerHTML = `<div class="pdf-error" style="padding: 20px; text-align: center; color: #dc2626;">
+      <p>Error al renderizar la página</p>
+      <p style="font-size: 12px; color: #666;">${err.message}</p>
+      <button onclick="renderEditorPage()" style="margin-top: 10px; padding: 8px 16px; cursor: pointer;">Reintentar</button>
+    </div>`;
   }
-  
-  // If pdf.js failed, draw placeholder
-  if (!renderSuccess) {
-    drawPlaceholder(ctx, canvas.width, canvas.height);
-  }
-  
-  canvasContainer.appendChild(canvas);
-  
-  // Create overlay for elements
-  const overlay = document.createElement('div');
-  overlay.className = 'pdf-editor-overlay';
-  overlay.id = 'editorOverlay';
-  overlay.style.width = canvas.width + 'px';
-  overlay.style.height = canvas.height + 'px';
-  
-  // Render existing elements for this page
-  const pageElements = editorElements[editorCurrentPage] || [];
-  pageElements.forEach((el, idx) => {
-    const elDiv = createEditorElement(el, idx);
-    overlay.appendChild(elDiv);
-  });
-  
-  canvasContainer.appendChild(overlay);
-  
-  // Now clear and replace container content
-  container.innerHTML = '';
-  container.appendChild(canvasContainer);
-  
-  // Update page info
-  $('currentPageNum').textContent = editorCurrentPage;
-  $('totalPages').textContent = editorTotalPages;
 }
 
 function drawPlaceholder(ctx, width, height) {
