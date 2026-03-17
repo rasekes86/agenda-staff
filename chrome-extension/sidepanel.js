@@ -2050,22 +2050,36 @@ async function loadPdfForEditor(file) {
 }
 
 async function renderEditorPage() {
+  console.log('renderEditorPage called');
+  console.log('editorPdfDoc:', editorPdfDoc ? 'exists' : 'null');
+  console.log('editorCurrentPage:', editorCurrentPage);
+  console.log('editorElements:', JSON.stringify(Object.keys(editorElements)));
+  
   if (!editorPdfDoc) {
     console.error('renderEditorPage: No PDF document loaded');
     return;
   }
   
   const container = $('pdfEditorPages');
+  console.log('Container:', container ? 'exists' : 'null');
+  
+  if (!container) {
+    console.error('renderEditorPage: Container pdfEditorPages not found!');
+    return;
+  }
   
   // Ensure elements array exists for current page
   if (!editorElements[editorCurrentPage]) {
     editorElements[editorCurrentPage] = [];
   }
   
+  console.log('Elements for current page:', editorElements[editorCurrentPage].length);
+  
   try {
     // Get page dimensions first (before clearing container)
     const page = editorPdfDoc.getPage(editorCurrentPage - 1);
     const { width, height } = page.getSize();
+    console.log('Page dimensions:', width, 'x', height);
     
     // Calculate scale to fit container (max width ~280px)
     editorScale = Math.min(280 / width, 400 / height, 1);
@@ -2130,6 +2144,8 @@ async function renderEditorPage() {
     // Update page info
     $('currentPageNum').textContent = editorCurrentPage;
     $('totalPages').textContent = editorTotalPages;
+    
+    console.log('renderEditorPage completed successfully');
     
   } catch (err) {
     console.error('Error rendering PDF page:', err);
@@ -2469,9 +2485,20 @@ async function addSignatureToPdf() {
   resetSignatureState();
   
   // Override the download function temporarily
-  window.selectSignatureForEditor = (url, name) => {
+  window.selectSignatureForEditor = async (url, name) => {
+    console.log('selectSignatureForEditor called with URL:', url);
+    
     const img = new Image();
-    img.onload = () => {
+    img.crossOrigin = 'anonymous';
+    
+    img.onerror = () => {
+      console.error('Error loading signature image:', url);
+      showToast('Error al cargar la firma');
+      $('signaturesModal').classList.remove('show');
+    };
+    
+    img.onload = async () => {
+      console.log('Signature image loaded successfully');
       let width = img.width;
       let height = img.height;
       const maxSize = 120;
@@ -2496,8 +2523,24 @@ async function addSignatureToPdf() {
         name
       });
       
+      console.log('Signature added to elements, current page:', editorCurrentPage);
+      console.log('Total elements on page:', editorElements[editorCurrentPage].length);
+      
+      // Close modal first
       $('signaturesModal').classList.remove('show');
-      renderEditorPage();
+      
+      // Small delay to ensure modal is closed before re-rendering
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      // Verify PDF document is still loaded
+      if (!editorPdfDoc) {
+        console.error('editorPdfDoc is null after closing modal!');
+        showToast('Error: PDF no está cargado');
+        return;
+      }
+      
+      console.log('Calling renderEditorPage...');
+      await renderEditorPage();
       showToast('Firma añadida');
     };
     img.src = url;
