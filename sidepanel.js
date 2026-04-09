@@ -2991,7 +2991,7 @@ async function loadProcesses() {
   if (!session || !currentUser) return;
   
   try {
-    const query = `?select=*&user_id=eq.${currentUser.id}&order=created_at.desc`;
+    const query = `?select=*&order=created_at.desc`;
     const data = await processesApi('GET', null, query);
     processes = data || [];
     renderProcesses();
@@ -3060,10 +3060,19 @@ async function handleCreateProcess(e) {
   
   try {
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+    const province = $('processProvince').value;
+    if (!province) {
+      showToast('Selecciona una provincia');
+      btn.disabled = false;
+      return;
+    }
+    
     const newProc = {
       id,
       user_id: currentUser.id,
+      user_name: currentUser.name,
       name,
+      province,
       added: 0,
       called: 0,
       interviewed: 0,
@@ -3074,6 +3083,7 @@ async function handleCreateProcess(e) {
     processes.unshift(newProc);
     
     $('processName').value = '';
+    $('processProvince').value = '';
     renderProcesses();
     renderGlobalStats();
     showToast('Proceso creado');
@@ -3204,6 +3214,10 @@ function renderProcesses() {
     const rate = total > 0 ? Math.round(((proc.selected || 0) / total) * 100) : 0;
     const createdDate = proc.created_at ? new Date(proc.created_at).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) : '';
     
+    const isOwn = proc.user_id === currentUser.id;
+    const creatorName = proc.user_name || 'Usuario';
+    const province = proc.province || '';
+    
     return `
       <div class="process-card">
         <div class="process-card-header">
@@ -3211,9 +3225,13 @@ function renderProcesses() {
             <h4 class="process-card-name">${esc(proc.name)}</h4>
             <span class="process-card-date">${createdDate}</span>
           </div>
+          <div class="process-card-meta">
+            ${province ? `<span class="process-card-province">📍 ${esc(province)}</span>` : ''}
+            <span class="process-card-creator">👤 ${esc(creatorName)}</span>
+          </div>
           <div class="process-card-actions-header">
-            <button class="btn-process-edit" data-id="${proc.id}" title="Cambiar nombre">✏️</button>
-            <button class="btn-process-del" data-id="${proc.id}" title="Eliminar">🗑</button>
+            ${isOwn ? `<button class="btn-process-edit" data-id="${proc.id}" title="Cambiar nombre">✏️</button>
+            <button class="btn-process-del" data-id="${proc.id}" title="Eliminar">🗑</button>` : ''}
           </div>
         </div>
         <div class="process-counters">
