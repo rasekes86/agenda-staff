@@ -534,14 +534,33 @@
           <button class="processes-modal-close" id="closeProcessesModal">&times;</button>
         </div>
         <div class="processes-modal-content">
-          <!-- Month Filter -->
-          <div class="processes-month-filter">
-            <label>📅 Mes:</label>
-            <select id="processMonthFilter">
-              <option value="all">Todos los meses</option>
-            </select>
+          <!-- Filters -->
+          <div class="processes-filters">
+            <div class="processes-month-filter">
+              <label>📅 Mes:</label>
+              <select id="processMonthFilter">
+                <option value="all">Todos los meses</option>
+              </select>
+            </div>
+            <div class="processes-delegation-filter">
+              <label>📍 Delegación:</label>
+              <select id="processDelegationFilter">
+                <option value="all">Todas</option>
+                <option value="Madrid">Madrid</option>
+                <option value="Valencia">Valencia</option>
+                <option value="Barcelona">Barcelona</option>
+                <option value="Sevilla">Sevilla</option>
+                <option value="Nacional">Nacional</option>
+              </select>
+            </div>
           </div>
-          
+
+          <!-- Tabs: Active / Finalized -->
+          <div class="processes-tabs">
+            <button class="process-tab active" data-tab="active">🔄 Activos</button>
+            <button class="process-tab" data-tab="finalized">🏁 Finalizados</button>
+          </div>
+
           <!-- Global Stats -->
           <div class="processes-global-stats" id="processesGlobalStats">
             <div class="gstat-card">
