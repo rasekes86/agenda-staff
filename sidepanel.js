@@ -48,11 +48,8 @@ let editorScale = 1;
 let editorCanvas = null;
 let selectedElement = null;
 
-// Candidates state
-let candidates = [];
-let candidateFilter = 'all';
-let candidateSearch = '';
-let editingCandidateId = null;
+// Processes state
+let processes = [];
 
 // DOM
 const $ = id => document.getElementById(id);
@@ -557,8 +554,8 @@ function setupListeners() {
   // Signatures Manager
   setupSignatureListeners();
   
-  // Candidates Manager
-  setupCandidatesListeners();
+  // Processes Manager
+  setupProcessesListeners();
   
   // Drag events
   daysList.addEventListener('dragstart', handleDragStart);
@@ -2971,131 +2968,41 @@ async function deleteSignature(id) {
 }
 
 // ============================================
-// CANDIDATES MODULE
+// PROCESSES MODULE
 // ============================================
 
-function setupCandidatesListeners() {
-  // Open/Close candidates modal
-  $('btnCandidates').addEventListener('click', openCandidatesModal);
-  $('closeCandidatesModal').addEventListener('click', closeCandidatesModal);
-  
-  // Add candidate
-  $('btnAddCandidate').addEventListener('click', () => openCandidateForm());
-  
-  // Close form
-  $('closeCandidateForm').addEventListener('click', closeCandidateForm);
-  $('btnCancelCandidate').addEventListener('click', closeCandidateForm);
-  $('candidateFormOverlay').addEventListener('click', (e) => {
-    if (e.target === $('candidateFormOverlay')) closeCandidateForm();
-  });
-  
-  // Form submit
-  $('candidateForm').addEventListener('submit', handleCandidateSubmit);
-  
-  // Search
-  $('candidateSearch').addEventListener('input', (e) => {
-    candidateSearch = e.target.value.toLowerCase();
-    renderCandidates();
-  });
-  
-  // Filter buttons
-  $('candidatesFilters').addEventListener('click', (e) => {
-    const btn = e.target.closest('.filter-btn');
-    if (!btn) return;
-    
-    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    candidateFilter = btn.dataset.filter;
-    renderCandidates();
-  });
-  
-  // Delegation for candidate actions
-  $('candidatesList').addEventListener('click', handleCandidateActions);
+function setupProcessesListeners() {
+  $('btnCandidates').addEventListener('click', openProcessesModal);
+  $('closeProcessesModal').addEventListener('click', closeProcessesModal);
+  $('processForm').addEventListener('submit', handleCreateProcess);
+  $('processesList').addEventListener('click', handleProcessActions);
 }
 
-function openCandidatesModal() {
-  $('candidatesModal').classList.add('show');
-  loadCandidates();
+function openProcessesModal() {
+  $('processesModal').classList.add('show');
+  loadProcesses();
 }
 
-function closeCandidatesModal() {
-  $('candidatesModal').classList.remove('show');
+function closeProcessesModal() {
+  $('processesModal').classList.remove('show');
 }
 
-function openCandidateForm(id = null) {
-  editingCandidateId = id;
-  
-  if (id) {
-    const cand = candidates.find(c => c.id === id);
-    if (cand) {
-      $('candidateFormTitle').textContent = 'Editar Candidato';
-      $('candName').value = cand.full_name || '';
-      $('candPhone').value = cand.phone || '';
-      $('candEmail').value = cand.email || '';
-      $('candPosition').value = cand.position || '';
-      $('candSource').value = cand.source || '';
-      $('candNotes').value = cand.notes || '';
-    }
-  } else {
-    $('candidateFormTitle').textContent = 'Nuevo Candidato';
-    $('candName').value = '';
-    $('candPhone').value = '';
-    $('candEmail').value = '';
-    $('candPosition').value = '';
-    $('candSource').value = '';
-    $('candNotes').value = '';
-  }
-  
-  $('candidateFormOverlay').classList.add('show');
-  $('candName').focus();
-}
-
-function closeCandidateForm() {
-  $('candidateFormOverlay').classList.remove('show');
-  editingCandidateId = null;
-}
-
-async function handleCandidateActions(e) {
-  // Status change buttons
-  const statusBtn = e.target.closest('.btn-cand-status');
-  if (statusBtn) {
-    const id = statusBtn.dataset.id;
-    const newStatus = statusBtn.dataset.status;
-    await changeCandidateStatus(id, newStatus);
-    return;
-  }
-  
-  // Edit button
-  const editBtn = e.target.closest('.btn-cand-edit');
-  if (editBtn) {
-    openCandidateForm(editBtn.dataset.id);
-    return;
-  }
-  
-  // Delete button
-  const delBtn = e.target.closest('.btn-cand-del');
-  if (delBtn) {
-    deleteCandidate(delBtn.dataset.id);
-    return;
-  }
-}
-
-async function loadCandidates() {
+async function loadProcesses() {
   if (!session || !currentUser) return;
   
   try {
     const query = `?select=*&user_id=eq.${currentUser.id}&order=created_at.desc`;
-    const data = await candidatesApi('GET', null, query);
-    candidates = data || [];
-    renderCandidates();
-    renderCandidateStats();
+    const data = await processesApi('GET', null, query);
+    processes = data || [];
+    renderProcesses();
+    renderGlobalStats();
   } catch (err) {
-    console.error('Error loading candidates:', err);
-    showToast('Error al cargar candidatos');
+    console.error('Error loading processes:', err);
+    showToast('Error al cargar procesos');
   }
 }
 
-async function candidatesApi(method, body, query = '') {
+async function processesApi(method, body, query = '') {
   if (!session || !session.access_token) {
     const stored = await chrome.storage.local.get(['session']);
     if (stored.session && stored.session.access_token) {
@@ -3105,7 +3012,7 @@ async function candidatesApi(method, body, query = '') {
     }
   }
   
-  const url = `${SUPABASE_URL}/rest/v1/candidates${query}`;
+  const url = `${SUPABASE_URL}/rest/v1/recruitment_processes${query}`;
   const opts = {
     method,
     headers: {
@@ -3143,218 +3050,196 @@ async function candidatesApi(method, body, query = '') {
   return res.json();
 }
 
-async function handleCandidateSubmit(e) {
+async function handleCreateProcess(e) {
   e.preventDefault();
+  const name = $('processName').value.trim();
+  if (!name) return;
   
-  const fullName = $('candName').value.trim();
-  const phone = $('candPhone').value.trim();
-  const email = $('candEmail').value.trim();
-  const position = $('candPosition').value.trim();
-  const source = $('candSource').value;
-  const notes = $('candNotes').value.trim();
-  
-  if (!fullName) {
-    showToast('El nombre es obligatorio');
-    return;
-  }
-  
-  const btn = $('candidateForm').querySelector('.btn-pri');
+  const btn = $('processForm').querySelector('.btn-add-process');
   btn.disabled = true;
-  btn.querySelector('.btn-text').textContent = 'Guardando...';
-  btn.querySelector('.btn-loader').style.display = 'block';
   
   try {
-    if (editingCandidateId) {
-      // Update
-      await candidatesApi('PATCH', {
-        full_name: fullName,
-        phone: phone || null,
-        email: email || null,
-        position: position || null,
-        source: source || null,
-        notes: notes || null
-      }, `?id=eq.${editingCandidateId}`);
-      
-      const idx = candidates.findIndex(c => c.id === editingCandidateId);
-      if (idx !== -1) {
-        candidates[idx] = { ...candidates[idx], full_name: fullName, phone, email, position, source, notes };
-      }
-      
-      showToast('Candidato actualizado');
-    } else {
-      // Create
-      const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
-      const newCand = {
-        id,
-        user_id: currentUser.id,
-        full_name: fullName,
-        phone: phone || null,
-        email: email || null,
-        position: position || null,
-        source: source || null,
-        notes: notes || null,
-        status: 'added'
-      };
-      
-      await candidatesApi('POST', newCand);
-      candidates.unshift(newCand);
-      
-      showToast('Candidato añadido');
-    }
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+    const newProc = {
+      id,
+      user_id: currentUser.id,
+      name,
+      added: 0,
+      called: 0,
+      interviewed: 0,
+      selected: 0
+    };
     
-    closeCandidateForm();
-    renderCandidates();
-    renderCandidateStats();
+    await processesApi('POST', newProc);
+    processes.unshift(newProc);
+    
+    $('processName').value = '';
+    renderProcesses();
+    renderGlobalStats();
+    showToast('Proceso creado');
   } catch (err) {
-    console.error('Error saving candidate:', err);
+    console.error('Error creating process:', err);
     showToast('Error: ' + err.message);
   } finally {
     btn.disabled = false;
-    btn.querySelector('.btn-text').textContent = 'Guardar Candidato';
-    btn.querySelector('.btn-loader').style.display = 'none';
   }
 }
 
-async function changeCandidateStatus(id, newStatus) {
-  try {
-    await candidatesApi('PATCH', { status: newStatus }, `?id=eq.${id}`);
-    
-    const idx = candidates.findIndex(c => c.id === id);
-    if (idx !== -1) {
-      candidates[idx].status = newStatus;
-    }
-    
-    renderCandidates();
-    renderCandidateStats();
-    
-    const statusNames = {
-      'added': 'Añadido',
-      'called': 'Citado',
-      'interviewed': 'Entrevistado',
-      'selected': 'Seleccionado',
-      'rejected': 'Rechazado'
-    };
-    showToast(`Estado: ${statusNames[newStatus]}`);
-  } catch (err) {
-    console.error('Error changing status:', err);
-    showToast('Error al cambiar estado');
+async function handleProcessActions(e) {
+  const counterBtn = e.target.closest('.btn-counter');
+  if (counterBtn) {
+    const id = counterBtn.dataset.id;
+    const field = counterBtn.dataset.field;
+    const delta = counterBtn.dataset.delta === '1' ? 1 : -1;
+    await updateCounter(id, field, delta);
+    return;
+  }
+  
+  const delBtn = e.target.closest('.btn-process-del');
+  if (delBtn) {
+    deleteProcess(delBtn.dataset.id);
+    return;
+  }
+  
+  const editBtn = e.target.closest('.btn-process-edit');
+  if (editBtn) {
+    editProcessName(editBtn.dataset.id);
+    return;
   }
 }
 
-async function deleteCandidate(id) {
-  const cand = candidates.find(c => c.id === id);
-  if (!cand) return;
+async function updateCounter(id, field, delta) {
+  const proc = processes.find(p => p.id === id);
+  if (!proc) return;
   
-  if (!confirm(`¿Eliminar a "${cand.full_name}"?`)) return;
+  const newVal = Math.max(0, (proc[field] || 0) + delta);
   
   try {
-    await candidatesApi('DELETE', null, `?id=eq.${id}`);
-    candidates = candidates.filter(c => c.id !== id);
-    renderCandidates();
-    renderCandidateStats();
-    showToast('Candidato eliminado');
+    await processesApi('PATCH', { [field]: newVal }, `?id=eq.${id}`);
+    proc[field] = newVal;
+    renderProcesses();
+    renderGlobalStats();
   } catch (err) {
-    console.error('Error deleting candidate:', err);
+    console.error('Error updating counter:', err);
+    showToast('Error al actualizar');
+  }
+}
+
+async function deleteProcess(id) {
+  const proc = processes.find(p => p.id === id);
+  if (!proc) return;
+  if (!confirm(`¿Eliminar "${proc.name}"?`)) return;
+  
+  try {
+    await processesApi('DELETE', null, `?id=eq.${id}`);
+    processes = processes.filter(p => p.id !== id);
+    renderProcesses();
+    renderGlobalStats();
+    showToast('Proceso eliminado');
+  } catch (err) {
+    console.error('Error deleting:', err);
     showToast('Error al eliminar');
   }
 }
 
-function renderCandidateStats() {
-  const counts = { added: 0, called: 0, interviewed: 0, selected: 0, rejected: 0 };
-  candidates.forEach(c => {
-    if (counts.hasOwnProperty(c.status)) counts[c.status]++;
-  });
+async function editProcessName(id) {
+  const proc = processes.find(p => p.id === id);
+  if (!proc) return;
   
-  $('statAdded').textContent = counts.added;
-  $('statCalled').textContent = counts.called;
-  $('statInterviewed').textContent = counts.interviewed;
-  $('statSelected').textContent = counts.selected;
-  $('statRejected').textContent = counts.rejected;
+  const newName = prompt('Nuevo nombre del proceso:', proc.name);
+  if (!newName || newName.trim() === '' || newName.trim() === proc.name) return;
   
-  // Conversion rate: selected / total (excluding rejected)
-  const total = candidates.filter(c => c.status !== 'rejected').length;
-  const conversionRate = total > 0 ? Math.round((counts.selected / total) * 100) : 0;
-  
-  $('conversionFill').style.width = conversionRate + '%';
-  $('conversionText').textContent = `Tasa de conversión: ${conversionRate}% (${counts.selected} de ${total})`;
+  try {
+    await processesApi('PATCH', { name: newName.trim() }, `?id=eq.${id}`);
+    proc.name = newName.trim();
+    renderProcesses();
+    showToast('Nombre actualizado');
+  } catch (err) {
+    console.error('Error updating name:', err);
+    showToast('Error al actualizar');
+  }
 }
 
-function renderCandidates() {
-  const list = $('candidatesList');
+function renderGlobalStats() {
+  let totalAdded = 0, totalCalled = 0, totalInterviewed = 0, totalSelected = 0;
+  processes.forEach(p => {
+    totalAdded += p.added || 0;
+    totalCalled += p.called || 0;
+    totalInterviewed += p.interviewed || 0;
+    totalSelected += p.selected || 0;
+  });
   
-  // Filter candidates
-  let filtered = candidates;
+  $('gsTotal').textContent = totalAdded;
+  $('gsCalled').textContent = totalCalled;
+  $('gsInterviewed').textContent = totalInterviewed;
+  $('gsSelected').textContent = totalSelected;
   
-  if (candidateFilter !== 'all') {
-    filtered = filtered.filter(c => c.status === candidateFilter);
-  }
+  const rate = totalAdded > 0 ? Math.round((totalSelected / totalAdded) * 100) : 0;
+  $('gsRate').textContent = rate + '%';
+}
+
+function renderProcesses() {
+  const list = $('processesList');
   
-  if (candidateSearch) {
-    filtered = filtered.filter(c =>
-      (c.full_name || '').toLowerCase().includes(candidateSearch) ||
-      (c.email || '').toLowerCase().includes(candidateSearch) ||
-      (c.phone || '').toLowerCase().includes(candidateSearch) ||
-      (c.position || '').toLowerCase().includes(candidateSearch)
-    );
-  }
-  
-  if (filtered.length === 0) {
-    const isSearching = candidateSearch || candidateFilter !== 'all';
+  if (processes.length === 0) {
     list.innerHTML = `
-      <div class="candidates-empty">
-        <div class="candidates-empty-icon">${isSearching ? '🔍' : '👥'}</div>
-        <div class="candidates-empty-text">${isSearching ? 'No se encontraron resultados' : 'No hay candidatos registrados'}</div>
-        <div class="candidates-empty-hint">${isSearching ? 'Prueba con otros filtros' : 'Pulsa "Añadir Candidato" para empezar'}</div>
+      <div class="processes-empty">
+        <div class="processes-empty-icon">📊</div>
+        <div class="processes-empty-text">No hay procesos creados</div>
+        <div class="processes-empty-hint">Escribe un nombre y pulsa "Crear Proceso"</div>
       </div>
     `;
     return;
   }
   
-  const statusConfig = {
-    'added': { label: 'Añadido', icon: '📋', next: 'called', nextLabel: '📞 Citar' },
-    'called': { label: 'Citado', icon: '📞', next: 'interviewed', nextLabel: '🎤 Entrevistar' },
-    'interviewed': { label: 'Entrevistado', icon: '🎤', next: 'selected', nextLabel: '✅ Seleccionar' },
-    'selected': { label: 'Seleccionado', icon: '✅', next: null, nextLabel: null },
-    'rejected': { label: 'Rechazado', icon: '❌', next: null, nextLabel: null }
-  };
+  const fields = [
+    { key: 'added', label: 'Añadidos', icon: '📋', color: '#3b82f6' },
+    { key: 'called', label: 'Citados', icon: '📞', color: '#f59e0b' },
+    { key: 'interviewed', label: 'Entrevistados', icon: '🎤', color: '#8b5cf6' },
+    { key: 'selected', label: 'Seleccionados', icon: '✅', color: '#10b981' }
+  ];
   
-  const sourceLabels = { web: '🌐 Web', referral: '🤝 Recomendación', linkedin: '💼 LinkedIn', indeed: '📊 Indeed', other: '📌 Otro' };
-  
-  list.innerHTML = filtered.map(cand => {
-    const cfg = statusConfig[cand.status] || statusConfig.added;
-    const source = cand.source ? (sourceLabels[cand.source] || cand.source) : '';
-    const createdDate = cand.created_at ? new Date(cand.created_at).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) : '';
+  list.innerHTML = processes.map(proc => {
+    const total = proc.added || 0;
+    const rate = total > 0 ? Math.round(((proc.selected || 0) / total) * 100) : 0;
+    const createdDate = proc.created_at ? new Date(proc.created_at).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) : '';
     
     return `
-      <div class="candidate-card status-${cand.status}" data-id="${cand.id}">
-        <div class="candidate-card-header">
-          <div class="candidate-name-row">
-            <span class="candidate-status-badge badge-${cand.status}">${cfg.icon} ${cfg.label}</span>
-            <span class="candidate-date">${createdDate}</span>
+      <div class="process-card">
+        <div class="process-card-header">
+          <div class="process-card-title-row">
+            <h4 class="process-card-name">${esc(proc.name)}</h4>
+            <span class="process-card-date">${createdDate}</span>
           </div>
-          <h4 class="candidate-name">${esc(cand.full_name)}</h4>
-          ${cand.position ? `<span class="candidate-position">${esc(cand.position)}</span>` : ''}
+          <div class="process-card-actions-header">
+            <button class="btn-process-edit" data-id="${proc.id}" title="Cambiar nombre">✏️</button>
+            <button class="btn-process-del" data-id="${proc.id}" title="Eliminar">🗑</button>
+          </div>
         </div>
-        <div class="candidate-card-body">
-          ${cand.phone ? `<div class="candidate-detail"><span>📱</span> <a href="tel:${cand.phone}" class="candidate-link">${esc(cand.phone)}</a></div>` : ''}
-          ${cand.email ? `<div class="candidate-detail"><span>📧</span> <a href="mailto:${cand.email}" class="candidate-link">${esc(cand.email)}</a></div>` : ''}
-          ${source ? `<div class="candidate-detail"><span>📌</span> ${source}</div>` : ''}
-          ${cand.notes ? `<div class="candidate-notes">${esc(cand.notes)}</div>` : ''}
+        <div class="process-counters">
+          ${fields.map(f => `
+            <div class="counter-row" style="border-left: 3px solid ${f.color}">
+              <div class="counter-info">
+                <span class="counter-icon">${f.icon}</span>
+                <span class="counter-label">${f.label}</span>
+              </div>
+              <div class="counter-controls">
+                <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="-1" title="Restar">−</button>
+                <span class="counter-value">${proc[f.key] || 0}</span>
+                <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="1" title="Sumar">+</button>
+              </div>
+            </div>
+          `).join('')}
         </div>
-        <div class="candidate-card-actions">
-          ${cfg.next ? `<button class="btn-cand-status" data-id="${cand.id}" data-status="${cfg.next}" title="${cfg.nextLabel}">${cfg.nextLabel}</button>` : ''}
-          ${cand.status !== 'rejected' ? `<button class="btn-cand-status btn-reject" data-id="${cand.id}" data-status="rejected" title="Rechazar">❌</button>` : ''}
-          ${cand.status !== 'added' ? `<button class="btn-cand-status btn-back" data-id="${cand.id}" data-status="${getPreviousStatus(cand.status)}" title="Retroceder estado">◀</button>` : ''}
-          <div class="candidate-card-spacer"></div>
-          <button class="btn-cand-edit" data-id="${cand.id}" title="Editar">✏️</button>
-          <button class="btn-cand-del" data-id="${cand.id}" title="Eliminar">🗑</button>
+        <div class="process-card-footer">
+          <div class="process-rate">
+            <div class="process-rate-bar">
+              <div class="process-rate-fill" style="width:${rate}%"></div>
+            </div>
+            <span class="process-rate-text">Conversión: ${rate}%</span>
+          </div>
         </div>
       </div>
     `;
   }).join('');
-}
-
-function getPreviousStatus(status) {
-  const prev = { called: 'added', interviewed: 'called', selected: 'interviewed', rejected: 'added' };
-  return prev[status] || 'added';
 }
