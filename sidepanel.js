@@ -3083,7 +3083,11 @@ async function handleCreateProcess(e) {
       added: 0,
       called: 0,
       interviewed: 0,
-      selected: 0
+      selected: 0,
+      added_erp: 0,
+      called_erp: 0,
+      interviewed_erp: 0,
+      selected_erp: 0
     };
     
     await processesApi('POST', newProc);
@@ -3224,10 +3228,10 @@ function renderGlobalStats() {
   const filtered = getFilteredProcesses();
   let totalAdded = 0, totalCalled = 0, totalInterviewed = 0, totalSelected = 0;
   filtered.forEach(p => {
-    totalAdded += p.added || 0;
-    totalCalled += p.called || 0;
-    totalInterviewed += p.interviewed || 0;
-    totalSelected += p.selected || 0;
+    totalAdded += (p.added || 0) + (p.added_erp || 0);
+    totalCalled += (p.called || 0) + (p.called_erp || 0);
+    totalInterviewed += (p.interviewed || 0) + (p.interviewed_erp || 0);
+    totalSelected += (p.selected || 0) + (p.selected_erp || 0);
   });
   
   $('gsTotal').textContent = totalAdded;
@@ -3261,9 +3265,17 @@ function renderProcesses() {
     { key: 'selected', label: 'Seleccionados', icon: '✅', color: '#10b981' }
   ];
   
+  const fieldsErp = [
+    { key: 'added_erp', label: 'Base de Datos', icon: '📋', color: '#3b82f6' },
+    { key: 'called_erp', label: 'Citados', icon: '📞', color: '#f59e0b' },
+    { key: 'interviewed_erp', label: 'Entrevistados', icon: '🎤', color: '#8b5cf6' },
+    { key: 'selected_erp', label: 'Seleccionados', icon: '✅', color: '#10b981' }
+  ];
+  
   list.innerHTML = filtered.map(proc => {
-    const total = proc.added || 0;
-    const rate = total > 0 ? Math.round(((proc.selected || 0) / total) * 100) : 0;
+    const total = (proc.added || 0) + (proc.added_erp || 0);
+    const totalSel = (proc.selected || 0) + (proc.selected_erp || 0);
+    const rate = total > 0 ? Math.round((totalSel / total) * 100) : 0;
     const createdDate = proc.created_at ? new Date(proc.created_at).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) : '';
     
     const isOwn = proc.user_id === currentUser.id;
@@ -3289,22 +3301,55 @@ function renderProcesses() {
             <button class="btn-process-del" data-id="${proc.id}" title="Eliminar">🗑</button>` : ''}
           </div>
         </div>
-        <div class="process-counters ${isFinished ? 'finished' : ''}">
-          ${fields.map(f => `
-            <div class="counter-row" style="border-left: 3px solid ${f.color}">
-              <div class="counter-info">
-                <span class="counter-icon">${f.icon}</span>
-                <span class="counter-label">${f.label}</span>
-              </div>
-              <div class="counter-controls">
-                <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="-1" title="Restar">−</button>
-                <span class="counter-value">${proc[f.key] || 0}</span>
-                <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="1" title="Sumar">+</button>
-              </div>
+        <div class="process-channels ${isFinished ? 'finished' : ''}">
+          <div class="process-channel">
+            <div class="channel-header">🌐 Ofertas de Empleo</div>
+            <div class="channel-counters">
+              ${fields.map(f => `
+                <div class="counter-row" style="border-left: 3px solid ${f.color}">
+                  <div class="counter-info">
+                    <span class="counter-icon">${f.icon}</span>
+                    <span class="counter-label">${f.label}</span>
+                  </div>
+                  <div class="counter-controls">
+                    <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="-1" title="Restar">−</button>
+                    <span class="counter-value">${proc[f.key] || 0}</span>
+                    <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="1" title="Sumar">+</button>
+                  </div>
+                </div>
+              `).join('')}
             </div>
-          `).join('')}
+            <div class="channel-rate">
+              <div class="process-rate-bar"><div class="process-rate-fill" style="width:${(proc.added || 0) > 0 ? Math.round(((proc.selected || 0) / (proc.added || 0)) * 100) : 0}%"></div></div>
+              <span class="process-rate-text">${(proc.added || 0) > 0 ? Math.round(((proc.selected || 0) / (proc.added || 0)) * 100) : 0}%</span>
+            </div>
+          </div>
+          <div class="channel-divider"></div>
+          <div class="process-channel">
+            <div class="channel-header">🏢 ERP Interna</div>
+            <div class="channel-counters">
+              ${fieldsErp.map(f => `
+                <div class="counter-row" style="border-left: 3px solid ${f.color}">
+                  <div class="counter-info">
+                    <span class="counter-icon">${f.icon}</span>
+                    <span class="counter-label">${f.label}</span>
+                  </div>
+                  <div class="counter-controls">
+                    <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="-1" title="Restar">−</button>
+                    <span class="counter-value">${proc[f.key] || 0}</span>
+                    <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="1" title="Sumar">+</button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+            <div class="channel-rate">
+              <div class="process-rate-bar"><div class="process-rate-fill" style="width:${(proc.added_erp || 0) > 0 ? Math.round(((proc.selected_erp || 0) / (proc.added_erp || 0)) * 100) : 0}%"></div></div>
+              <span class="process-rate-text">${(proc.added_erp || 0) > 0 ? Math.round(((proc.selected_erp || 0) / (proc.added_erp || 0)) * 100) : 0}%</span>
+            </div>
+          </div>
         </div>
         <div class="process-card-footer">
+          <span class="footer-total">Total Base de Datos: ${total} | Seleccionados: ${totalSel}</span>
           <div class="process-rate">
             <div class="process-rate-bar">
               <div class="process-rate-fill" style="width:${rate}%"></div>
