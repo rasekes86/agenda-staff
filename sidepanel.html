@@ -102,7 +102,7 @@
             <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
           </svg>
         </button>
-        <button class="btn-candidates" id="btnCandidates" title="Gestión de Candidatos">
+        <button class="btn-candidates" id="btnCandidates" title="Control de Procesos">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
             <circle cx="9" cy="7" r="4"></circle>
@@ -527,142 +527,59 @@
         </div>
       </div>
 
-      <!-- Candidates Modal -->
-      <div class="candidates-modal" id="candidatesModal">
-        <div class="candidates-modal-header">
-          <h3>👥 Gestión de Candidatos</h3>
-          <button class="candidates-modal-close" id="closeCandidatesModal">&times;</button>
+      <!-- Processes Modal -->
+      <div class="processes-modal" id="processesModal">
+        <div class="processes-modal-header">
+          <h3>📊 Control de Procesos</h3>
+          <button class="processes-modal-close" id="closeProcessesModal">&times;</button>
         </div>
-        <div class="candidates-modal-content">
-          <!-- Funnel Stats -->
-          <div class="candidates-stats" id="candidatesStats">
-            <div class="stat-card stat-added">
-              <div class="stat-icon">📋</div>
-              <div class="stat-info">
-                <span class="stat-number" id="statAdded">0</span>
-                <span class="stat-label">Añadidos</span>
-              </div>
+        <div class="processes-modal-content">
+          <!-- Global Stats -->
+          <div class="processes-global-stats" id="processesGlobalStats">
+            <div class="gstat-card">
+              <span class="gstat-number" id="gsTotal">0</span>
+              <span class="gstat-label">Añadidos</span>
             </div>
-            <div class="stat-card stat-called">
-              <div class="stat-icon">📞</div>
-              <div class="stat-info">
-                <span class="stat-number" id="statCalled">0</span>
-                <span class="stat-label">Citados</span>
-              </div>
+            <div class="gstat-card">
+              <span class="gstat-number" id="gsCalled">0</span>
+              <span class="gstat-label">Citados</span>
             </div>
-            <div class="stat-card stat-interviewed">
-              <div class="stat-icon">🎤</div>
-              <div class="stat-info">
-                <span class="stat-number" id="statInterviewed">0</span>
-                <span class="stat-label">Entrevistados</span>
-              </div>
+            <div class="gstat-card">
+              <span class="gstat-number" id="gsInterviewed">0</span>
+              <span class="gstat-label">Entrevistados</span>
             </div>
-            <div class="stat-card stat-selected">
-              <div class="stat-icon">✅</div>
-              <div class="stat-info">
-                <span class="stat-number" id="statSelected">0</span>
-                <span class="stat-label">Seleccionados</span>
-              </div>
+            <div class="gstat-card">
+              <span class="gstat-number" id="gsSelected">0</span>
+              <span class="gstat-label">Seleccionados</span>
             </div>
-            <div class="stat-card stat-rejected">
-              <div class="stat-icon">❌</div>
-              <div class="stat-info">
-                <span class="stat-number" id="statRejected">0</span>
-                <span class="stat-label">Rechazados</span>
-              </div>
+            <div class="gstat-card gstat-rate">
+              <span class="gstat-number" id="gsRate">0%</span>
+              <span class="gstat-label">Conversión</span>
             </div>
           </div>
           
-          <!-- Conversion rate bar -->
-          <div class="candidates-conversion" id="candidatesConversion">
-            <div class="conversion-bar">
-              <div class="conversion-fill" id="conversionFill" style="width:0%"></div>
-            </div>
-            <span class="conversion-text" id="conversionText">Tasa de conversión: 0%</span>
-          </div>
-
-          <!-- Toolbar -->
-          <div class="candidates-toolbar">
-            <button class="btn-add-candidate" id="btnAddCandidate">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="12" y1="5" x2="12" y2="19"></line>
-                <line x1="5" y1="12" x2="19" y2="12"></line>
-              </svg>
-              Añadir Candidato
-            </button>
-            <input type="text" class="candidates-search" id="candidateSearch" placeholder="🔍 Buscar candidato...">
-            <div class="candidates-filters" id="candidatesFilters">
-              <button class="filter-btn active" data-filter="all">Todos</button>
-              <button class="filter-btn" data-filter="added">📋 Añadidos</button>
-              <button class="filter-btn" data-filter="called">📞 Citados</button>
-              <button class="filter-btn" data-filter="interviewed">🎤 Entrev.</button>
-              <button class="filter-btn" data-filter="selected">✅ Selec.</button>
-              <button class="filter-btn" data-filter="rejected">❌ Rechaz.</button>
-            </div>
-          </div>
-
-          <!-- Candidates List -->
-          <div class="candidates-list" id="candidatesList">
-            <div class="candidates-empty">
-              <div class="candidates-empty-icon">👥</div>
-              <div class="candidates-empty-text">No hay candidatos registrados</div>
-              <div class="candidates-empty-hint">Pulsa "Añadir Candidato" para empezar</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Candidate Form Modal -->
-      <div class="candidate-form-overlay" id="candidateFormOverlay">
-        <div class="candidate-form-modal">
-          <div class="candidate-form-header">
-            <h3 id="candidateFormTitle">Nuevo Candidato</h3>
-            <button class="candidate-form-close" id="closeCandidateForm">&times;</button>
-          </div>
-          <form id="candidateForm">
-            <div class="form-group">
-              <label>Nombre completo *</label>
-              <input type="text" id="candName" placeholder="Nombre y apellidos" required>
-            </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label>Teléfono</label>
-                <input type="tel" id="candPhone" placeholder="+34 600 000 000">
-              </div>
-              <div class="form-group">
-                <label>Email</label>
-                <input type="email" id="candEmail" placeholder="email@ejemplo.com">
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label>Puesto</label>
-                <input type="text" id="candPosition" placeholder="Ej: Operario, Técnico...">
-              </div>
-              <div class="form-group">
-                <label>Fuente</label>
-                <select id="candSource">
-                  <option value="">Seleccionar...</option>
-                  <option value="web">Web</option>
-                  <option value="referral">Recomendación</option>
-                  <option value="linkedin">LinkedIn</option>
-                  <option value="indeed">Indeed</option>
-                  <option value="other">Otro</option>
-                </select>
-              </div>
-            </div>
-            <div class="form-group">
-              <label>Notas</label>
-              <textarea id="candNotes" rows="3" placeholder="Observaciones sobre el candidato..."></textarea>
-            </div>
-            <div class="candidate-form-actions">
-              <button type="button" class="btn btn-sec" id="btnCancelCandidate">Cancelar</button>
-              <button type="submit" class="btn btn-pri">
-                <span class="btn-text">Guardar Candidato</span>
-                <span class="btn-loader" style="display:none"></span>
+          <!-- Add Process -->
+          <div class="processes-add">
+            <form id="processForm" class="process-form-inline">
+              <input type="text" id="processName" placeholder="Nombre del proceso (Ej: Selección Operarios)" required>
+              <button type="submit" class="btn-add-process">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                Crear Proceso
               </button>
+            </form>
+          </div>
+
+          <!-- Processes List -->
+          <div class="processes-list" id="processesList">
+            <div class="processes-empty">
+              <div class="processes-empty-icon">📊</div>
+              <div class="processes-empty-text">No hay procesos creados</div>
+              <div class="processes-empty-hint">Escribe un nombre y pulsa "Crear Proceso"</div>
             </div>
-          </form>
+          </div>
         </div>
       </div>
 
