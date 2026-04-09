@@ -2281,14 +2281,15 @@ body {
   display: flex;
 }
 
-.process-form-inline {
-  display: flex;
+.process-form-grid {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
   gap: 8px;
   width: 100%;
 }
 
-.process-form-inline input {
-  flex: 1;
+.process-form-grid input {
+  min-width: 0;
   padding: 8px 12px;
   border: 1px solid var(--bor);
   border-radius: var(--rad);
@@ -2351,6 +2352,41 @@ body {
   padding: 10px 12px;
   background: var(--bg2);
   border-bottom: 1px solid var(--bor);
+}
+
+.process-card-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 0 12px 6px;
+}
+
+.process-card-province {
+  font-size: 11px;
+  color: var(--txt2);
+  background: var(--bg3);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.process-card-creator {
+  font-size: 11px;
+  color: var(--txt3);
+}
+
+.process-form-grid select {
+  padding: 8px 10px;
+  border: 1px solid var(--bor);
+  border-radius: var(--rad);
+  background: var(--bg);
+  color: var(--txt);
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+}
+
+.process-form-grid select:focus {
+  border-color: var(--pri);
 }
 
 .process-card-title-row {
