@@ -50,6 +50,7 @@ let selectedElement = null;
 
 // Processes state
 let processes = [];
+let processMonthFilter = 'all';
 
 // DOM
 const $ = id => document.getElementById(id);
@@ -2976,10 +2977,16 @@ function setupProcessesListeners() {
   $('closeProcessesModal').addEventListener('click', closeProcessesModal);
   $('processForm').addEventListener('submit', handleCreateProcess);
   $('processesList').addEventListener('click', handleProcessActions);
+  $('processMonthFilter').addEventListener('change', (e) => {
+    processMonthFilter = e.target.value;
+    renderProcesses();
+    renderGlobalStats();
+  });
 }
 
 function openProcessesModal() {
   $('processesModal').classList.add('show');
+  populateMonthFilter();
   loadProcesses();
 }
 
@@ -3116,11 +3123,17 @@ async function handleProcessActions(e) {
     editProcessName(editBtn.dataset.id);
     return;
   }
+  
+  const finalizeBtn = e.target.closest('.btn-process-finalize');
+  if (finalizeBtn) {
+    finalizeProcess(finalizeBtn.dataset.id);
+    return;
+  }
 }
 
 async function updateCounter(id, field, delta) {
   const proc = processes.find(p => p.id === id);
-  if (!proc) return;
+  if (!proc || proc.is_active === false) return;
   
   const newVal = Math.max(0, (proc[field] || 0) + delta);
   
@@ -3170,9 +3183,47 @@ async function editProcessName(id) {
   }
 }
 
-function renderGlobalStats() {
-  let totalAdded = 0, totalCalled = 0, totalInterviewed = 0, totalSelected = 0;
+function getFilteredProcesses() {
+  if (processMonthFilter === 'all') return processes;
+  return processes.filter(p => {
+    if (!p.created_at) return false;
+    const d = new Date(p.created_at);
+    const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    return key === processMonthFilter;
+  });
+}
+
+function populateMonthFilter() {
+  const select = $('processMonthFilter');
+  const months = new Map();
   processes.forEach(p => {
+    if (!p.created_at) return;
+    const d = new Date(p.created_at);
+    const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    if (!months.has(key)) {
+      const label = d.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+      months.set(key, label.charAt(0).toUpperCase() + label.slice(1));
+    }
+  });
+  
+  const currentVal = select.value;
+  select.innerHTML = '<option value="all">Todos los meses</option>';
+  
+  const sortedKeys = [...months.keys()].sort().reverse();
+  sortedKeys.forEach(key => {
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = months.get(key);
+    select.appendChild(opt);
+  });
+  
+  select.value = currentVal || 'all';
+}
+
+function renderGlobalStats() {
+  const filtered = getFilteredProcesses();
+  let totalAdded = 0, totalCalled = 0, totalInterviewed = 0, totalSelected = 0;
+  filtered.forEach(p => {
     totalAdded += p.added || 0;
     totalCalled += p.called || 0;
     totalInterviewed += p.interviewed || 0;
@@ -3190,26 +3241,27 @@ function renderGlobalStats() {
 
 function renderProcesses() {
   const list = $('processesList');
+  const filtered = getFilteredProcesses();
   
-  if (processes.length === 0) {
+  if (filtered.length === 0) {
     list.innerHTML = `
       <div class="processes-empty">
         <div class="processes-empty-icon">📊</div>
-        <div class="processes-empty-text">No hay procesos creados</div>
-        <div class="processes-empty-hint">Escribe un nombre y pulsa "Crear Proceso"</div>
+        <div class="processes-empty-text">${processMonthFilter === 'all' ? 'No hay procesos creados' : 'Sin procesos este mes'}</div>
+        <div class="processes-empty-hint">Escribe un nombre y pulsa "Crear"</div>
       </div>
     `;
     return;
   }
   
   const fields = [
-    { key: 'added', label: 'Añadidos', icon: '📋', color: '#3b82f6' },
+    { key: 'added', label: 'Base de Datos', icon: '📋', color: '#3b82f6' },
     { key: 'called', label: 'Citados', icon: '📞', color: '#f59e0b' },
     { key: 'interviewed', label: 'Entrevistados', icon: '🎤', color: '#8b5cf6' },
     { key: 'selected', label: 'Seleccionados', icon: '✅', color: '#10b981' }
   ];
   
-  list.innerHTML = processes.map(proc => {
+  list.innerHTML = filtered.map(proc => {
     const total = proc.added || 0;
     const rate = total > 0 ? Math.round(((proc.selected || 0) / total) * 100) : 0;
     const createdDate = proc.created_at ? new Date(proc.created_at).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) : '';
@@ -3217,9 +3269,10 @@ function renderProcesses() {
     const isOwn = proc.user_id === currentUser.id;
     const creatorName = proc.user_name || 'Usuario';
     const province = proc.province || '';
+    const isFinished = proc.is_active === false;
     
     return `
-      <div class="process-card">
+      <div class="process-card ${isFinished ? 'is-finished' : ''}">
         <div class="process-card-header">
           <div class="process-card-title-row">
             <h4 class="process-card-name">${esc(proc.name)}</h4>
@@ -3230,11 +3283,13 @@ function renderProcesses() {
             <span class="process-card-creator">👤 ${esc(creatorName)}</span>
           </div>
           <div class="process-card-actions-header">
+            ${isOwn && !isFinished ? `<button class="btn-process-finalize" data-id="${proc.id}" title="Finalizar proceso">🏁 Finalizar</button>` : ''}
+            ${isFinished ? `<span class="process-finished-badge">🏁 Finalizado</span>` : ''}
             ${isOwn ? `<button class="btn-process-edit" data-id="${proc.id}" title="Cambiar nombre">✏️</button>
             <button class="btn-process-del" data-id="${proc.id}" title="Eliminar">🗑</button>` : ''}
           </div>
         </div>
-        <div class="process-counters">
+        <div class="process-counters ${isFinished ? 'finished' : ''}">
           ${fields.map(f => `
             <div class="counter-row" style="border-left: 3px solid ${f.color}">
               <div class="counter-info">
@@ -3260,4 +3315,21 @@ function renderProcesses() {
       </div>
     `;
   }).join('');
+}
+
+async function finalizeProcess(id) {
+  const proc = processes.find(p => p.id === id);
+  if (!proc) return;
+  if (!confirm(`¿Finalizar "${proc.name}"? Los contadores quedarán bloqueados.`)) return;
+  
+  try {
+    await processesApi('PATCH', { is_active: false }, `?id=eq.${id}`);
+    proc.is_active = false;
+    renderProcesses();
+    renderGlobalStats();
+    showToast('Proceso finalizado');
+  } catch (err) {
+    console.error('Error finalizing:', err);
+    showToast('Error al finalizar');
+  }
 }
