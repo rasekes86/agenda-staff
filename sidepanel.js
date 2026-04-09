@@ -48,6 +48,12 @@ let editorScale = 1;
 let editorCanvas = null;
 let selectedElement = null;
 
+// Candidates state
+let candidates = [];
+let candidateFilter = 'all';
+let candidateSearch = '';
+let editingCandidateId = null;
+
 // DOM
 const $ = id => document.getElementById(id);
 const daysList = $('daysList');
@@ -550,6 +556,9 @@ function setupListeners() {
   
   // Signatures Manager
   setupSignatureListeners();
+  
+  // Candidates Manager
+  setupCandidatesListeners();
   
   // Drag events
   daysList.addEventListener('dragstart', handleDragStart);
@@ -2959,4 +2968,393 @@ async function deleteSignature(id) {
     console.error('Delete error:', err);
     showToast('Error al eliminar la firma');
   }
+}
+
+// ============================================
+// CANDIDATES MODULE
+// ============================================
+
+function setupCandidatesListeners() {
+  // Open/Close candidates modal
+  $('btnCandidates').addEventListener('click', openCandidatesModal);
+  $('closeCandidatesModal').addEventListener('click', closeCandidatesModal);
+  
+  // Add candidate
+  $('btnAddCandidate').addEventListener('click', () => openCandidateForm());
+  
+  // Close form
+  $('closeCandidateForm').addEventListener('click', closeCandidateForm);
+  $('btnCancelCandidate').addEventListener('click', closeCandidateForm);
+  $('candidateFormOverlay').addEventListener('click', (e) => {
+    if (e.target === $('candidateFormOverlay')) closeCandidateForm();
+  });
+  
+  // Form submit
+  $('candidateForm').addEventListener('submit', handleCandidateSubmit);
+  
+  // Search
+  $('candidateSearch').addEventListener('input', (e) => {
+    candidateSearch = e.target.value.toLowerCase();
+    renderCandidates();
+  });
+  
+  // Filter buttons
+  $('candidatesFilters').addEventListener('click', (e) => {
+    const btn = e.target.closest('.filter-btn');
+    if (!btn) return;
+    
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    candidateFilter = btn.dataset.filter;
+    renderCandidates();
+  });
+  
+  // Delegation for candidate actions
+  $('candidatesList').addEventListener('click', handleCandidateActions);
+}
+
+function openCandidatesModal() {
+  $('candidatesModal').classList.add('show');
+  loadCandidates();
+}
+
+function closeCandidatesModal() {
+  $('candidatesModal').classList.remove('show');
+}
+
+function openCandidateForm(id = null) {
+  editingCandidateId = id;
+  
+  if (id) {
+    const cand = candidates.find(c => c.id === id);
+    if (cand) {
+      $('candidateFormTitle').textContent = 'Editar Candidato';
+      $('candName').value = cand.full_name || '';
+      $('candPhone').value = cand.phone || '';
+      $('candEmail').value = cand.email || '';
+      $('candPosition').value = cand.position || '';
+      $('candSource').value = cand.source || '';
+      $('candNotes').value = cand.notes || '';
+    }
+  } else {
+    $('candidateFormTitle').textContent = 'Nuevo Candidato';
+    $('candName').value = '';
+    $('candPhone').value = '';
+    $('candEmail').value = '';
+    $('candPosition').value = '';
+    $('candSource').value = '';
+    $('candNotes').value = '';
+  }
+  
+  $('candidateFormOverlay').classList.add('show');
+  $('candName').focus();
+}
+
+function closeCandidateForm() {
+  $('candidateFormOverlay').classList.remove('show');
+  editingCandidateId = null;
+}
+
+async function handleCandidateActions(e) {
+  // Status change buttons
+  const statusBtn = e.target.closest('.btn-cand-status');
+  if (statusBtn) {
+    const id = statusBtn.dataset.id;
+    const newStatus = statusBtn.dataset.status;
+    await changeCandidateStatus(id, newStatus);
+    return;
+  }
+  
+  // Edit button
+  const editBtn = e.target.closest('.btn-cand-edit');
+  if (editBtn) {
+    openCandidateForm(editBtn.dataset.id);
+    return;
+  }
+  
+  // Delete button
+  const delBtn = e.target.closest('.btn-cand-del');
+  if (delBtn) {
+    deleteCandidate(delBtn.dataset.id);
+    return;
+  }
+}
+
+async function loadCandidates() {
+  if (!session || !currentUser) return;
+  
+  try {
+    const query = `?select=*&user_id=eq.${currentUser.id}&order=created_at.desc`;
+    const data = await candidatesApi('GET', null, query);
+    candidates = data || [];
+    renderCandidates();
+    renderCandidateStats();
+  } catch (err) {
+    console.error('Error loading candidates:', err);
+    showToast('Error al cargar candidatos');
+  }
+}
+
+async function candidatesApi(method, body, query = '') {
+  if (!session || !session.access_token) {
+    const stored = await chrome.storage.local.get(['session']);
+    if (stored.session && stored.session.access_token) {
+      session = stored.session;
+    } else {
+      throw new Error('No hay sesión activa');
+    }
+  }
+  
+  const url = `${SUPABASE_URL}/rest/v1/candidates${query}`;
+  const opts = {
+    method,
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation'
+    }
+  };
+  if (body) opts.body = JSON.stringify(body);
+  
+  const res = await fetch(url, opts);
+  
+  if (!res.ok) {
+    const errText = await res.text();
+    if (res.status === 401 || res.status === 403) {
+      if (session.refresh_token) {
+        const refreshed = await refreshSession(session.refresh_token);
+        if (refreshed) {
+          const newStored = await chrome.storage.local.get(['session']);
+          session = newStored.session;
+          opts.headers.Authorization = `Bearer ${session.access_token}`;
+          const retryRes = await fetch(url, opts);
+          if (retryRes.ok) {
+            if (method === 'DELETE') return {};
+            return retryRes.json();
+          }
+        }
+      }
+      throw new Error('Sesión expirada');
+    }
+    throw new Error(errText || `Error ${res.status}`);
+  }
+  if (method === 'DELETE') return {};
+  return res.json();
+}
+
+async function handleCandidateSubmit(e) {
+  e.preventDefault();
+  
+  const fullName = $('candName').value.trim();
+  const phone = $('candPhone').value.trim();
+  const email = $('candEmail').value.trim();
+  const position = $('candPosition').value.trim();
+  const source = $('candSource').value;
+  const notes = $('candNotes').value.trim();
+  
+  if (!fullName) {
+    showToast('El nombre es obligatorio');
+    return;
+  }
+  
+  const btn = $('candidateForm').querySelector('.btn-pri');
+  btn.disabled = true;
+  btn.querySelector('.btn-text').textContent = 'Guardando...';
+  btn.querySelector('.btn-loader').style.display = 'block';
+  
+  try {
+    if (editingCandidateId) {
+      // Update
+      await candidatesApi('PATCH', {
+        full_name: fullName,
+        phone: phone || null,
+        email: email || null,
+        position: position || null,
+        source: source || null,
+        notes: notes || null
+      }, `?id=eq.${editingCandidateId}`);
+      
+      const idx = candidates.findIndex(c => c.id === editingCandidateId);
+      if (idx !== -1) {
+        candidates[idx] = { ...candidates[idx], full_name: fullName, phone, email, position, source, notes };
+      }
+      
+      showToast('Candidato actualizado');
+    } else {
+      // Create
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+      const newCand = {
+        id,
+        user_id: currentUser.id,
+        full_name: fullName,
+        phone: phone || null,
+        email: email || null,
+        position: position || null,
+        source: source || null,
+        notes: notes || null,
+        status: 'added'
+      };
+      
+      await candidatesApi('POST', newCand);
+      candidates.unshift(newCand);
+      
+      showToast('Candidato añadido');
+    }
+    
+    closeCandidateForm();
+    renderCandidates();
+    renderCandidateStats();
+  } catch (err) {
+    console.error('Error saving candidate:', err);
+    showToast('Error: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.querySelector('.btn-text').textContent = 'Guardar Candidato';
+    btn.querySelector('.btn-loader').style.display = 'none';
+  }
+}
+
+async function changeCandidateStatus(id, newStatus) {
+  try {
+    await candidatesApi('PATCH', { status: newStatus }, `?id=eq.${id}`);
+    
+    const idx = candidates.findIndex(c => c.id === id);
+    if (idx !== -1) {
+      candidates[idx].status = newStatus;
+    }
+    
+    renderCandidates();
+    renderCandidateStats();
+    
+    const statusNames = {
+      'added': 'Añadido',
+      'called': 'Citado',
+      'interviewed': 'Entrevistado',
+      'selected': 'Seleccionado',
+      'rejected': 'Rechazado'
+    };
+    showToast(`Estado: ${statusNames[newStatus]}`);
+  } catch (err) {
+    console.error('Error changing status:', err);
+    showToast('Error al cambiar estado');
+  }
+}
+
+async function deleteCandidate(id) {
+  const cand = candidates.find(c => c.id === id);
+  if (!cand) return;
+  
+  if (!confirm(`¿Eliminar a "${cand.full_name}"?`)) return;
+  
+  try {
+    await candidatesApi('DELETE', null, `?id=eq.${id}`);
+    candidates = candidates.filter(c => c.id !== id);
+    renderCandidates();
+    renderCandidateStats();
+    showToast('Candidato eliminado');
+  } catch (err) {
+    console.error('Error deleting candidate:', err);
+    showToast('Error al eliminar');
+  }
+}
+
+function renderCandidateStats() {
+  const counts = { added: 0, called: 0, interviewed: 0, selected: 0, rejected: 0 };
+  candidates.forEach(c => {
+    if (counts.hasOwnProperty(c.status)) counts[c.status]++;
+  });
+  
+  $('statAdded').textContent = counts.added;
+  $('statCalled').textContent = counts.called;
+  $('statInterviewed').textContent = counts.interviewed;
+  $('statSelected').textContent = counts.selected;
+  $('statRejected').textContent = counts.rejected;
+  
+  // Conversion rate: selected / total (excluding rejected)
+  const total = candidates.filter(c => c.status !== 'rejected').length;
+  const conversionRate = total > 0 ? Math.round((counts.selected / total) * 100) : 0;
+  
+  $('conversionFill').style.width = conversionRate + '%';
+  $('conversionText').textContent = `Tasa de conversión: ${conversionRate}% (${counts.selected} de ${total})`;
+}
+
+function renderCandidates() {
+  const list = $('candidatesList');
+  
+  // Filter candidates
+  let filtered = candidates;
+  
+  if (candidateFilter !== 'all') {
+    filtered = filtered.filter(c => c.status === candidateFilter);
+  }
+  
+  if (candidateSearch) {
+    filtered = filtered.filter(c =>
+      (c.full_name || '').toLowerCase().includes(candidateSearch) ||
+      (c.email || '').toLowerCase().includes(candidateSearch) ||
+      (c.phone || '').toLowerCase().includes(candidateSearch) ||
+      (c.position || '').toLowerCase().includes(candidateSearch)
+    );
+  }
+  
+  if (filtered.length === 0) {
+    const isSearching = candidateSearch || candidateFilter !== 'all';
+    list.innerHTML = `
+      <div class="candidates-empty">
+        <div class="candidates-empty-icon">${isSearching ? '🔍' : '👥'}</div>
+        <div class="candidates-empty-text">${isSearching ? 'No se encontraron resultados' : 'No hay candidatos registrados'}</div>
+        <div class="candidates-empty-hint">${isSearching ? 'Prueba con otros filtros' : 'Pulsa "Añadir Candidato" para empezar'}</div>
+      </div>
+    `;
+    return;
+  }
+  
+  const statusConfig = {
+    'added': { label: 'Añadido', icon: '📋', next: 'called', nextLabel: '📞 Citar' },
+    'called': { label: 'Citado', icon: '📞', next: 'interviewed', nextLabel: '🎤 Entrevistar' },
+    'interviewed': { label: 'Entrevistado', icon: '🎤', next: 'selected', nextLabel: '✅ Seleccionar' },
+    'selected': { label: 'Seleccionado', icon: '✅', next: null, nextLabel: null },
+    'rejected': { label: 'Rechazado', icon: '❌', next: null, nextLabel: null }
+  };
+  
+  const sourceLabels = { web: '🌐 Web', referral: '🤝 Recomendación', linkedin: '💼 LinkedIn', indeed: '📊 Indeed', other: '📌 Otro' };
+  
+  list.innerHTML = filtered.map(cand => {
+    const cfg = statusConfig[cand.status] || statusConfig.added;
+    const source = cand.source ? (sourceLabels[cand.source] || cand.source) : '';
+    const createdDate = cand.created_at ? new Date(cand.created_at).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) : '';
+    
+    return `
+      <div class="candidate-card status-${cand.status}" data-id="${cand.id}">
+        <div class="candidate-card-header">
+          <div class="candidate-name-row">
+            <span class="candidate-status-badge badge-${cand.status}">${cfg.icon} ${cfg.label}</span>
+            <span class="candidate-date">${createdDate}</span>
+          </div>
+          <h4 class="candidate-name">${esc(cand.full_name)}</h4>
+          ${cand.position ? `<span class="candidate-position">${esc(cand.position)}</span>` : ''}
+        </div>
+        <div class="candidate-card-body">
+          ${cand.phone ? `<div class="candidate-detail"><span>📱</span> <a href="tel:${cand.phone}" class="candidate-link">${esc(cand.phone)}</a></div>` : ''}
+          ${cand.email ? `<div class="candidate-detail"><span>📧</span> <a href="mailto:${cand.email}" class="candidate-link">${esc(cand.email)}</a></div>` : ''}
+          ${source ? `<div class="candidate-detail"><span>📌</span> ${source}</div>` : ''}
+          ${cand.notes ? `<div class="candidate-notes">${esc(cand.notes)}</div>` : ''}
+        </div>
+        <div class="candidate-card-actions">
+          ${cfg.next ? `<button class="btn-cand-status" data-id="${cand.id}" data-status="${cfg.next}" title="${cfg.nextLabel}">${cfg.nextLabel}</button>` : ''}
+          ${cand.status !== 'rejected' ? `<button class="btn-cand-status btn-reject" data-id="${cand.id}" data-status="rejected" title="Rechazar">❌</button>` : ''}
+          ${cand.status !== 'added' ? `<button class="btn-cand-status btn-back" data-id="${cand.id}" data-status="${getPreviousStatus(cand.status)}" title="Retroceder estado">◀</button>` : ''}
+          <div class="candidate-card-spacer"></div>
+          <button class="btn-cand-edit" data-id="${cand.id}" title="Editar">✏️</button>
+          <button class="btn-cand-del" data-id="${cand.id}" title="Eliminar">🗑</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function getPreviousStatus(status) {
+  const prev = { called: 'added', interviewed: 'called', selected: 'interviewed', rejected: 'added' };
+  return prev[status] || 'added';
 }
