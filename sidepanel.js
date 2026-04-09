@@ -3341,30 +3341,8 @@ function renderProcesses() {
     const province = proc.province || '';
     const isFinished = proc.is_active === false;
     
-    // In finalized tab, show counters as read-only (no +/- buttons)
-    const counterHtml = isFinished ? `
-                <div class="counter-row" style="border-left: 3px solid ${f.color}">
-                  <div class="counter-info">
-                    <span class="counter-icon">${f.icon}</span>
-                    <span class="counter-label">${f.label}</span>
-                  </div>
-                  <div class="counter-controls counter-locked">
-                    <span class="counter-value">${proc[f.key] || 0}</span>
-                  </div>
-                </div>` : `
-                <div class="counter-row" style="border-left: 3px solid ${f.color}">
-                  <div class="counter-info">
-                    <span class="counter-icon">${f.icon}</span>
-                    <span class="counter-label">${f.label}</span>
-                  </div>
-                  <div class="counter-controls">
-                    <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="-1" title="Restar">−</button>
-                    <span class="counter-value">${proc[f.key] || 0}</span>
-                    <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="1" title="Sumar">+</button>
-                  </div>
-                </div>`;
-
-    const counterErpHtml = isFinished ? `
+    // Helper to render a counter row (used inside .map(f => ...))
+    const renderCounter = (f) => isFinished ? `
                 <div class="counter-row" style="border-left: 3px solid ${f.color}">
                   <div class="counter-info">
                     <span class="counter-icon">${f.icon}</span>
@@ -3408,7 +3386,7 @@ function renderProcesses() {
           <div class="process-channel">
             <div class="channel-header">🌐 Ofertas de Empleo</div>
             <div class="channel-counters">
-              ${fields.map(f => counterHtml).join('')}
+              ${fields.map(f => renderCounter(f)).join('')}
             </div>
             <div class="channel-rate">
               <div class="process-rate-bar"><div class="process-rate-fill" style="width:${(proc.added || 0) > 0 ? Math.round(((proc.selected || 0) / (proc.added || 0)) * 100) : 0}%"></div></div>
@@ -3419,7 +3397,7 @@ function renderProcesses() {
           <div class="process-channel">
             <div class="channel-header">🏢 ERP Interna</div>
             <div class="channel-counters">
-              ${fieldsErp.map(f => counterErpHtml).join('')}
+              ${fieldsErp.map(f => renderCounter(f)).join('')}
             </div>
             <div class="channel-rate">
               <div class="process-rate-bar"><div class="process-rate-fill" style="width:${(proc.added_erp || 0) > 0 ? Math.round(((proc.selected_erp || 0) / (proc.added_erp || 0)) * 100) : 0}%"></div></div>
