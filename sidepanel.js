@@ -51,6 +51,16 @@ let selectedElement = null;
 // Processes state
 let processes = [];
 let processMonthFilter = 'all';
+let processDelegationFilter = 'all';
+let processTabFilter = 'active'; // 'active' or 'finalized'
+
+const DELEGATIONS = {
+  'Madrid': ['Madrid'],
+  'Valencia': ['Alicante', 'Castellón', 'Valencia'],
+  'Barcelona': ['Barcelona', 'Girona', 'Lleida', 'Tarragona'],
+  'Sevilla': ['Almería', 'Cádiz', 'Córdoba', 'Granada', 'Huelva', 'Jaén', 'Málaga', 'Sevilla'],
+  'Nacional': [] // All other provinces
+};
 
 // DOM
 const $ = id => document.getElementById(id);
@@ -2982,6 +2992,20 @@ function setupProcessesListeners() {
     renderProcesses();
     renderGlobalStats();
   });
+  $('processDelegationFilter').addEventListener('change', (e) => {
+    processDelegationFilter = e.target.value;
+    renderProcesses();
+    renderGlobalStats();
+  });
+  document.querySelectorAll('.process-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.process-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      processTabFilter = tab.dataset.tab;
+      renderProcesses();
+      renderGlobalStats();
+    });
+  });
 }
 
 function openProcessesModal() {
@@ -3187,14 +3211,44 @@ async function editProcessName(id) {
   }
 }
 
+function getDelegationForProvince(province) {
+  if (!province) return 'Nacional';
+  for (const [delegation, provinces] of Object.entries(DELEGATIONS)) {
+    if (delegation === 'Nacional') continue;
+    if (provinces.includes(province)) return delegation;
+  }
+  return 'Nacional';
+}
+
 function getFilteredProcesses() {
-  if (processMonthFilter === 'all') return processes;
-  return processes.filter(p => {
-    if (!p.created_at) return false;
-    const d = new Date(p.created_at);
-    const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
-    return key === processMonthFilter;
-  });
+  let filtered = processes;
+
+  // Filter by month
+  if (processMonthFilter !== 'all') {
+    filtered = filtered.filter(p => {
+      if (!p.created_at) return false;
+      const d = new Date(p.created_at);
+      const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+      return key === processMonthFilter;
+    });
+  }
+
+  // Filter by delegation
+  if (processDelegationFilter !== 'all') {
+    filtered = filtered.filter(p => {
+      const procDelegation = getDelegationForProvince(p.province);
+      return procDelegation === processDelegationFilter;
+    });
+  }
+
+  // Filter by tab (active vs finalized)
+  if (processTabFilter === 'active') {
+    filtered = filtered.filter(p => p.is_active !== false);
+  } else {
+    filtered = filtered.filter(p => p.is_active === false);
+  }
+
+  return filtered;
 }
 
 function populateMonthFilter() {
@@ -3246,12 +3300,16 @@ function renderGlobalStats() {
 function renderProcesses() {
   const list = $('processesList');
   const filtered = getFilteredProcesses();
+  const isFinalizedTab = processTabFilter === 'finalized';
   
   if (filtered.length === 0) {
+    const emptyMsg = isFinalizedTab
+      ? 'No hay procesos finalizados'
+      : (processMonthFilter === 'all' ? 'No hay procesos creados' : 'Sin procesos este mes');
     list.innerHTML = `
       <div class="processes-empty">
         <div class="processes-empty-icon">📊</div>
-        <div class="processes-empty-text">${processMonthFilter === 'all' ? 'No hay procesos creados' : 'Sin procesos este mes'}</div>
+        <div class="processes-empty-text">${emptyMsg}</div>
         <div class="processes-empty-hint">Escribe un nombre y pulsa "Crear"</div>
       </div>
     `;
@@ -3283,6 +3341,51 @@ function renderProcesses() {
     const province = proc.province || '';
     const isFinished = proc.is_active === false;
     
+    // In finalized tab, show counters as read-only (no +/- buttons)
+    const counterHtml = isFinished ? `
+                <div class="counter-row" style="border-left: 3px solid ${f.color}">
+                  <div class="counter-info">
+                    <span class="counter-icon">${f.icon}</span>
+                    <span class="counter-label">${f.label}</span>
+                  </div>
+                  <div class="counter-controls counter-locked">
+                    <span class="counter-value">${proc[f.key] || 0}</span>
+                  </div>
+                </div>` : `
+                <div class="counter-row" style="border-left: 3px solid ${f.color}">
+                  <div class="counter-info">
+                    <span class="counter-icon">${f.icon}</span>
+                    <span class="counter-label">${f.label}</span>
+                  </div>
+                  <div class="counter-controls">
+                    <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="-1" title="Restar">−</button>
+                    <span class="counter-value">${proc[f.key] || 0}</span>
+                    <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="1" title="Sumar">+</button>
+                  </div>
+                </div>`;
+
+    const counterErpHtml = isFinished ? `
+                <div class="counter-row" style="border-left: 3px solid ${f.color}">
+                  <div class="counter-info">
+                    <span class="counter-icon">${f.icon}</span>
+                    <span class="counter-label">${f.label}</span>
+                  </div>
+                  <div class="counter-controls counter-locked">
+                    <span class="counter-value">${proc[f.key] || 0}</span>
+                  </div>
+                </div>` : `
+                <div class="counter-row" style="border-left: 3px solid ${f.color}">
+                  <div class="counter-info">
+                    <span class="counter-icon">${f.icon}</span>
+                    <span class="counter-label">${f.label}</span>
+                  </div>
+                  <div class="counter-controls">
+                    <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="-1" title="Restar">−</button>
+                    <span class="counter-value">${proc[f.key] || 0}</span>
+                    <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="1" title="Sumar">+</button>
+                  </div>
+                </div>`;
+
     return `
       <div class="process-card ${isFinished ? 'is-finished' : ''}">
         <div class="process-card-header">
@@ -3305,19 +3408,7 @@ function renderProcesses() {
           <div class="process-channel">
             <div class="channel-header">🌐 Ofertas de Empleo</div>
             <div class="channel-counters">
-              ${fields.map(f => `
-                <div class="counter-row" style="border-left: 3px solid ${f.color}">
-                  <div class="counter-info">
-                    <span class="counter-icon">${f.icon}</span>
-                    <span class="counter-label">${f.label}</span>
-                  </div>
-                  <div class="counter-controls">
-                    <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="-1" title="Restar">−</button>
-                    <span class="counter-value">${proc[f.key] || 0}</span>
-                    <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="1" title="Sumar">+</button>
-                  </div>
-                </div>
-              `).join('')}
+              ${fields.map(f => counterHtml).join('')}
             </div>
             <div class="channel-rate">
               <div class="process-rate-bar"><div class="process-rate-fill" style="width:${(proc.added || 0) > 0 ? Math.round(((proc.selected || 0) / (proc.added || 0)) * 100) : 0}%"></div></div>
@@ -3328,19 +3419,7 @@ function renderProcesses() {
           <div class="process-channel">
             <div class="channel-header">🏢 ERP Interna</div>
             <div class="channel-counters">
-              ${fieldsErp.map(f => `
-                <div class="counter-row" style="border-left: 3px solid ${f.color}">
-                  <div class="counter-info">
-                    <span class="counter-icon">${f.icon}</span>
-                    <span class="counter-label">${f.label}</span>
-                  </div>
-                  <div class="counter-controls">
-                    <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="-1" title="Restar">−</button>
-                    <span class="counter-value">${proc[f.key] || 0}</span>
-                    <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="1" title="Sumar">+</button>
-                  </div>
-                </div>
-              `).join('')}
+              ${fieldsErp.map(f => counterErpHtml).join('')}
             </div>
             <div class="channel-rate">
               <div class="process-rate-bar"><div class="process-rate-fill" style="width:${(proc.added_erp || 0) > 0 ? Math.round(((proc.selected_erp || 0) / (proc.added_erp || 0)) * 100) : 0}%"></div></div>
