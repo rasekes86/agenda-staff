@@ -2275,6 +2275,84 @@ body {
   border-color: var(--pri);
 }
 
+/* Filters container */
+.processes-filters {
+  display: flex;
+  gap: 8px;
+}
+
+.processes-delegation-filter {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg2);
+  border: 1px solid var(--bor);
+  border-radius: var(--rad);
+}
+
+.processes-delegation-filter label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--txt2);
+  white-space: nowrap;
+}
+
+.processes-delegation-filter select {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--bor);
+  border-radius: var(--rad);
+  background: var(--bg);
+  color: var(--txt);
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+}
+
+.processes-delegation-filter select:focus {
+  border-color: var(--pri);
+}
+
+/* Process Tabs (Activos / Finalizados) */
+.processes-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--bg3);
+  padding: 4px;
+  border-radius: var(--rad);
+}
+
+.process-tab {
+  flex: 1;
+  padding: 7px 12px;
+  border: none;
+  background: transparent;
+  color: var(--txt2);
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.process-tab:hover {
+  color: var(--txt);
+}
+
+.process-tab.active {
+  background: var(--bg);
+  color: var(--pri);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+/* Locked counters for finalized processes */
+.counter-locked .counter-value {
+  font-weight: 600;
+  color: var(--txt);
+}
+
 /* Global Stats */
 .processes-global-stats {
   display: flex;
