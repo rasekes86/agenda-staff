@@ -2482,6 +2482,58 @@ body {
   pointer-events: none;
 }
 
+.process-channels {
+  display: grid;
+  grid-template-columns: 1fr 1px 1fr;
+}
+
+.process-channels.finished {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.channel-header {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--txt);
+  padding: 8px 12px 4px;
+  text-align: center;
+  letter-spacing: 0.3px;
+}
+
+.channel-counters {
+  display: flex;
+  flex-direction: column;
+}
+
+.channel-divider {
+  background: var(--bor);
+  width: 1px;
+}
+
+.channel-rate {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 8px;
+  border-top: 1px solid var(--bor);
+}
+
+.channel-rate .process-rate-bar {
+  flex: 1;
+}
+
+.channel-rate .process-rate-text {
+  min-width: 30px;
+  text-align: right;
+}
+
+.footer-total {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--txt3);
+}
+
 .process-card.is-finished {
   opacity: 0.75;
 }
