@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "AGENDA STAFF",
   "version": "6.0.0",
-  "description": "Agenda colaborativa con autenticacion de usuarios, notificaciones y herramientas PDF",
+  "description": "Agenda colaborativa con autenticaci\u00f3n de usuarios, notificaciones, herramientas PDF y control de procesos",
   "permissions": [
     "sidePanel",
     "storage",
