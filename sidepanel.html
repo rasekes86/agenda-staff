@@ -575,6 +575,28 @@
               </select>
             </div>
           </div>
+          <div class="processes-filters">
+            <div class="processes-position-filter">
+              <label>💼 Puesto:</label>
+              <select id="processPositionFilter">
+                <option value="all">Todos</option>
+                <option value="Auxiliar de Seguridad">Auxiliar de Seguridad</option>
+                <option value="Azafat@s">Azafat@s</option>
+                <option value="Conductor">Conductor</option>
+                <option value="Camarero">Camarero</option>
+                <option value="Cocinero">Cocinero</option>
+                <option value="Carga y Descarga">Carga y Descarga</option>
+                <option value="Aux. Audiovisual">Aux. Audiovisual</option>
+                <option value="Limpieza">Limpieza</option>
+                <option value="Oficina">Oficina</option>
+                <option value="Runner">Runner</option>
+              </select>
+            </div>
+            <button class="btn-compact-view" id="btnCompactView" title="Vista comprimida">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect></svg>
+              Compacta
+            </button>
+          </div>
 
           <!-- Tabs: Active / Finalized -->
           <div class="processes-tabs">
@@ -605,11 +627,37 @@
               <span class="gstat-label">Conversión</span>
             </div>
           </div>
+          <!-- Ofertas vs ERP Balance -->
+          <div class="processes-balance-bar">
+            <div class="balance-header">
+              <span class="balance-label-ofertas">🌐 Selec. Ofertas: <strong id="gsSelOfertas">0</strong></span>
+              <span class="balance-label-erp">🏢 Selec. ERP: <strong id="gsSelErp">0</strong></span>
+            </div>
+            <div class="balance-track">
+              <div class="balance-fill-ofertas" id="gsBalanceOfertas" style="width:50%"></div>
+              <div class="balance-fill-erp" id="gsBalanceErp" style="width:50%"></div>
+            </div>
+            <div class="balance-text" id="gsBalanceText">Sin datos</div>
+          </div>
           
           <!-- Add Process -->
           <div class="processes-add">
             <form id="processForm" class="process-form-grid">
               <input type="text" id="processName" placeholder="Nombre del proceso (Ej: Selección Operarios)" required>
+              <select id="processPosition" required>
+                <option value="">Puesto *</option>
+                <option value="Auxiliar de Seguridad">Auxiliar de Seguridad</option>
+                <option value="Azafat@s">Azafat@s</option>
+                <option value="Conductor">Conductor</option>
+                <option value="Camarero">Camarero</option>
+                <option value="Cocinero">Cocinero</option>
+                <option value="Carga y Descarga">Carga y Descarga</option>
+                <option value="Aux. Audiovisual">Aux. Audiovisual</option>
+                <option value="Limpieza">Limpieza</option>
+                <option value="Oficina">Oficina</option>
+                <option value="Runner">Runner</option>
+              </select>
+              <input type="number" id="processObjetivo" placeholder="Objetivo (opcional)" min="0">
               <select id="processProvince" required>
                 <option value="">Provincia *</option>
                 <option value="A Coruña">A Coruña</option><option value="Álava">Álava</option><option value="Albacete">Albacete</option><option value="Alicante">Alicante</option><option value="Almería">Almería</option><option value="Asturias">Asturias</option><option value="Ávila">Ávila</option><option value="Badajoz">Badajoz</option><option value="Barcelona">Barcelona</option><option value="Burgos">Burgos</option><option value="Cáceres">Cáceres</option><option value="Cádiz">Cádiz</option><option value="Cantabria">Cantabria</option><option value="Castellón">Castellón</option><option value="Ceuta">Ceuta</option><option value="Ciudad Real">Ciudad Real</option><option value="Córdoba">Córdoba</option><option value="Cuenca">Cuenca</option><option value="Girona">Girona</option><option value="Granada">Granada</option><option value="Guadalajara">Guadalajara</option><option value="Gipuzkoa">Gipuzkoa</option><option value="Huelva">Huelva</option><option value="Huesca">Huesca</option><option value="Illes Balears">Illes Balears</option><option value="Jaén">Jaén</option><option value="La Rioja">La Rioja</option><option value="Las Palmas">Las Palmas</option><option value="León">León</option><option value="Lleida">Lleida</option><option value="Lugo">Lugo</option><option value="Madrid">Madrid</option><option value="Málaga">Málaga</option><option value="Melilla">Melilla</option><option value="Murcia">Murcia</option><option value="Navarra">Navarra</option><option value="Ourense">Ourense</option><option value="Palencia">Palencia</option><option value="Pontevedra">Pontevedra</option><option value="Salamanca">Salamanca</option><option value="Santa Cruz de Tenerife">Santa Cruz de Tenerife</option><option value="Segovia">Segovia</option><option value="Sevilla">Sevilla</option><option value="Soria">Soria</option><option value="Tarragona">Tarragona</option><option value="Teruel">Teruel</option><option value="Toledo">Toledo</option><option value="Valencia">Valencia</option><option value="Valladolid">Valladolid</option><option value="Bizkaia">Bizkaia</option><option value="Zamora">Zamora</option><option value="Zaragoza">Zaragoza</option>
