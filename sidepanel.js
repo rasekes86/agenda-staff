@@ -3116,6 +3116,7 @@ async function handleCreateProcess(e) {
       return;
     }
     
+    const objetivoVal = parseInt($('processObjetivo').value) || 0;
     const newProc = {
       id,
       user_id: currentUser.id,
@@ -3123,6 +3124,7 @@ async function handleCreateProcess(e) {
       name,
       position,
       province,
+      objetivo: Math.max(0, objetivoVal),
       added: 0,
       called: 0,
       interviewed: 0,
@@ -3139,6 +3141,7 @@ async function handleCreateProcess(e) {
     $('processName').value = '';
     $('processPosition').value = '';
     $('processProvince').value = '';
+    $('processObjetivo').value = '';
     renderProcesses();
     renderGlobalStats();
     showToast('Proceso creado');
@@ -3165,33 +3168,41 @@ async function handleProcessActions(e) {
     const proc = processes.find(p => p.id === counterValue.dataset.id);
     if (!proc || proc.is_active === false) return;
     const field = counterValue.dataset.field;
-    const currentVal = proc[field] || 0;
+    
+    const wrapper = document.createElement('div');
+    wrapper.className = 'counter-sum-wrapper';
+    
+    const plusIcon = document.createElement('span');
+    plusIcon.className = 'counter-sum-icon';
+    plusIcon.textContent = '+';
     
     const input = document.createElement('input');
     input.type = 'number';
     input.min = '0';
-    input.value = currentVal;
-    input.className = 'counter-input';
-    input.style.cssText = 'width:50px;padding:2px 4px;border:1px solid var(--pri);border-radius:4px;font-size:14px;font-weight:700;text-align:center;outline:none;color:var(--txt);background:var(--bg);';
+    input.value = '';
+    input.placeholder = '0';
+    input.className = 'counter-sum-input';
+    
+    wrapper.appendChild(plusIcon);
+    wrapper.appendChild(input);
     
     const saveValue = async () => {
-      const newVal = Math.max(0, parseInt(input.value) || 0);
-      if (newVal !== currentVal) {
-        await updateCounter(id, field, newVal - currentVal);
+      const addVal = Math.max(0, parseInt(input.value) || 0);
+      if (addVal > 0) {
+        await updateCounter(proc.id, field, addVal);
       } else {
-        input.replaceWith(counterValue);
+        wrapper.replaceWith(counterValue);
       }
     };
     
     input.addEventListener('keydown', (ev) => {
       if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
-      if (ev.key === 'Escape') { input.value = currentVal; input.blur(); }
+      if (ev.key === 'Escape') { wrapper.replaceWith(counterValue); }
     });
     input.addEventListener('blur', saveValue);
     
-    counterValue.replaceWith(input);
+    counterValue.replaceWith(wrapper);
     input.focus();
-    input.select();
     return;
   }
   
@@ -3401,32 +3412,11 @@ function renderProcesses() {
     const position = proc.position || '';
     const province = proc.province || '';
     const isFinished = proc.is_active === false;
+    const objetivo = proc.objetivo || 0;
+    const objProgress = objetivo > 0 ? Math.min(100, Math.round((totalSel / objetivo) * 100)) : 0;
     
-    // Helper to render a counter row (used inside .map(f => ...))
+    // Helper to render a counter row
     const renderCounter = (f) => {
-      if (processCompactView) {
-        return isFinished ? `
-                <div class="counter-row compact" style="border-left: 3px solid ${f.color}">
-                  <div class="counter-info">
-                    <span class="counter-icon">${f.icon}</span>
-                    <span class="counter-label">${f.label}</span>
-                  </div>
-                  <div class="counter-controls counter-locked">
-                    <span class="counter-value" data-id="${proc.id}" data-field="${f.key}">${proc[f.key] || 0}</span>
-                  </div>
-                </div>` : `
-                <div class="counter-row compact" style="border-left: 3px solid ${f.color}">
-                  <div class="counter-info">
-                    <span class="counter-icon">${f.icon}</span>
-                    <span class="counter-label">${f.label}</span>
-                  </div>
-                  <div class="counter-controls">
-                    <button class="btn-counter compact" data-id="${proc.id}" data-field="${f.key}" data-delta="-1" title="Restar">−</button>
-                    <span class="counter-value clickable" data-id="${proc.id}" data-field="${f.key}" title="Clic para editar">${proc[f.key] || 0}</span>
-                    <button class="btn-counter compact" data-id="${proc.id}" data-field="${f.key}" data-delta="1" title="Sumar">+</button>
-                  </div>
-                </div>`;
-      }
       return isFinished ? `
                 <div class="counter-row" style="border-left: 3px solid ${f.color}">
                   <div class="counter-info">
@@ -3444,7 +3434,7 @@ function renderProcesses() {
                   </div>
                   <div class="counter-controls">
                     <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="-1" title="Restar">−</button>
-                    <span class="counter-value clickable" data-id="${proc.id}" data-field="${f.key}" title="Clic para editar">${proc[f.key] || 0}</span>
+                    <span class="counter-value clickable" data-id="${proc.id}" data-field="${f.key}" title="Clic para sumar">${proc[f.key] || 0}</span>
                     <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="1" title="Sumar">+</button>
                   </div>
                 </div>`;
@@ -3460,8 +3450,17 @@ function renderProcesses() {
           <div class="process-card-meta">
             ${position ? `<span class="process-card-position">💼 ${esc(position)}</span>` : ''}
             ${province ? `<span class="process-card-province">📍 ${esc(province)}</span>` : ''}
+            ${objetivo > 0 ? `<span class="process-card-objetivo" title="Objetivo: ${objetivo} seleccionados">🎯 ${objetivo}</span>` : ''}
             <span class="process-card-creator">👤 ${esc(creatorName)}</span>
           </div>
+          ${processCompactView ? `
+            <div class="process-card-compact-summary">
+              <span class="compact-track">🌐 ${proc.added||0}/${proc.called||0}/${proc.interviewed||0}/${proc.selected||0}</span>
+              <span class="compact-divider-track">|</span>
+              <span class="compact-track">🏢 ${proc.added_erp||0}/${proc.called_erp||0}/${proc.interviewed_erp||0}/${proc.selected_erp||0}</span>
+              ${objetivo > 0 ? `<span class="compact-divider-track">|</span><span class="compact-track compact-objetivo">🎯 ${totalSel}/${objetivo} (${objProgress}%)</span>` : ''}
+            </div>
+          ` : ''}
           <div class="process-card-actions-header">
             ${isOwn && !isFinished ? `<button class="btn-process-finalize" data-id="${proc.id}" title="Finalizar proceso">🏁 Finalizar</button>` : ''}
             ${isFinished ? `<span class="process-finished-badge">🏁 Finalizado</span>` : ''}
@@ -3469,7 +3468,8 @@ function renderProcesses() {
             <button class="btn-process-del" data-id="${proc.id}" title="Eliminar">🗑</button>` : ''}
           </div>
         </div>
-        <div class="process-channels ${isFinished ? 'finished' : ''} ${processCompactView ? 'compact' : ''}">
+        ${!processCompactView ? `
+        <div class="process-channels ${isFinished ? 'finished' : ''}">
           <div class="process-channel">
             <div class="channel-header">🌐 Ofertas de Empleo</div>
             <div class="channel-counters">
@@ -3492,7 +3492,14 @@ function renderProcesses() {
             </div>
           </div>
         </div>
-        <div class="process-card-footer ${processCompactView ? 'compact' : ''}">
+        <div class="process-card-footer">
+          ${objetivo > 0 ? `
+            <div class="objetivo-section">
+              <span class="objetivo-label">🎯 Objetivo: ${objetivo}</span>
+              <div class="objetivo-bar"><div class="objetivo-fill" style="width:${objProgress}%"></div></div>
+              <span class="objetivo-progress">${totalSel}/${objetivo} (${objProgress}%)</span>
+            </div>
+          ` : ''}
           <span class="footer-total">Total Base de Datos: ${total} | Seleccionados: ${totalSel}</span>
           <div class="process-rate">
             <div class="process-rate-bar">
@@ -3501,6 +3508,7 @@ function renderProcesses() {
             <span class="process-rate-text">Conversión: ${rate}%</span>
           </div>
         </div>
+        ` : ''}
       </div>
     `;
   }).join('');
