@@ -3808,7 +3808,7 @@ function renderProcesses() {
                 </div>`;
     };
 
-    // Compact single-line
+    // Compact single-line: NOMBRE / PUESTO / LUGAR / OBJETIVO
     if (isCollapsed) {
       const objColor = objetivo > 0 ? (objProgress >= 100 ? '#10b981' : (objProgress >= 68 ? '#eab308' : (objProgress >= 34 ? '#f97316' : '#ef4444'))) : 'var(--pri)';
       return `
@@ -3827,7 +3827,7 @@ function renderProcesses() {
               <span class="compact-obj ${objProgress >= 100 ? 'obj-reached' : ''}">${objEmoji} ${totalSel}/${objetivo}</span>
             ` : `<span class="compact-obj-none">Sin objetivo</span>`}
             <span class="compact-sep">/</span>
-            <span class="compact-sel" title="Ofertas: ${selOfertas} | ERP: ${selErp}">✅ ${totalSel}</span>
+            <span class="compact-sel" title="🌐 Ofertas: ${selOfertas} | 🏢 ERP: ${selErp}">✅ ${totalSel}</span>
             <div class="compact-line-actions">
               ${isFinished ? `<span class="process-finished-badge mini">🏁</span>` : ''}
               ${isOwn ? `<button class="btn-process-del btn-process-del-mini" data-id="${proc.id}" title="Eliminar">🗑</button>` : ''}

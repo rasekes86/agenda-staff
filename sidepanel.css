@@ -2558,8 +2558,8 @@ body {
 .process-card-header {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
+  gap: 5px;
+  padding: 7px 10px;
   background: var(--bg2);
   border-bottom: 1px solid var(--bor);
 }
@@ -2672,15 +2672,6 @@ body {
 }
 .btn-process-finalize:hover { background: #10b981; color: white; border-color: #10b981; }
 
-.process-finished-badge {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--txt3);
-  padding: 0;
-  background: none;
-  border-radius: 0;
-}
-
 .process-form-grid select {
   padding: 8px 10px;
   border: 1px solid var(--bor);
@@ -2691,9 +2682,38 @@ body {
   outline: none;
   cursor: pointer;
 }
+.process-form-grid select:focus { border-color: var(--pri); }
 
-.process-form-grid select:focus {
+#processObjetivo {
+  padding: 8px 10px;
+  border: 1px solid var(--bor);
+  border-radius: var(--rad);
+  background: var(--bg);
+  color: var(--txt);
+  font-size: 12px;
+  outline: none;
+}
+
+#processObjetivo:focus {
   border-color: var(--pri);
+}
+
+#processObjetivo::placeholder {
+  color: var(--txt3);
+}
+
+.process-finished-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: #065f46;
+  background: #d1fae5;
+  padding: 2px 10px;
+  border-radius: 10px;
+}
+
+.process-counters.finished {
+  opacity: 0.6;
+  pointer-events: none;
 }
 
 .process-channels {
@@ -2846,8 +2866,9 @@ body {
   white-space: nowrap;
 }
 
+
 /* ============================================
-   POSITION FILTER
+   RESTORED FROM v5.36 - PROCESS FEATURES
    ============================================ */
 
 .processes-filters + .processes-filters {
@@ -3111,6 +3132,29 @@ body {
   color: var(--pri);
 }
 
+.counter-input {
+  width: 50px;
+  padding: 2px 4px;
+  border: 1px solid var(--pri);
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+  outline: none;
+  color: var(--txt);
+  background: var(--bg);
+}
+
+/* Hide number input spinners */
+.counter-input::-webkit-inner-spin-button,
+.counter-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.counter-input[type=number] {
+  -moz-appearance: textfield;
+}
+
 /* ============================================
    COUNTER SUM INPUT
    ============================================ */
@@ -3149,9 +3193,9 @@ body {
 .counter-sum-input::placeholder {
   color: var(--txt3);
   font-weight: 400;
+  font-size: 11px;
 }
 
-/* Hide number input spinners */
 .counter-sum-input::-webkit-inner-spin-button,
 .counter-sum-input::-webkit-outer-spin-button {
   -webkit-appearance: none;
@@ -3162,41 +3206,60 @@ body {
 }
 
 /* ============================================
-   OBJETIVO SECTION
+   OBJETIVO SECTION (FOOTER BAR)
    ============================================ */
 
 .objetivo-section {
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
   margin-bottom: 6px;
 }
 
 .objetivo-label {
   font-size: 11px;
   font-weight: 600;
-  color: var(--txt2);
+  color: #f59e0b;
   white-space: nowrap;
 }
 
 .objetivo-bar {
   flex: 1;
-  height: 6px;
+  height: 8px;
   background: var(--bg3);
-  border-radius: 3px;
+  border-radius: 4px;
   overflow: hidden;
 }
 
 .objetivo-fill {
   height: 100%;
   background: linear-gradient(90deg, #f59e0b, #10b981);
-  border-radius: 3px;
-  transition: width 0.4s ease;
+  border-radius: 4px;
+  transition: width 0.3s;
 }
 
 .objetivo-progress {
   font-size: 10px;
+  color: var(--txt2);
   font-weight: 600;
-  color: var(--txt3);
   white-space: nowrap;
+}
+
+#processObjetivo {
+  padding: 8px 10px;
+  border: 1px solid var(--bor);
+  border-radius: var(--rad);
+  background: var(--bg);
+  color: var(--txt);
+  font-size: 12px;
+  outline: none;
+}
+
+#processObjetivo:focus {
+  border-color: var(--pri);
+}
+
+#processObjetivo::placeholder {
+  color: var(--txt3);
 }
