@@ -2718,3 +2718,200 @@ body {
   color: var(--txt2);
   white-space: nowrap;
 }
+
+/* ============================================
+   POSITION FILTER
+   ============================================ */
+
+.processes-filters + .processes-filters {
+  margin-top: 0;
+}
+
+.processes-position-filter {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg2);
+  border: 1px solid var(--bor);
+  border-radius: var(--rad);
+}
+
+.processes-position-filter label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--txt2);
+  white-space: nowrap;
+}
+
+.processes-position-filter select {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--bor);
+  border-radius: var(--rad);
+  background: var(--bg);
+  color: var(--txt);
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+}
+
+.processes-position-filter select:focus {
+  border-color: var(--pri);
+}
+
+/* ============================================
+   COMPACT VIEW TOGGLE BUTTON
+   ============================================ */
+
+.btn-compact-view {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 12px;
+  border: 1px solid var(--bor);
+  background: var(--bg2);
+  color: var(--txt2);
+  border-radius: var(--rad);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-compact-view:hover {
+  background: var(--bg3);
+  color: var(--txt);
+}
+
+.btn-compact-view.active {
+  background: var(--pri);
+  color: white;
+  border-color: var(--pri);
+}
+
+/* ============================================
+   CLICKABLE COUNTER VALUE
+   ============================================ */
+
+.counter-value.clickable {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 1px 4px;
+  transition: background 0.15s;
+}
+
+.counter-value.clickable:hover {
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--pri);
+}
+
+.counter-input {
+  width: 50px;
+  padding: 2px 4px;
+  border: 1px solid var(--pri);
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+  outline: none;
+  color: var(--txt);
+  background: var(--bg);
+}
+
+/* Hide number input spinners */
+.counter-input::-webkit-inner-spin-button,
+.counter-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.counter-input[type=number] {
+  -moz-appearance: textfield;
+}
+
+/* ============================================
+   COMPACT VIEW STYLES
+   ============================================ */
+
+.process-card.compact .process-card-header {
+  padding: 6px 10px;
+}
+
+.process-card.compact .process-card-name {
+  font-size: 12px;
+}
+
+.process-card.compact .process-card-date {
+  font-size: 9px;
+}
+
+.process-card.compact .process-card-meta {
+  padding: 0 10px 4px;
+  gap: 6px;
+}
+
+.process-card.compact .process-card-position,
+.process-card.compact .process-card-province,
+.process-card.compact .process-card-creator {
+  font-size: 10px;
+  padding: 1px 6px;
+}
+
+.process-channels.compact {
+  gap: 0;
+}
+
+.process-channels.compact .channel-header {
+  font-size: 10px;
+  padding: 4px 8px 2px;
+}
+
+.channel-divider {
+  background: var(--bor);
+  width: 1px;
+}
+
+.process-channels.compact .channel-divider {
+  width: 1px;
+}
+
+.counter-row.compact {
+  padding: 4px 8px;
+}
+
+.counter-row.compact .counter-icon {
+  font-size: 11px;
+}
+
+.counter-row.compact .counter-label {
+  font-size: 10px;
+}
+
+.counter-row.compact .counter-value {
+  font-size: 13px;
+  min-width: 24px;
+}
+
+.btn-counter.compact {
+  width: 24px;
+  height: 24px;
+  font-size: 14px;
+}
+
+.process-card-footer.compact {
+  padding: 5px 10px;
+}
+
+.process-card-footer.compact .footer-total {
+  font-size: 9px;
+}
+
+.process-card-footer.compact .process-rate-text {
+  font-size: 9px;
+}
+
+.process-card-footer.compact .process-rate-bar {
+  height: 4px;
+}
