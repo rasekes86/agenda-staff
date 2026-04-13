@@ -522,6 +522,28 @@
             </button>
           </div>
           
+          <!-- Bulk Upload Section -->
+          <div class="sig-bulk-section">
+            <div class="sig-bulk-header">
+              <span>Subida masiva</span>
+              <button class="sig-bulk-toggle" id="btnToggleBulk">Mostrar</button>
+            </div>
+            <div class="sig-bulk-body" id="sigBulkBody" style="display:none">
+              <div class="sig-bulk-dropzone" id="sigBulkDropzone">
+                <div class="sig-bulk-dropzone-icon">📁</div>
+                <div class="sig-bulk-dropzone-text">Arrastra múltiples imágenes aquí</div>
+                <div class="sig-bulk-dropzone-hint">Los nombres de archivo se usaran como nombre de firma</div>
+                <input type="file" id="sigBulkFileInput" accept="image/*" multiple hidden>
+              </div>
+              <div class="sig-bulk-list" id="sigBulkList"></div>
+              <div class="sig-bulk-progress" id="sigBulkProgress" style="display:none">
+                <div class="sig-bulk-bar"><div class="sig-bulk-fill" id="sigBulkFill"></div></div>
+                <span class="sig-bulk-text" id="sigBulkText">0/0</span>
+              </div>
+              <button class="sig-bulk-upload-btn" id="btnBulkUpload" disabled>Subir todas</button>
+            </div>
+          </div>
+          
           <!-- Loading State -->
           <div class="signatures-loading" id="signaturesLoading" style="display: none;"></div>
         </div>
