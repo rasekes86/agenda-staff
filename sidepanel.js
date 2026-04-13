@@ -2573,6 +2573,28 @@ function setupSignatureListeners() {
   // View all signatures button
   $('btnViewAllSignatures').addEventListener('click', loadAllSignatures);
 
+  // Bulk upload toggle
+  $('btnToggleBulk').addEventListener('click', () => {
+    const body = $('sigBulkBody');
+    const isOpen = body.style.display !== 'none';
+    body.style.display = isOpen ? 'none' : 'block';
+    $('btnToggleBulk').textContent = isOpen ? 'Mostrar' : 'Ocultar';
+  });
+
+  // Bulk file input
+  $('sigBulkFileInput').addEventListener('change', (e) => handleBulkFiles(e.target.files));
+  $('sigBulkDropzone').addEventListener('click', () => $('sigBulkFileInput').click());
+  $('sigBulkDropzone').addEventListener('dragover', (e) => { e.preventDefault(); $('sigBulkDropzone').classList.add('drag-over'); });
+  $('sigBulkDropzone').addEventListener('dragleave', () => $('sigBulkDropzone').classList.remove('drag-over'));
+  $('sigBulkDropzone').addEventListener('drop', (e) => {
+    e.preventDefault();
+    $('sigBulkDropzone').classList.remove('drag-over');
+    handleBulkFiles(e.dataTransfer.files);
+  });
+
+  // Bulk upload button
+  $('btnBulkUpload').addEventListener('click', bulkUploadSignatures);
+
   // Dropzone click
   $('signatureDropzone').addEventListener('click', () => {
     $('signatureFileInput').click();
@@ -2712,15 +2734,25 @@ function renderSignatureResults(signatures, isAlphabetical = false) {
       }
     }
     
-    // Simple item: just name, clickable to download or select for editor
+    const displayName = sig.name.split(',').map(n => n.trim()).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(', ');
+    
+    // Item with preview image, actions (preview, download, delete)
     html += `
-      <div class="signature-result-item" data-id="${sig.id}" data-url="${sig.image_url}" data-name="${esc(sig.name)}" title="Clic para ${window.selectSignatureForEditor ? 'seleccionar' : 'descargar'}">
-        <span class="signature-result-name">${esc(sig.name)}</span>
-        <svg class="signature-download-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-          <polyline points="7 10 12 15 17 10"></polyline>
-          <line x1="12" y1="15" x2="12" y2="3"></line>
-        </svg>
+      <div class="sig-item" data-id="${sig.id}">
+        <div class="sig-img-wrap" data-url="${sig.image_url}" data-name="${esc(displayName)}" title="Clic para previsualizar">
+          <img class="sig-thumb" src="${sig.image_url}" alt="${esc(displayName)}" loading="lazy">
+        </div>
+        <div class="sig-info">
+          <span class="sig-name" title="${esc(displayName)}">${esc(displayName)}</span>
+        </div>
+        <div class="sig-actions">
+          <button class="sig-btn sig-btn-download" data-url="${sig.image_url}" data-name="${esc(displayName)}" title="Descargar">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </button>
+          <button class="sig-btn sig-btn-delete" data-id="${sig.id}" data-name="${esc(displayName)}" title="Eliminar">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </button>
+        </div>
       </div>
     `;
   });
@@ -2728,18 +2760,66 @@ function renderSignatureResults(signatures, isAlphabetical = false) {
   $('signaturesResults').innerHTML = html;
   $('signaturesUploadSection').style.display = 'none';
 
-  // Add click handlers - click anywhere on item to download or select for editor
-  document.querySelectorAll('.signature-result-item').forEach(item => {
-    item.addEventListener('click', () => {
+  // Image preview on click
+  document.querySelectorAll('.sig-img-wrap').forEach(wrap => {
+    wrap.addEventListener('click', () => {
       if (window.selectSignatureForEditor) {
-        // Called from PDF editor
-        window.selectSignatureForEditor(item.dataset.url, item.dataset.name);
+        window.selectSignatureForEditor(wrap.dataset.url, wrap.dataset.name);
       } else {
-        // Normal download
-        downloadSignature(item.dataset.url, item.dataset.name);
+        showSignaturePreviewModal(wrap.dataset.url, wrap.dataset.name);
       }
     });
   });
+
+  // Download button
+  document.querySelectorAll('.sig-btn-download').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      downloadSignature(btn.dataset.url, btn.dataset.name);
+    });
+  });
+
+  // Delete button
+  document.querySelectorAll('.sig-btn-delete').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (confirm(`¿Eliminar firma de "${btn.dataset.name}"?`)) {
+        deleteSignature(btn.dataset.id);
+      }
+    });
+  });
+}
+
+// Full-screen signature preview
+function showSignaturePreviewModal(url, name) {
+  let overlay = document.getElementById('sigPreviewOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'sigPreviewOverlay';
+    overlay.className = 'sig-preview-overlay';
+    overlay.innerHTML = `
+      <div class="sig-preview-box">
+        <div class="sig-preview-header">
+          <span class="sig-preview-title"></span>
+          <button class="sig-preview-close">&times;</button>
+        </div>
+        <div class="sig-preview-img-container">
+          <img class="sig-preview-img" src="" alt="">
+        </div>
+        <div class="sig-preview-footer">
+          <button class="sig-preview-dl">Descargar</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    
+    overlay.querySelector('.sig-preview-close').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  }
+  overlay.querySelector('.sig-preview-title').textContent = name;
+  overlay.querySelector('.sig-preview-img').src = url;
+  overlay.querySelector('.sig-preview-dl').onclick = () => downloadSignature(url, name);
+  overlay.style.display = 'flex';
 }
 
 // Load all signatures sorted alphabetically
@@ -2979,6 +3059,147 @@ async function deleteSignature(id) {
     console.error('Delete error:', err);
     showToast('Error al eliminar la firma');
   }
+}
+
+// ============================================
+// BULK SIGNATURE UPLOAD
+// ============================================
+
+let bulkFiles = []; // { file, name, previewUrl }
+
+function handleBulkFiles(files) {
+  if (!files || files.length === 0) return;
+  
+  bulkFiles = [];
+  const list = $('sigBulkList');
+  list.innerHTML = '';
+  
+  Array.from(files).forEach(file => {
+    const isImage = (file.type || '').startsWith('image/') || /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(file.name);
+    if (!isImage) return;
+    
+    // Extract name from filename (remove extension)
+    const rawName = file.name.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ').trim();
+    const item = { file, name: rawName, previewUrl: null };
+    
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      item.previewUrl = e.target.result;
+      const idx = bulkFiles.indexOf(item);
+      if (idx >= 0) {
+        const img = list.querySelector(`[data-bulk-idx="${idx}"] .sig-bulk-thumb`);
+        if (img) img.src = item.previewUrl;
+      }
+    };
+    reader.readAsDataURL(file);
+    
+    bulkFiles.push(item);
+    const idx = bulkFiles.length - 1;
+    
+    list.innerHTML += `
+      <div class="sig-bulk-item" data-bulk-idx="${idx}">
+        <img class="sig-bulk-thumb" src="" alt="${esc(rawName)}">
+        <input class="sig-bulk-name" type="text" value="${esc(rawName)}" data-idx="${idx}">
+        <button class="sig-bulk-remove" data-idx="${idx}" title="Quitar">✕</button>
+      </div>
+    `;
+  });
+  
+  // Listeners for name changes
+  list.querySelectorAll('.sig-bulk-name').forEach(input => {
+    input.addEventListener('input', (e) => {
+      const idx = parseInt(e.target.dataset.idx);
+      if (bulkFiles[idx]) bulkFiles[idx].name = e.target.value.trim();
+    });
+  });
+  
+  // Remove buttons
+  list.querySelectorAll('.sig-bulk-remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.idx);
+      bulkFiles[idx] = null;
+      btn.closest('.sig-bulk-item').remove();
+      // Enable/disable upload
+      const valid = bulkFiles.filter(f => f !== null).length;
+      $('btnBulkUpload').disabled = valid === 0;
+    });
+  });
+  
+  $('btnBulkUpload').disabled = false;
+}
+
+async function bulkUploadSignatures() {
+  const validFiles = bulkFiles.filter(f => f !== null && f.name);
+  if (validFiles.length === 0) {
+    showToast('No hay archivos para subir');
+    return;
+  }
+  
+  const btn = $('btnBulkUpload');
+  btn.disabled = true;
+  btn.textContent = 'Subiendo...';
+  $('sigBulkProgress').style.display = 'flex';
+  
+  let uploaded = 0;
+  let errors = 0;
+  
+  for (const item of validFiles) {
+    $('sigBulkText').textContent = `${uploaded + errors + 1}/${validFiles.length}`;
+    $('sigBulkFill').style.width = Math.round(((uploaded + errors) / validFiles.length) * 100) + '%';
+    
+    try {
+      const base64Image = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(item.file);
+      });
+      
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/signatures`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify({
+          id,
+          name: item.name.toLowerCase(),
+          image_url: base64Image,
+          user_id: currentUser.id,
+          user_name: currentUser.name
+        })
+      });
+      
+      if (res.ok) {
+        uploaded++;
+      } else {
+        errors++;
+      }
+    } catch (e) {
+      errors++;
+    }
+  }
+  
+  $('sigBulkFill').style.width = '100%';
+  $('sigBulkText').textContent = `${uploaded} subidas, ${errors} errores`;
+  
+  btn.textContent = 'Subir todas';
+  btn.disabled = false;
+  bulkFiles = [];
+  $('sigBulkList').innerHTML = '';
+  
+  if (errors === 0) {
+    showToast(`${uploaded} firmas subidas correctamente`);
+  } else {
+    showToast(`${uploaded} subidas, ${errors} con error`);
+  }
+  
+  setTimeout(() => {
+    $('sigBulkProgress').style.display = 'none';
+  }, 3000);
 }
 
 // ============================================
