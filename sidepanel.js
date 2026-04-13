@@ -3515,27 +3515,32 @@ function renderProcesses() {
     }
 
     // Expanded full card
+    const objColorExpanded = objetivo > 0 ? (objProgress >= 100 ? '#10b981' : (objProgress >= 68 ? '#eab308' : (objProgress >= 34 ? '#f97316' : '#ef4444'))) : 'var(--bor)';
     return `
-      <div class="process-card ${isFinished ? 'is-finished' : ''}">
+      <div class="process-card ${isFinished ? 'is-finished' : ''}" style="border-left: 3px solid ${objColorExpanded}">
         <div class="process-card-header">
-          <div class="process-card-title-row">
+          <div class="process-card-line-top">
             <button class="btn-process-collapse" data-id="${proc.id}" title="Comprimir">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="15 18 9 12 15 6"></polyline></svg>
             </button>
             <h4 class="process-card-name">${esc(proc.name)}</h4>
+            <span class="compact-sep">/</span>
             <span class="process-card-date">${createdDate}</span>
-          </div>
-          <div class="process-card-meta">
-            ${position ? `<span class="process-card-position">💼 ${esc(position)}</span>` : ''}
-            ${province ? `<span class="process-card-province">📍 ${esc(province)}</span>` : ''}
-            ${objetivo > 0 ? `<span class="process-card-objetivo" title="Objetivo: ${objetivo} seleccionados">🎯 ${objetivo}</span>` : ''}
+            <span class="compact-sep">/</span>
             <span class="process-card-creator">👤 ${esc(creatorName)}</span>
           </div>
-          <div class="process-card-actions-header">
-            ${isOwn && !isFinished ? `<button class="btn-process-finalize" data-id="${proc.id}" title="Finalizar proceso">🏁 Finalizar</button>` : ''}
-            ${isFinished ? `<span class="process-finished-badge">🏁 Finalizado</span>` : ''}
-            ${isOwn ? `<button class="btn-process-edit" data-id="${proc.id}" title="Cambiar nombre">✏️</button>
-            <button class="btn-process-del" data-id="${proc.id}" title="Eliminar">🗑</button>` : ''}
+          <div class="process-card-line-bottom">
+            ${position ? `<span class="process-card-position">💼 ${esc(position)}</span>` : ''}
+            <span class="compact-sep">/</span>
+            ${objetivo > 0 ? `<span class="process-card-objetivo" title="Objetivo: ${objetivo} seleccionados">🎯 ${objetivo}</span>` : `<span class="process-card-objetivo-none">Sin objetivo</span>`}
+            <span class="compact-sep">/</span>
+            ${province ? `<span class="process-card-province">📍 ${esc(province)}</span>` : ''}
+            <div class="process-card-actions-header">
+              ${isOwn && !isFinished ? `<button class="btn-process-finalize" data-id="${proc.id}" title="Finalizar proceso">🏁 Finalizar</button>` : ''}
+              ${isFinished ? `<span class="process-finished-badge">🏁 Finalizado</span>` : ''}
+              ${isOwn ? `<button class="btn-process-edit" data-id="${proc.id}" title="Cambiar nombre">✏️</button>
+              <button class="btn-process-del" data-id="${proc.id}" title="Eliminar">🗑</button>` : ''}
+            </div>
           </div>
         </div>
         <div class="process-channels ${isFinished ? 'finished' : ''}">
