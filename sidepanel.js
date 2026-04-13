@@ -53,9 +53,6 @@ let processes = [];
 let processMonthFilter = 'all';
 let processDelegationFilter = 'all';
 let processTabFilter = 'active'; // 'active' or 'finalized'
-let processPositionFilter = 'all';
-let processCompactView = false;
-let collapsedProcesses = new Set(); // IDs of individually collapsed processes
 
 const DELEGATIONS = {
   'Madrid': ['Madrid'],
@@ -2549,13 +2546,15 @@ let signatureSearchTerm = '';
 let signatureFile = null;
 let signaturePreviewUrl = null;
 
+// Bulk upload state
+let bulkFiles = []; // Array of { file, name (UPPERCASE), base64, status: 'new'|'replace'|'skip', existingId? }
+
 // Setup signature listeners
 function setupSignatureListeners() {
   // Open signatures modal
   $('btnSignatures').addEventListener('click', () => {
     $('signaturesModal').classList.add('show');
     $('signatureSearchInput').focus();
-    // Reset state
     resetSignatureState();
   });
 
@@ -2573,66 +2572,69 @@ function setupSignatureListeners() {
   // View all signatures button
   $('btnViewAllSignatures').addEventListener('click', loadAllSignatures);
 
-  // Bulk upload toggle
-  $('btnToggleBulk').addEventListener('click', () => {
-    const body = $('sigBulkBody');
-    const isOpen = body.style.display !== 'none';
-    body.style.display = isOpen ? 'none' : 'block';
-    $('btnToggleBulk').textContent = isOpen ? 'Mostrar' : 'Ocultar';
-  });
-
-  // Bulk file input
-  $('sigBulkFileInput').addEventListener('change', (e) => handleBulkFiles(e.target.files));
-  $('sigBulkDropzone').addEventListener('click', () => $('sigBulkFileInput').click());
-  $('sigBulkDropzone').addEventListener('dragover', (e) => { e.preventDefault(); $('sigBulkDropzone').classList.add('drag-over'); });
-  $('sigBulkDropzone').addEventListener('dragleave', () => $('sigBulkDropzone').classList.remove('drag-over'));
-  $('sigBulkDropzone').addEventListener('drop', (e) => {
-    e.preventDefault();
-    $('sigBulkDropzone').classList.remove('drag-over');
-    handleBulkFiles(e.dataTransfer.files);
-  });
-
-  // Bulk upload button
-  $('btnBulkUpload').addEventListener('click', bulkUploadSignatures);
-
-  // Dropzone click
+  // Single upload - Dropzone click
   $('signatureDropzone').addEventListener('click', () => {
     $('signatureFileInput').click();
   });
 
-  // File input change
+  // Single upload - File input change
   $('signatureFileInput').addEventListener('change', handleSignatureFileSelect);
 
-  // Drag and drop
+  // Single upload - Drag and drop
   $('signatureDropzone').addEventListener('dragover', (e) => {
     e.preventDefault();
     $('signatureDropzone').classList.add('drag-over');
   });
-
   $('signatureDropzone').addEventListener('dragleave', () => {
     $('signatureDropzone').classList.remove('drag-over');
   });
-
   $('signatureDropzone').addEventListener('drop', (e) => {
     e.preventDefault();
     $('signatureDropzone').classList.remove('drag-over');
     const files = e.dataTransfer.files;
-    if (files.length > 0) {
-      handleSignatureFile(files[0]);
-    }
+    if (files.length > 0) handleSignatureFile(files[0]);
   });
 
-  // Clear signature preview
-  $('btnClearSignature').addEventListener('click', () => {
-    clearSignaturePreview();
-  });
+  // Clear single signature preview
+  $('btnClearSignature').addEventListener('click', clearSignaturePreview);
 
-  // Upload signature
+  // Upload single signature
   $('btnUploadSignature').addEventListener('click', uploadSignature);
+
+  // === BULK UPLOAD ===
+  // Bulk dropzone click
+  $('bulkDropzone').addEventListener('click', () => {
+    $('bulkFileInput').click();
+  });
+
+  // Bulk file input change
+  $('bulkFileInput').addEventListener('change', (e) => {
+    if (e.target.files.length > 0) handleBulkFiles(Array.from(e.target.files));
+  });
+
+  // Bulk drag and drop
+  $('bulkDropzone').addEventListener('dragover', (e) => {
+    e.preventDefault();
+    $('bulkDropzone').classList.add('drag-over');
+  });
+  $('bulkDropzone').addEventListener('dragleave', () => {
+    $('bulkDropzone').classList.remove('drag-over');
+  });
+  $('bulkDropzone').addEventListener('drop', (e) => {
+    e.preventDefault();
+    $('bulkDropzone').classList.remove('drag-over');
+    if (e.dataTransfer.files.length > 0) handleBulkFiles(Array.from(e.dataTransfer.files));
+  });
+
+  // Bulk upload button
+  $('btnBulkUpload').addEventListener('click', executeBulkUpload);
 }
 
 function closeSignaturesModal() {
   $('signaturesModal').classList.remove('show');
+  // Remove preview overlay if exists
+  const overlay = document.querySelector('.sig-preview-overlay');
+  if (overlay) overlay.remove();
   resetSignatureState();
 }
 
@@ -2640,6 +2642,7 @@ function resetSignatureState() {
   signatureSearchTerm = '';
   signatureFile = null;
   signaturePreviewUrl = null;
+  bulkFiles = [];
   $('signatureSearchInput').value = '';
   $('signaturesResults').innerHTML = `
     <div class="signatures-empty">
@@ -2649,7 +2652,13 @@ function resetSignatureState() {
   `;
   $('signaturesUploadSection').style.display = 'none';
   $('signaturePreviewArea').style.display = 'none';
+  $('signatureDropzone').style.display = '';
   $('newSignatureName').value = '';
+  $('bulkFileInput').value = '';
+  $('bulkList').innerHTML = '';
+  $('bulkListContainer').style.display = 'none';
+  $('bulkCount').textContent = '';
+  $('bulkDropzone').style.display = '';
 }
 
 // Search signatures in Supabase (supports multiple names, one per line)
@@ -2661,7 +2670,6 @@ async function searchSignatures() {
     return;
   }
 
-  // Split by newlines to support multiple names
   const searchTerms = searchInput.split('\n')
     .map(term => term.trim().toLowerCase())
     .filter(term => term.length > 0);
@@ -2672,16 +2680,12 @@ async function searchSignatures() {
   }
 
   signatureSearchTerm = searchInput;
-  
-  // Show loading
   $('signaturesResults').innerHTML = '<div class="signatures-loading"></div>';
 
   try {
     let allSignatures = [];
     
-    // Search for each term
     for (const term of searchTerms) {
-      // Query signatures table - search for exact or partial match
       const query = `?select=*&name=ilike.*${encodeURIComponent(term)}*&order=name.asc`;
       const url = `${SUPABASE_URL}/rest/v1/signatures${query}`;
       
@@ -2695,7 +2699,6 @@ async function searchSignatures() {
       if (res.ok) {
         const signatures = await res.json();
         if (signatures && signatures.length > 0) {
-          // Add to results, avoiding duplicates by id
           signatures.forEach(sig => {
             if (!allSignatures.find(s => s.id === sig.id)) {
               allSignatures.push(sig);
@@ -2706,7 +2709,6 @@ async function searchSignatures() {
     }
 
     if (allSignatures.length > 0) {
-      // Sort alphabetically by name
       allSignatures.sort((a, b) => a.name.localeCompare(b.name));
       renderSignatureResults(allSignatures);
     } else {
@@ -2715,17 +2717,16 @@ async function searchSignatures() {
 
   } catch (err) {
     console.error('Search error:', err);
-    // Show upload section on error (table might not exist)
     showSignaturesUploadSection(searchTerms.join(', '));
   }
 }
 
+// Render signatures with thumbnail, preview, download, delete buttons
 function renderSignatureResults(signatures, isAlphabetical = false) {
   let html = '';
   let currentLetter = '';
   
   signatures.forEach(sig => {
-    // Add letter separator for alphabetical view
     if (isAlphabetical) {
       const firstLetter = sig.name.charAt(0).toUpperCase();
       if (firstLetter !== currentLetter) {
@@ -2734,23 +2735,27 @@ function renderSignatureResults(signatures, isAlphabetical = false) {
       }
     }
     
-    const displayName = sig.name.split(',').map(n => n.trim()).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(', ');
-    
-    // Item with preview image, actions (preview, download, delete)
+    const thumbSrc = sig.image_url || '';
     html += `
-      <div class="sig-item" data-id="${sig.id}">
-        <div class="sig-img-wrap" data-url="${sig.image_url}" data-name="${esc(displayName)}" title="Clic para previsualizar">
-          <img class="sig-thumb" src="${sig.image_url}" alt="${esc(displayName)}" loading="lazy">
+      <div class="signature-result-item" data-id="${sig.id}" data-url="${esc(sig.image_url)}" data-name="${esc(sig.name)}">
+        <img class="signature-result-thumb" src="${thumbSrc}" alt="${esc(sig.name)}" onerror="this.style.display='none'">
+        <div class="signature-result-info">
+          <span class="signature-result-name">${esc(sig.name)}</span>
+          <span class="signature-result-date">${sig.created_at ? new Date(sig.created_at).toLocaleDateString('es-ES') : ''}</span>
         </div>
-        <div class="sig-info">
-          <span class="sig-name" title="${esc(displayName)}">${esc(displayName)}</span>
-        </div>
-        <div class="sig-actions">
-          <button class="sig-btn sig-btn-download" data-url="${sig.image_url}" data-name="${esc(displayName)}" title="Descargar">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <div class="signature-result-actions">
+          <button class="btn-download-signature" data-url="${esc(sig.image_url)}" data-name="${esc(sig.name)}" title="Descargar">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
           </button>
-          <button class="sig-btn sig-btn-delete" data-id="${sig.id}" data-name="${esc(displayName)}" title="Eliminar">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          <button class="btn-delete-signature" data-id="${sig.id}" data-name="${esc(sig.name)}" title="Eliminar">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
           </button>
         </div>
       </div>
@@ -2760,75 +2765,100 @@ function renderSignatureResults(signatures, isAlphabetical = false) {
   $('signaturesResults').innerHTML = html;
   $('signaturesUploadSection').style.display = 'none';
 
-  // Image preview on click
-  document.querySelectorAll('.sig-img-wrap').forEach(wrap => {
-    wrap.addEventListener('click', () => {
-      if (window.selectSignatureForEditor) {
-        window.selectSignatureForEditor(wrap.dataset.url, wrap.dataset.name);
-      } else {
-        showSignaturePreviewModal(wrap.dataset.url, wrap.dataset.name);
-      }
+  // Add click handlers
+  document.querySelectorAll('.signature-result-item').forEach(item => {
+    // Click on item body (not buttons) = preview
+    item.addEventListener('click', (e) => {
+      if (e.target.closest('.signature-result-actions')) return;
+      showSignaturePreview(item.dataset.url, item.dataset.name, item.dataset.id);
     });
   });
 
-  // Download button
-  document.querySelectorAll('.sig-btn-download').forEach(btn => {
+  // Download buttons
+  document.querySelectorAll('.btn-download-signature').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       downloadSignature(btn.dataset.url, btn.dataset.name);
     });
   });
 
-  // Delete button
-  document.querySelectorAll('.sig-btn-delete').forEach(btn => {
+  // Delete buttons
+  document.querySelectorAll('.btn-delete-signature').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (confirm(`¿Eliminar firma de "${btn.dataset.name}"?`)) {
+      if (confirm(`¿Eliminar la firma "${btn.dataset.name}"?`)) {
         deleteSignature(btn.dataset.id);
       }
     });
   });
 }
 
-// Full-screen signature preview
-function showSignaturePreviewModal(url, name) {
-  let overlay = document.getElementById('sigPreviewOverlay');
-  if (!overlay) {
-    overlay = document.createElement('div');
-    overlay.id = 'sigPreviewOverlay';
-    overlay.className = 'sig-preview-overlay';
-    overlay.innerHTML = `
-      <div class="sig-preview-box">
-        <div class="sig-preview-header">
-          <span class="sig-preview-title"></span>
-          <button class="sig-preview-close">&times;</button>
-        </div>
-        <div class="sig-preview-img-container">
-          <img class="sig-preview-img" src="" alt="">
-        </div>
-        <div class="sig-preview-footer">
-          <button class="sig-preview-dl">Descargar</button>
-        </div>
+// Show signature in a preview overlay
+function showSignaturePreview(url, name, id) {
+  // Remove existing overlay if any
+  const existing = document.querySelector('.sig-preview-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'sig-preview-overlay';
+  overlay.innerHTML = `
+    <div class="sig-preview-card">
+      <img src="${url}" alt="${esc(name)}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%2240%22><text y=%2225%22 font-size=%2214%22 fill=%22%23999%22>Error</text></svg>'">
+      <div class="sig-preview-name">${esc(name)}</div>
+      <div class="sig-preview-actions">
+        ${window.selectSignatureForEditor ? `
+          <button class="sig-btn-preview-select" id="sigPreviewSelect">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            Seleccionar
+          </button>
+        ` : ''}
+        <button class="sig-btn-preview-download" id="sigPreviewDownload">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          Descargar
+        </button>
+        <button class="sig-btn-preview-delete" id="sigPreviewDelete">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+          Eliminar
+        </button>
+        <button class="sig-btn-preview-close" id="sigPreviewClose">Cerrar</button>
       </div>
-    `;
-    document.body.appendChild(overlay);
-    
-    overlay.querySelector('.sig-preview-close').addEventListener('click', () => overlay.remove());
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  // Close
+  overlay.querySelector('#sigPreviewClose').addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  // Download
+  overlay.querySelector('#sigPreviewDownload').addEventListener('click', () => {
+    downloadSignature(url, name);
+  });
+
+  // Delete
+  overlay.querySelector('#sigPreviewDelete').addEventListener('click', async () => {
+    if (confirm(`¿Eliminar la firma "${name}"?`)) {
+      await deleteSignature(id);
+      overlay.remove();
+    }
+  });
+
+  // Select for editor
+  const selectBtn = overlay.querySelector('#sigPreviewSelect');
+  if (selectBtn) {
+    selectBtn.addEventListener('click', () => {
+      window.selectSignatureForEditor(url, name);
+      overlay.remove();
+    });
   }
-  overlay.querySelector('.sig-preview-title').textContent = name;
-  overlay.querySelector('.sig-preview-img').src = url;
-  overlay.querySelector('.sig-preview-dl').onclick = () => downloadSignature(url, name);
-  overlay.style.display = 'flex';
 }
 
 // Load all signatures sorted alphabetically
 async function loadAllSignatures() {
-  // Show loading
   $('signaturesResults').innerHTML = '<div class="signatures-loading"></div>';
 
   try {
-    // Query all signatures ordered by name
     const query = `?select=*&order=name.asc`;
     const url = `${SUPABASE_URL}/rest/v1/signatures${query}`;
     
@@ -2856,7 +2886,7 @@ async function loadAllSignatures() {
     const signatures = await res.json();
 
     if (signatures && signatures.length > 0) {
-      renderSignatureResults(signatures, true); // true = alphabetical view with separators
+      renderSignatureResults(signatures, true);
     } else {
       $('signaturesResults').innerHTML = `
         <div class="signatures-empty">
@@ -2889,6 +2919,7 @@ function showSignaturesUploadSection(searchTerm) {
   $('signaturesUploadSection').style.display = 'block';
   $('newSignatureName').value = searchTerm;
   $('signaturePreviewArea').style.display = 'none';
+  $('signatureDropzone').style.display = '';
   signatureFile = null;
   signaturePreviewUrl = null;
 }
@@ -2899,7 +2930,6 @@ function handleSignatureFileSelect(e) {
 }
 
 function handleSignatureFile(file) {
-  // Check if file is an image (handle undefined type)
   const fileType = file.type || '';
   const fileName = file.name || '';
   const isImage = fileType.startsWith('image/') || 
@@ -2912,7 +2942,6 @@ function handleSignatureFile(file) {
 
   signatureFile = file;
 
-  // Create preview
   const reader = new FileReader();
   reader.onload = (e) => {
     signaturePreviewUrl = e.target.result;
@@ -2927,22 +2956,23 @@ function clearSignaturePreview() {
   signatureFile = null;
   signaturePreviewUrl = null;
   $('signaturePreviewArea').style.display = 'none';
-  $('signatureDropzone').style.display = 'block';
+  $('signatureDropzone').style.display = '';
   $('signatureFileInput').value = '';
 }
 
-// Upload signature to Supabase
+// Upload single signature to Supabase
 async function uploadSignature() {
   if (!signatureFile) {
     showToast('Selecciona una imagen de firma');
     return;
   }
 
-  const name = $('newSignatureName').value.trim();
+  let name = $('newSignatureName').value.trim();
   if (!name) {
     showToast('Introduce un nombre para la firma');
     return;
   }
+  name = name.toUpperCase(); // Store in uppercase
 
   const btn = $('btnUploadSignature');
   btn.disabled = true;
@@ -2950,18 +2980,7 @@ async function uploadSignature() {
   btn.querySelector('.btn-loader').style.display = 'inline-block';
 
   try {
-    // Convert image to base64
-    const base64Image = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(signatureFile);
-    });
-
-    console.log('Subiendo firma:', name);
-    console.log('User ID:', currentUser?.id);
-
-    // Insert into signatures table
+    const base64Image = await fileToBase64(signatureFile);
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
     
     const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/signatures`, {
@@ -2980,30 +2999,19 @@ async function uploadSignature() {
         user_name: currentUser.name
       })
     });
-
-    console.log('Response status:', insertRes.status);
     
     if (!insertRes.ok) {
       const errText = await insertRes.text();
-      console.error('Insert error:', errText);
-      
-      if (insertRes.status === 404) {
-        throw new Error('La tabla "signatures" no existe. Ejecuta el SQL en Supabase.');
-      }
-      if (errText.includes('permission denied') || errText.includes('policy')) {
-        throw new Error('Error de permisos. Verifica las políticas RLS en Supabase.');
-      }
+      if (insertRes.status === 404) throw new Error('La tabla "signatures" no existe.');
+      if (errText.includes('permission denied') || errText.includes('policy')) throw new Error('Error de permisos.');
       throw new Error('Error al guardar: ' + errText);
     }
 
-    const result = await insertRes.json();
-    console.log('Firma guardada:', result);
-
-    showToast('✅ Firma guardada correctamente');
-    
-    // Reset and close
+    showToast('Firma guardada correctamente');
     resetSignatureState();
-    closeSignaturesModal();
+    
+    // Reload to show the new signature
+    searchSignatures();
 
   } catch (err) {
     console.error('Upload error:', err);
@@ -3013,6 +3021,237 @@ async function uploadSignature() {
     btn.querySelector('.btn-text').textContent = 'Guardar Firma';
     btn.querySelector('.btn-loader').style.display = 'none';
   }
+}
+
+// ============================================
+// BULK UPLOAD
+// ============================================
+
+// Convert File to base64 data URL
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// Extract name from filename (remove extension, UPPERCASE)
+function getSignatureNameFromFile(fileName) {
+  return fileName.replace(/\.[^.]+$/, '').toUpperCase();
+}
+
+// Handle multiple files for bulk upload
+async function handleBulkFiles(files) {
+  // Filter only images
+  const imageFiles = files.filter(f => {
+    const t = f.type || '';
+    const n = f.name || '';
+    return t.startsWith('image/') || /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(n);
+  });
+
+  if (imageFiles.length === 0) {
+    showToast('No se encontraron imágenes válidas');
+    return;
+  }
+
+  // Read all files as base64
+  const fileDataList = [];
+  for (const f of imageFiles) {
+    const base64 = await fileToBase64(f);
+    fileDataList.push({
+      file: f,
+      name: getSignatureNameFromFile(f.name),
+      base64: base64
+    });
+  }
+
+  // Check for duplicates in Supabase
+  try {
+    // Get all existing signature names
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=id,name`, {
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${session.access_token}`
+      }
+    });
+
+    const existingSigs = res.ok ? await res.json() : [];
+    const existingMap = {};
+    existingSigs.forEach(s => {
+      existingMap[s.name.toUpperCase()] = s.id;
+    });
+
+    bulkFiles = fileDataList.map(fd => {
+      const upperName = fd.name;
+      const matchKey = Object.keys(existingMap).find(k => k === upperName);
+      if (matchKey) {
+        return {
+          ...fd,
+          status: 'skip', // default: keep existing
+          existingId: existingMap[matchKey],
+          existingName: matchKey
+        };
+      }
+      return { ...fd, status: 'new' };
+    });
+
+    renderBulkList();
+
+  } catch (err) {
+    console.error('Error checking duplicates:', err);
+    // If we can't check, mark all as new
+    bulkFiles = fileDataList.map(fd => ({ ...fd, status: 'new' }));
+    renderBulkList();
+  }
+}
+
+// Render bulk upload list
+function renderBulkList() {
+  const list = $('bulkList');
+  const container = $('bulkListContainer');
+
+  if (bulkFiles.length === 0) {
+    container.style.display = 'none';
+    $('bulkCount').textContent = '';
+    $('bulkDropzone').style.display = '';
+    return;
+  }
+
+  container.style.display = 'block';
+  $('bulkDropzone').style.display = 'none';
+
+  const newCount = bulkFiles.filter(f => f.status === 'new').length;
+  const replaceCount = bulkFiles.filter(f => f.status === 'replace').length;
+  const skipCount = bulkFiles.filter(f => f.status === 'skip').length;
+  
+  $('bulkCount').textContent = `${bulkFiles.length} archivo(s) · ${newCount} nuevas · ${skipCount} conservadas · ${replaceCount} sustituir`;
+
+  list.innerHTML = bulkFiles.map((f, i) => {
+    let statusClass = 'dup-new';
+    let statusText = 'Nueva';
+    let toggleText = '';
+    
+    if (f.status === 'skip') {
+      statusClass = 'dup-skip';
+      statusText = 'Conservar existente';
+      toggleText = 'Sustituir';
+    } else if (f.status === 'replace') {
+      statusClass = 'dup-exists';
+      statusText = 'Sustituir existente';
+      toggleText = 'Conservar';
+    }
+    
+    const hasDup = f.status === 'skip' || f.status === 'replace';
+    
+    return `
+      <div class="signatures-bulk-item ${statusClass}">
+        <img class="signatures-bulk-thumb" src="${f.base64}" alt="">
+        <span class="signatures-bulk-name" title="${esc(f.name)}">${esc(f.name)}</span>
+        <span class="signatures-bulk-status ${statusClass === 'dup-new' ? 'is-new' : statusClass === 'dup-exists' ? 'is-replace' : 'is-skip'}">${statusText}</span>
+        ${hasDup ? `<button class="signatures-bulk-toggle" data-idx="${i}">${toggleText}</button>` : ''}
+      </div>
+    `;
+  }).join('');
+
+  // Toggle buttons for duplicates
+  list.querySelectorAll('.signatures-bulk-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.idx);
+      const item = bulkFiles[idx];
+      if (item.status === 'skip') {
+        item.status = 'replace';
+      } else if (item.status === 'replace') {
+        item.status = 'skip';
+      }
+      renderBulkList();
+    });
+  });
+
+  // Enable upload button if there's something to upload
+  const hasUploadable = bulkFiles.some(f => f.status === 'new' || f.status === 'replace');
+  $('btnBulkUpload').disabled = !hasUploadable;
+}
+
+// Execute bulk upload
+async function executeBulkUpload() {
+  const toUpload = bulkFiles.filter(f => f.status === 'new' || f.status === 'replace');
+  if (toUpload.length === 0) {
+    showToast('No hay firmas para subir');
+    return;
+  }
+
+  const btn = $('btnBulkUpload');
+  btn.disabled = true;
+  btn.querySelector('.btn-text').textContent = `Subiendo 0/${toUpload.length}...`;
+  btn.querySelector('.btn-loader').style.display = 'inline-block';
+
+  let success = 0;
+  let failed = 0;
+
+  for (let i = 0; i < toUpload.length; i++) {
+    const f = toUpload[i];
+    btn.querySelector('.btn-text').textContent = `Subiendo ${i + 1}/${toUpload.length}...`;
+
+    try {
+      if (f.status === 'replace' && f.existingId) {
+        // Delete existing, then insert new
+        await fetch(`${SUPABASE_URL}/rest/v1/signatures?id=eq.${f.existingId}`, {
+          method: 'DELETE',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${session.access_token}`
+          }
+        });
+      }
+
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+      const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/signatures`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify({
+          id,
+          name: f.name.toLowerCase(), // Store lowercase for search, display uppercase
+          image_url: f.base64,
+          user_id: currentUser.id,
+          user_name: currentUser.name
+        })
+      });
+
+      if (insertRes.ok) {
+        success++;
+      } else {
+        failed++;
+        console.error('Bulk insert error:', await insertRes.text());
+      }
+    } catch (err) {
+      failed++;
+      console.error('Bulk upload error for', f.name, err);
+    }
+
+    // Small delay to avoid rate limiting
+    await new Promise(r => setTimeout(r, 100));
+  }
+
+  btn.querySelector('.btn-text').textContent = 'Subir firmas';
+  btn.querySelector('.btn-loader').style.display = 'none';
+
+  if (failed === 0) {
+    showToast(`${success} firma(s) guardada(s) correctamente`);
+  } else {
+    showToast(`${success} OK, ${failed} con error`);
+  }
+
+  // Reset bulk state and reload results
+  bulkFiles = [];
+  renderBulkList();
+  loadAllSignatures();
 }
 
 // Download signature
@@ -3032,7 +3271,7 @@ async function downloadSignature(url, name) {
     document.body.removeChild(a);
     URL.revokeObjectURL(downloadUrl);
     
-    showToast('✅ Firma descargada');
+    showToast('Firma descargada');
   } catch (err) {
     console.error('Download error:', err);
     showToast('Error al descargar la firma');
@@ -3054,152 +3293,12 @@ async function deleteSignature(id) {
     if (!res.ok) throw new Error('Error al eliminar');
 
     showToast('Firma eliminada');
-    searchSignatures();
+    // Reload current view
+    loadAllSignatures();
   } catch (err) {
     console.error('Delete error:', err);
     showToast('Error al eliminar la firma');
   }
-}
-
-// ============================================
-// BULK SIGNATURE UPLOAD
-// ============================================
-
-let bulkFiles = []; // { file, name, previewUrl }
-
-function handleBulkFiles(files) {
-  if (!files || files.length === 0) return;
-  
-  bulkFiles = [];
-  const list = $('sigBulkList');
-  list.innerHTML = '';
-  
-  Array.from(files).forEach(file => {
-    const isImage = (file.type || '').startsWith('image/') || /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(file.name);
-    if (!isImage) return;
-    
-    // Extract name from filename (remove extension)
-    const rawName = file.name.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ').trim();
-    const item = { file, name: rawName, previewUrl: null };
-    
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      item.previewUrl = e.target.result;
-      const idx = bulkFiles.indexOf(item);
-      if (idx >= 0) {
-        const img = list.querySelector(`[data-bulk-idx="${idx}"] .sig-bulk-thumb`);
-        if (img) img.src = item.previewUrl;
-      }
-    };
-    reader.readAsDataURL(file);
-    
-    bulkFiles.push(item);
-    const idx = bulkFiles.length - 1;
-    
-    list.innerHTML += `
-      <div class="sig-bulk-item" data-bulk-idx="${idx}">
-        <img class="sig-bulk-thumb" src="" alt="${esc(rawName)}">
-        <input class="sig-bulk-name" type="text" value="${esc(rawName)}" data-idx="${idx}">
-        <button class="sig-bulk-remove" data-idx="${idx}" title="Quitar">✕</button>
-      </div>
-    `;
-  });
-  
-  // Listeners for name changes
-  list.querySelectorAll('.sig-bulk-name').forEach(input => {
-    input.addEventListener('input', (e) => {
-      const idx = parseInt(e.target.dataset.idx);
-      if (bulkFiles[idx]) bulkFiles[idx].name = e.target.value.trim();
-    });
-  });
-  
-  // Remove buttons
-  list.querySelectorAll('.sig-bulk-remove').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const idx = parseInt(btn.dataset.idx);
-      bulkFiles[idx] = null;
-      btn.closest('.sig-bulk-item').remove();
-      // Enable/disable upload
-      const valid = bulkFiles.filter(f => f !== null).length;
-      $('btnBulkUpload').disabled = valid === 0;
-    });
-  });
-  
-  $('btnBulkUpload').disabled = false;
-}
-
-async function bulkUploadSignatures() {
-  const validFiles = bulkFiles.filter(f => f !== null && f.name);
-  if (validFiles.length === 0) {
-    showToast('No hay archivos para subir');
-    return;
-  }
-  
-  const btn = $('btnBulkUpload');
-  btn.disabled = true;
-  btn.textContent = 'Subiendo...';
-  $('sigBulkProgress').style.display = 'flex';
-  
-  let uploaded = 0;
-  let errors = 0;
-  
-  for (const item of validFiles) {
-    $('sigBulkText').textContent = `${uploaded + errors + 1}/${validFiles.length}`;
-    $('sigBulkFill').style.width = Math.round(((uploaded + errors) / validFiles.length) * 100) + '%';
-    
-    try {
-      const base64Image = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(item.file);
-      });
-      
-      const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/signatures`, {
-        method: 'POST',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=representation'
-        },
-        body: JSON.stringify({
-          id,
-          name: item.name.toLowerCase(),
-          image_url: base64Image,
-          user_id: currentUser.id,
-          user_name: currentUser.name
-        })
-      });
-      
-      if (res.ok) {
-        uploaded++;
-      } else {
-        errors++;
-      }
-    } catch (e) {
-      errors++;
-    }
-  }
-  
-  $('sigBulkFill').style.width = '100%';
-  $('sigBulkText').textContent = `${uploaded} subidas, ${errors} errores`;
-  
-  btn.textContent = 'Subir todas';
-  btn.disabled = false;
-  bulkFiles = [];
-  $('sigBulkList').innerHTML = '';
-  
-  if (errors === 0) {
-    showToast(`${uploaded} firmas subidas correctamente`);
-  } else {
-    showToast(`${uploaded} subidas, ${errors} con error`);
-  }
-  
-  setTimeout(() => {
-    $('sigBulkProgress').style.display = 'none';
-  }, 3000);
 }
 
 // ============================================
@@ -3220,17 +3319,6 @@ function setupProcessesListeners() {
     processDelegationFilter = e.target.value;
     renderProcesses();
     renderGlobalStats();
-  });
-  $('processPositionFilter').addEventListener('change', (e) => {
-    processPositionFilter = e.target.value;
-    renderProcesses();
-    renderGlobalStats();
-  });
-  $('btnCompactView').addEventListener('click', () => {
-    processCompactView = !processCompactView;
-    $('btnCompactView').classList.toggle('active', processCompactView);
-    if (processCompactView) collapsedProcesses.clear(); // Clear individual states
-    renderProcesses();
   });
   document.querySelectorAll('.process-tab').forEach(tab => {
     tab.addEventListener('click', () => {
@@ -3326,28 +3414,19 @@ async function handleCreateProcess(e) {
   
   try {
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
-    const position = $('processPosition').value;
     const province = $('processProvince').value;
-    if (!position) {
-      showToast('Selecciona un puesto');
-      btn.disabled = false;
-      return;
-    }
     if (!province) {
       showToast('Selecciona una provincia');
       btn.disabled = false;
       return;
     }
     
-    const objetivoVal = parseInt($('processObjetivo').value) || 0;
     const newProc = {
       id,
       user_id: currentUser.id,
       user_name: currentUser.name,
       name,
-      position,
       province,
-      objetivo: Math.max(0, objetivoVal),
       added: 0,
       called: 0,
       interviewed: 0,
@@ -3362,9 +3441,7 @@ async function handleCreateProcess(e) {
     processes.unshift(newProc);
     
     $('processName').value = '';
-    $('processPosition').value = '';
     $('processProvince').value = '';
-    $('processObjetivo').value = '';
     renderProcesses();
     renderGlobalStats();
     showToast('Proceso creado');
@@ -3377,73 +3454,12 @@ async function handleCreateProcess(e) {
 }
 
 async function handleProcessActions(e) {
-  // Individual expand button
-  const expandBtn = e.target.closest('.btn-process-expand');
-  if (expandBtn) {
-    const id = expandBtn.dataset.id;
-    collapsedProcesses.delete(id);
-    renderProcesses();
-    return;
-  }
-  
-  // Individual collapse button
-  const collapseBtn = e.target.closest('.btn-process-collapse');
-  if (collapseBtn) {
-    const id = collapseBtn.dataset.id;
-    collapsedProcesses.add(id);
-    renderProcesses();
-    return;
-  }
-  
   const counterBtn = e.target.closest('.btn-counter');
   if (counterBtn) {
     const id = counterBtn.dataset.id;
     const field = counterBtn.dataset.field;
     const delta = counterBtn.dataset.delta === '1' ? 1 : -1;
     await updateCounter(id, field, delta);
-    return;
-  }
-  
-  const counterValue = e.target.closest('.counter-value');
-  if (counterValue) {
-    const proc = processes.find(p => p.id === counterValue.dataset.id);
-    if (!proc || proc.is_active === false) return;
-    const field = counterValue.dataset.field;
-    
-    const wrapper = document.createElement('div');
-    wrapper.className = 'counter-sum-wrapper';
-    
-    const plusIcon = document.createElement('span');
-    plusIcon.className = 'counter-sum-icon';
-    plusIcon.textContent = '+';
-    
-    const input = document.createElement('input');
-    input.type = 'number';
-    input.min = '0';
-    input.value = '';
-    input.placeholder = '0';
-    input.className = 'counter-sum-input';
-    
-    wrapper.appendChild(plusIcon);
-    wrapper.appendChild(input);
-    
-    const saveValue = async () => {
-      const addVal = Math.max(0, parseInt(input.value) || 0);
-      if (addVal > 0) {
-        await updateCounter(proc.id, field, addVal);
-      } else {
-        wrapper.replaceWith(counterValue);
-      }
-    };
-    
-    input.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
-      if (ev.key === 'Escape') { wrapper.replaceWith(counterValue); }
-    });
-    input.addEventListener('blur', saveValue);
-    
-    counterValue.replaceWith(wrapper);
-    input.focus();
     return;
   }
   
@@ -3548,11 +3564,6 @@ function getFilteredProcesses() {
     });
   }
 
-  // Filter by position
-  if (processPositionFilter !== 'all') {
-    filtered = filtered.filter(p => p.position === processPositionFilter);
-  }
-
   // Filter by tab (active vs finalized)
   if (processTabFilter === 'active') {
     filtered = filtered.filter(p => p.is_active !== false);
@@ -3593,16 +3604,11 @@ function populateMonthFilter() {
 function renderGlobalStats() {
   const filtered = getFilteredProcesses();
   let totalAdded = 0, totalCalled = 0, totalInterviewed = 0, totalSelected = 0;
-  let selectedOfertas = 0, selectedErp = 0;
   filtered.forEach(p => {
-    const ao = p.added || 0, so = p.selected || 0;
-    const ae = p.added_erp || 0, se = p.selected_erp || 0;
-    totalAdded += ao + ae;
+    totalAdded += (p.added || 0) + (p.added_erp || 0);
     totalCalled += (p.called || 0) + (p.called_erp || 0);
     totalInterviewed += (p.interviewed || 0) + (p.interviewed_erp || 0);
-    totalSelected += so + se;
-    selectedOfertas += so;
-    selectedErp += se;
+    totalSelected += (p.selected || 0) + (p.selected_erp || 0);
   });
   
   $('gsTotal').textContent = totalAdded;
@@ -3612,22 +3618,6 @@ function renderGlobalStats() {
   
   const rate = totalAdded > 0 ? Math.round((totalSelected / totalAdded) * 100) : 0;
   $('gsRate').textContent = rate + '%';
-  
-  $('gsSelOfertas').textContent = selectedOfertas;
-  $('gsSelErp').textContent = selectedErp;
-  
-  const totalSelBalance = selectedOfertas + selectedErp;
-  if (totalSelBalance > 0) {
-    const pctOfertas = Math.round((selectedOfertas / totalSelBalance) * 100);
-    const pctErp = Math.round((selectedErp / totalSelBalance) * 100);
-    $('gsBalanceOfertas').style.width = pctOfertas + '%';
-    $('gsBalanceErp').style.width = pctErp + '%';
-    $('gsBalanceText').textContent = `Ofertas ${pctOfertas}% | ERP ${pctErp}%`;
-  } else {
-    $('gsBalanceOfertas').style.width = '50%';
-    $('gsBalanceErp').style.width = '50%';
-    $('gsBalanceText').textContent = 'Sin datos';
-  }
 }
 
 function renderProcesses() {
@@ -3666,31 +3656,23 @@ function renderProcesses() {
   list.innerHTML = filtered.map(proc => {
     const total = (proc.added || 0) + (proc.added_erp || 0);
     const totalSel = (proc.selected || 0) + (proc.selected_erp || 0);
-    const selOfertas = proc.selected || 0;
-    const selErp = proc.selected_erp || 0;
     const rate = total > 0 ? Math.round((totalSel / total) * 100) : 0;
     const createdDate = proc.created_at ? new Date(proc.created_at).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) : '';
     
     const isOwn = proc.user_id === currentUser.id;
     const creatorName = proc.user_name || 'Usuario';
-    const position = proc.position || '';
     const province = proc.province || '';
     const isFinished = proc.is_active === false;
-    const objetivo = proc.objetivo || 0;
-    const objProgress = objetivo > 0 ? Math.min(100, Math.round((totalSel / objetivo) * 100)) : 0;
-    const isCollapsed = processCompactView || collapsedProcesses.has(proc.id);
-    const objEmoji = objetivo > 0 ? (objProgress >= 100 ? '🎯' : (objProgress >= 50 ? '📍' : '⏳')) : '';
     
-    // Helper to render a counter row
-    const renderCounter = (f) => {
-      return isFinished ? `
+    // In finalized tab, show counters as read-only (no +/- buttons)
+    const counterHtml = isFinished ? `
                 <div class="counter-row" style="border-left: 3px solid ${f.color}">
                   <div class="counter-info">
                     <span class="counter-icon">${f.icon}</span>
                     <span class="counter-label">${f.label}</span>
                   </div>
                   <div class="counter-controls counter-locked">
-                    <span class="counter-value" data-id="${proc.id}" data-field="${f.key}">${proc[f.key] || 0}</span>
+                    <span class="counter-value">${proc[f.key] || 0}</span>
                   </div>
                 </div>` : `
                 <div class="counter-row" style="border-left: 3px solid ${f.color}">
@@ -3700,75 +3682,56 @@ function renderProcesses() {
                   </div>
                   <div class="counter-controls">
                     <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="-1" title="Restar">−</button>
-                    <span class="counter-value clickable" data-id="${proc.id}" data-field="${f.key}" title="Clic para sumar">${proc[f.key] || 0}</span>
+                    <span class="counter-value">${proc[f.key] || 0}</span>
                     <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="1" title="Sumar">+</button>
                   </div>
                 </div>`;
-    };
 
-    // Compact single-line: NOMBRE / PUESTO / LUGAR / OBJETIVO
-    if (isCollapsed) {
-      const objColor = objetivo > 0 ? (objProgress >= 100 ? '#10b981' : (objProgress >= 68 ? '#eab308' : (objProgress >= 34 ? '#f97316' : '#ef4444'))) : 'var(--pri)';
-      return `
-        <div class="process-card ${isFinished ? 'is-finished' : ''} compact-single">
-          <div class="process-card-compact-line" style="border-left-color: ${objColor}">
-            <button class="btn-process-expand" data-id="${proc.id}" title="Desplegar">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="9 18 15 12 9 6"></polyline></svg>
-            </button>
-            <span class="compact-name">${esc(proc.name)}</span>
-            <span class="compact-sep">/</span>
-            <span class="compact-pos">${position ? esc(position) : '—'}</span>
-            <span class="compact-sep">/</span>
-            <span class="compact-loc">${province ? esc(province) : '—'}</span>
-            <span class="compact-sep">/</span>
-            ${objetivo > 0 ? `
-              <span class="compact-obj ${objProgress >= 100 ? 'obj-reached' : ''}">${objEmoji} ${totalSel}/${objetivo}</span>
-            ` : `<span class="compact-obj-none">Sin objetivo</span>`}
-            <span class="compact-sep">/</span>
-            <span class="compact-sel" title="🌐 Ofertas: ${selOfertas} | 🏢 ERP: ${selErp}">✅ ${totalSel}</span>
-            <div class="compact-line-actions">
-              ${isFinished ? `<span class="process-finished-badge mini">🏁</span>` : ''}
-              ${isOwn ? `<button class="btn-process-del btn-process-del-mini" data-id="${proc.id}" title="Eliminar">🗑</button>` : ''}
-            </div>
-          </div>
-        </div>
-      `;
-    }
+    const counterErpHtml = isFinished ? `
+                <div class="counter-row" style="border-left: 3px solid ${f.color}">
+                  <div class="counter-info">
+                    <span class="counter-icon">${f.icon}</span>
+                    <span class="counter-label">${f.label}</span>
+                  </div>
+                  <div class="counter-controls counter-locked">
+                    <span class="counter-value">${proc[f.key] || 0}</span>
+                  </div>
+                </div>` : `
+                <div class="counter-row" style="border-left: 3px solid ${f.color}">
+                  <div class="counter-info">
+                    <span class="counter-icon">${f.icon}</span>
+                    <span class="counter-label">${f.label}</span>
+                  </div>
+                  <div class="counter-controls">
+                    <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="-1" title="Restar">−</button>
+                    <span class="counter-value">${proc[f.key] || 0}</span>
+                    <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="1" title="Sumar">+</button>
+                  </div>
+                </div>`;
 
-    // Expanded full card
-    const objColorExpanded = objetivo > 0 ? (objProgress >= 100 ? '#10b981' : (objProgress >= 68 ? '#eab308' : (objProgress >= 34 ? '#f97316' : '#ef4444'))) : 'var(--bor)';
     return `
-      <div class="process-card ${isFinished ? 'is-finished' : ''}" style="border-left: 3px solid ${objColorExpanded}">
+      <div class="process-card ${isFinished ? 'is-finished' : ''}">
         <div class="process-card-header">
-          <div class="process-card-line-top">
-            <button class="btn-process-collapse" data-id="${proc.id}" title="Comprimir">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="15 18 9 12 15 6"></polyline></svg>
-            </button>
-            <span class="process-card-name">${esc(proc.name)}</span>
-            <span class="hdr-sep">/</span>
+          <div class="process-card-title-row">
+            <h4 class="process-card-name">${esc(proc.name)}</h4>
             <span class="process-card-date">${createdDate}</span>
-            <span class="hdr-sep">/</span>
-            ${province ? `<span class="process-card-province">${esc(province)}</span>` : ''}
-            <span class="hdr-sep">/</span>
-            <span class="process-card-creator">${esc(creatorName)}</span>
           </div>
-          <div class="process-card-line-bottom">
-            ${position ? `<span class="process-card-position">${esc(position)}</span>` : ''}
-            <span class="hdr-sep">/</span>
-            ${objetivo > 0 ? `<span class="process-card-objetivo" title="Objetivo: ${objetivo} seleccionados">${objetivo} objetivo</span>` : `<span class="process-card-objetivo-none">sin objetivo</span>`}
-            <div class="process-card-actions-header">
-              ${isOwn && !isFinished ? `<button class="btn-process-finalize" data-id="${proc.id}" title="Finalizar">Finalizar</button>` : ''}
-              ${isFinished ? `<span class="process-finished-badge">Finalizado</span>` : ''}
-              ${isOwn ? `<button class="btn-process-edit" data-id="${proc.id}" title="Editar">✏️</button>
-              <button class="btn-process-del" data-id="${proc.id}" title="Eliminar">🗑</button>` : ''}
-            </div>
+          <div class="process-card-meta">
+            ${province ? `<span class="process-card-province">📍 ${esc(province)}</span>` : ''}
+            <span class="process-card-creator">👤 ${esc(creatorName)}</span>
+          </div>
+          <div class="process-card-actions-header">
+            ${isOwn && !isFinished ? `<button class="btn-process-finalize" data-id="${proc.id}" title="Finalizar proceso">🏁 Finalizar</button>` : ''}
+            ${isFinished ? `<span class="process-finished-badge">🏁 Finalizado</span>` : ''}
+            ${isOwn ? `<button class="btn-process-edit" data-id="${proc.id}" title="Cambiar nombre">✏️</button>
+            <button class="btn-process-del" data-id="${proc.id}" title="Eliminar">🗑</button>` : ''}
           </div>
         </div>
         <div class="process-channels ${isFinished ? 'finished' : ''}">
           <div class="process-channel">
             <div class="channel-header">🌐 Ofertas de Empleo</div>
             <div class="channel-counters">
-              ${fields.map(f => renderCounter(f)).join('')}
+              ${fields.map(f => counterHtml).join('')}
             </div>
             <div class="channel-rate">
               <div class="process-rate-bar"><div class="process-rate-fill" style="width:${(proc.added || 0) > 0 ? Math.round(((proc.selected || 0) / (proc.added || 0)) * 100) : 0}%"></div></div>
@@ -3779,7 +3742,7 @@ function renderProcesses() {
           <div class="process-channel">
             <div class="channel-header">🏢 ERP Interna</div>
             <div class="channel-counters">
-              ${fieldsErp.map(f => renderCounter(f)).join('')}
+              ${fieldsErp.map(f => counterErpHtml).join('')}
             </div>
             <div class="channel-rate">
               <div class="process-rate-bar"><div class="process-rate-fill" style="width:${(proc.added_erp || 0) > 0 ? Math.round(((proc.selected_erp || 0) / (proc.added_erp || 0)) * 100) : 0}%"></div></div>
@@ -3788,14 +3751,7 @@ function renderProcesses() {
           </div>
         </div>
         <div class="process-card-footer">
-          ${objetivo > 0 ? `
-            <div class="objetivo-section">
-              <span class="objetivo-label">🎯 Objetivo: ${objetivo}</span>
-              <div class="objetivo-bar"><div class="objetivo-fill" style="width:${objProgress}%"></div></div>
-              <span class="objetivo-progress">${totalSel}/${objetivo} (${objProgress}%)</span>
-            </div>
-          ` : ''}
-          <span class="footer-total">Total BD: ${total} | Selec. 🌐 ${selOfertas} / 🏢 ${selErp} = ${totalSel}</span>
+          <span class="footer-total">Total Base de Datos: ${total} | Seleccionados: ${totalSel}</span>
           <div class="process-rate">
             <div class="process-rate-bar">
               <div class="process-rate-fill" style="width:${rate}%"></div>
