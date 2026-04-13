@@ -55,6 +55,7 @@ let processDelegationFilter = 'all';
 let processTabFilter = 'active'; // 'active' or 'finalized'
 let processPositionFilter = 'all';
 let processCompactView = false;
+let collapsedProcesses = new Set(); // IDs of individually collapsed processes
 
 const DELEGATIONS = {
   'Madrid': ['Madrid'],
@@ -3007,6 +3008,7 @@ function setupProcessesListeners() {
   $('btnCompactView').addEventListener('click', () => {
     processCompactView = !processCompactView;
     $('btnCompactView').classList.toggle('active', processCompactView);
+    if (processCompactView) collapsedProcesses.clear(); // Clear individual states
     renderProcesses();
   });
   document.querySelectorAll('.process-tab').forEach(tab => {
@@ -3154,6 +3156,24 @@ async function handleCreateProcess(e) {
 }
 
 async function handleProcessActions(e) {
+  // Individual expand button
+  const expandBtn = e.target.closest('.btn-process-expand');
+  if (expandBtn) {
+    const id = expandBtn.dataset.id;
+    collapsedProcesses.delete(id);
+    renderProcesses();
+    return;
+  }
+  
+  // Individual collapse button
+  const collapseBtn = e.target.closest('.btn-process-collapse');
+  if (collapseBtn) {
+    const id = collapseBtn.dataset.id;
+    collapsedProcesses.add(id);
+    renderProcesses();
+    return;
+  }
+  
   const counterBtn = e.target.closest('.btn-counter');
   if (counterBtn) {
     const id = counterBtn.dataset.id;
@@ -3352,11 +3372,17 @@ function populateMonthFilter() {
 function renderGlobalStats() {
   const filtered = getFilteredProcesses();
   let totalAdded = 0, totalCalled = 0, totalInterviewed = 0, totalSelected = 0;
+  let addedOfertas = 0, selectedOfertas = 0;
+  let addedErp = 0, selectedErp = 0;
   filtered.forEach(p => {
-    totalAdded += (p.added || 0) + (p.added_erp || 0);
+    const ao = p.added || 0, so = p.selected || 0;
+    const ae = p.added_erp || 0, se = p.selected_erp || 0;
+    totalAdded += ao + ae;
     totalCalled += (p.called || 0) + (p.called_erp || 0);
     totalInterviewed += (p.interviewed || 0) + (p.interviewed_erp || 0);
-    totalSelected += (p.selected || 0) + (p.selected_erp || 0);
+    totalSelected += so + se;
+    addedOfertas += ao; selectedOfertas += so;
+    addedErp += ae; selectedErp += se;
   });
   
   $('gsTotal').textContent = totalAdded;
@@ -3366,6 +3392,22 @@ function renderGlobalStats() {
   
   const rate = totalAdded > 0 ? Math.round((totalSelected / totalAdded) * 100) : 0;
   $('gsRate').textContent = rate + '%';
+  
+  $('gsSelOfertas').textContent = selectedOfertas;
+  $('gsSelErp').textContent = selectedErp;
+  
+  const ofAdded = addedOfertas + addedErp;
+  if (ofAdded > 0) {
+    const pctOfertas = Math.round((selectedOfertas / ofAdded) * 100);
+    const pctErp = Math.round((selectedErp / ofAdded) * 100);
+    $('gsBalanceOfertas').style.width = pctOfertas + '%';
+    $('gsBalanceErp').style.width = pctErp + '%';
+    $('gsBalanceText').textContent = `Ofertas ${pctOfertas}% | ERP ${pctErp}%`;
+  } else {
+    $('gsBalanceOfertas').style.width = '50%';
+    $('gsBalanceErp').style.width = '50%';
+    $('gsBalanceText').textContent = 'Sin datos';
+  }
 }
 
 function renderProcesses() {
@@ -3404,6 +3446,8 @@ function renderProcesses() {
   list.innerHTML = filtered.map(proc => {
     const total = (proc.added || 0) + (proc.added_erp || 0);
     const totalSel = (proc.selected || 0) + (proc.selected_erp || 0);
+    const selOfertas = proc.selected || 0;
+    const selErp = proc.selected_erp || 0;
     const rate = total > 0 ? Math.round((totalSel / total) * 100) : 0;
     const createdDate = proc.created_at ? new Date(proc.created_at).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) : '';
     
@@ -3414,6 +3458,8 @@ function renderProcesses() {
     const isFinished = proc.is_active === false;
     const objetivo = proc.objetivo || 0;
     const objProgress = objetivo > 0 ? Math.min(100, Math.round((totalSel / objetivo) * 100)) : 0;
+    const isCollapsed = processCompactView || collapsedProcesses.has(proc.id);
+    const objEmoji = objetivo > 0 ? (objProgress >= 100 ? '🎯' : (objProgress >= 50 ? '📍' : '⏳')) : '';
     
     // Helper to render a counter row
     const renderCounter = (f) => {
@@ -3440,10 +3486,42 @@ function renderProcesses() {
                 </div>`;
     };
 
+    // Compact single-line: NOMBRE / PUESTO / LUGAR / OBJETIVO
+    if (isCollapsed) {
+      return `
+        <div class="process-card ${isFinished ? 'is-finished' : ''} compact-single">
+          <div class="process-card-compact-line">
+            <button class="btn-process-expand" data-id="${proc.id}" title="Desplegar">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            </button>
+            <span class="compact-name">${esc(proc.name)}</span>
+            <span class="compact-sep">/</span>
+            <span class="compact-pos">${position ? esc(position) : '—'}</span>
+            <span class="compact-sep">/</span>
+            <span class="compact-loc">${province ? esc(province) : '—'}</span>
+            <span class="compact-sep">/</span>
+            ${objetivo > 0 ? `
+              <span class="compact-obj ${objProgress >= 100 ? 'obj-reached' : ''}">${objEmoji} ${totalSel}/${objetivo}</span>
+            ` : `<span class="compact-obj-none">Sin objetivo</span>`}
+            <span class="compact-sep">/</span>
+            <span class="compact-sel" title="🌐 Ofertas: ${selOfertas} | 🏢 ERP: ${selErp}">✅ ${totalSel}</span>
+            <div class="compact-line-actions">
+              ${isFinished ? `<span class="process-finished-badge mini">🏁</span>` : ''}
+              ${isOwn ? `<button class="btn-process-del btn-process-del-mini" data-id="${proc.id}" title="Eliminar">🗑</button>` : ''}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Expanded full card
     return `
-      <div class="process-card ${isFinished ? 'is-finished' : ''} ${processCompactView ? 'compact' : ''}">
+      <div class="process-card ${isFinished ? 'is-finished' : ''}">
         <div class="process-card-header">
           <div class="process-card-title-row">
+            <button class="btn-process-collapse" data-id="${proc.id}" title="Comprimir">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </button>
             <h4 class="process-card-name">${esc(proc.name)}</h4>
             <span class="process-card-date">${createdDate}</span>
           </div>
@@ -3453,14 +3531,6 @@ function renderProcesses() {
             ${objetivo > 0 ? `<span class="process-card-objetivo" title="Objetivo: ${objetivo} seleccionados">🎯 ${objetivo}</span>` : ''}
             <span class="process-card-creator">👤 ${esc(creatorName)}</span>
           </div>
-          ${processCompactView ? `
-            <div class="process-card-compact-summary">
-              <span class="compact-track">🌐 ${proc.added||0}/${proc.called||0}/${proc.interviewed||0}/${proc.selected||0}</span>
-              <span class="compact-divider-track">|</span>
-              <span class="compact-track">🏢 ${proc.added_erp||0}/${proc.called_erp||0}/${proc.interviewed_erp||0}/${proc.selected_erp||0}</span>
-              ${objetivo > 0 ? `<span class="compact-divider-track">|</span><span class="compact-track compact-objetivo">🎯 ${totalSel}/${objetivo} (${objProgress}%)</span>` : ''}
-            </div>
-          ` : ''}
           <div class="process-card-actions-header">
             ${isOwn && !isFinished ? `<button class="btn-process-finalize" data-id="${proc.id}" title="Finalizar proceso">🏁 Finalizar</button>` : ''}
             ${isFinished ? `<span class="process-finished-badge">🏁 Finalizado</span>` : ''}
@@ -3468,7 +3538,6 @@ function renderProcesses() {
             <button class="btn-process-del" data-id="${proc.id}" title="Eliminar">🗑</button>` : ''}
           </div>
         </div>
-        ${!processCompactView ? `
         <div class="process-channels ${isFinished ? 'finished' : ''}">
           <div class="process-channel">
             <div class="channel-header">🌐 Ofertas de Empleo</div>
@@ -3500,7 +3569,7 @@ function renderProcesses() {
               <span class="objetivo-progress">${totalSel}/${objetivo} (${objProgress}%)</span>
             </div>
           ` : ''}
-          <span class="footer-total">Total Base de Datos: ${total} | Seleccionados: ${totalSel}</span>
+          <span class="footer-total">Total BD: ${total} | Selec. 🌐 ${selOfertas} / 🏢 ${selErp} = ${totalSel}</span>
           <div class="process-rate">
             <div class="process-rate-bar">
               <div class="process-rate-fill" style="width:${rate}%"></div>
@@ -3508,7 +3577,6 @@ function renderProcesses() {
             <span class="process-rate-text">Conversión: ${rate}%</span>
           </div>
         </div>
-        ` : ''}
       </div>
     `;
   }).join('');
