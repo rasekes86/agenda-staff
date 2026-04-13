@@ -3091,7 +3091,13 @@ async function handleCreateProcess(e) {
   
   try {
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+    const position = $('processPosition').value;
     const province = $('processProvince').value;
+    if (!position) {
+      showToast('Selecciona un puesto');
+      btn.disabled = false;
+      return;
+    }
     if (!province) {
       showToast('Selecciona una provincia');
       btn.disabled = false;
@@ -3103,6 +3109,7 @@ async function handleCreateProcess(e) {
       user_id: currentUser.id,
       user_name: currentUser.name,
       name,
+      position,
       province,
       added: 0,
       called: 0,
@@ -3118,6 +3125,7 @@ async function handleCreateProcess(e) {
     processes.unshift(newProc);
     
     $('processName').value = '';
+    $('processPosition').value = '';
     $('processProvince').value = '';
     renderProcesses();
     renderGlobalStats();
@@ -3338,6 +3346,7 @@ function renderProcesses() {
     
     const isOwn = proc.user_id === currentUser.id;
     const creatorName = proc.user_name || 'Usuario';
+    const position = proc.position || '';
     const province = proc.province || '';
     const isFinished = proc.is_active === false;
     
@@ -3372,6 +3381,7 @@ function renderProcesses() {
             <span class="process-card-date">${createdDate}</span>
           </div>
           <div class="process-card-meta">
+            ${position ? `<span class="process-card-position">💼 ${esc(position)}</span>` : ''}
             ${province ? `<span class="process-card-province">📍 ${esc(province)}</span>` : ''}
             <span class="process-card-creator">👤 ${esc(creatorName)}</span>
           </div>

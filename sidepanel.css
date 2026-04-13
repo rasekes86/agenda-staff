@@ -2473,6 +2473,15 @@ body {
   padding: 0 12px 6px;
 }
 
+.process-card-position {
+  font-size: 11px;
+  color: #3b82f6;
+  background: rgba(59, 130, 246, 0.1);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
 .process-card-province {
   font-size: 11px;
   color: var(--txt2);
