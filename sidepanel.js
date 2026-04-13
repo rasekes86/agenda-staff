@@ -3527,14 +3527,14 @@ function renderProcesses() {
             <span class="compact-sep">/</span>
             <span class="process-card-date">${createdDate}</span>
             <span class="compact-sep">/</span>
+            ${province ? `<span class="process-card-province">📍 ${esc(province)}</span>` : ''}
+            <span class="compact-sep">/</span>
             <span class="process-card-creator">👤 ${esc(creatorName)}</span>
           </div>
           <div class="process-card-line-bottom">
             ${position ? `<span class="process-card-position">💼 ${esc(position)}</span>` : ''}
             <span class="compact-sep">/</span>
             ${objetivo > 0 ? `<span class="process-card-objetivo" title="Objetivo: ${objetivo} seleccionados">🎯 ${objetivo}</span>` : `<span class="process-card-objetivo-none">Sin objetivo</span>`}
-            <span class="compact-sep">/</span>
-            ${province ? `<span class="process-card-province">📍 ${esc(province)}</span>` : ''}
             <div class="process-card-actions-header">
               ${isOwn && !isFinished ? `<button class="btn-process-finalize" data-id="${proc.id}" title="Finalizar proceso">🏁 Finalizar</button>` : ''}
               ${isFinished ? `<span class="process-finished-badge">🏁 Finalizado</span>` : ''}
