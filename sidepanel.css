@@ -56,18 +56,16 @@ body {
 .btn-candidates {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 10px;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   border: none;
-  background: var(--pri);
-  color: white;
+  background: transparent;
+  color: var(--txt2);
   border-radius: 6px;
-  font-size: 11px;
   cursor: pointer;
-  transition: all 0.2s;
-  white-space: nowrap;
 }
-.btn-candidates:hover { filter: brightness(1.15); transform: translateY(-1px); }
+.btn-candidates:hover { background: var(--bg3); color: var(--txt); }
 
 
 .title { font-size: 15px; font-weight: 600; flex-shrink: 0; }

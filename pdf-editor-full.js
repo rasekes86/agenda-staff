@@ -1112,6 +1112,11 @@ function removeDniNie(text) {
     .trim();
 }
 
+function normalizeText(text) {
+  // Remove accents and normalize for comparison (e.g. García → Garcia)
+  return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 async function searchSignatures() {
   const signatureSearchInput = $('signatureSearchInput');
   const signatureResults = $('signatureResults');
@@ -1139,18 +1144,25 @@ async function searchSignatures() {
     }
     
     for (const term of searchTerms) {
-      const query = `?select=*&name=ilike.*${encodeURIComponent(term)}*&order=name.asc`;
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/signatures${query}`, { headers });
+      // Search with original term AND normalized (no accents) term for better matching
+      const normalizedTerm = normalizeText(term);
+      const searchValues = [term];
+      if (normalizedTerm !== term) searchValues.push(normalizedTerm);
       
-      if (res.ok) {
-        const signatures = await res.json();
-        if (signatures && signatures.length > 0) {
-          signatures.forEach(sig => {
-            if (!allSignatures.find(s => s.id === sig.id)) {
-              allSignatures.push(sig);
-              foundNames.push(sig.name.toLowerCase());
-            }
-          });
+      for (const searchTerm of searchValues) {
+        const query = `?select=*&name=ilike.*${encodeURIComponent(searchTerm)}*&order=name.asc`;
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/signatures${query}`, { headers });
+        
+        if (res.ok) {
+          const signatures = await res.json();
+          if (signatures && signatures.length > 0) {
+            signatures.forEach(sig => {
+              if (!allSignatures.find(s => s.id === sig.id)) {
+                allSignatures.push(sig);
+                foundNames.push(normalizeText(sig.name).toLowerCase());
+              }
+            });
+          }
         }
       }
     }
@@ -1170,7 +1182,7 @@ function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames
   
   const normalizedFoundNames = foundNames.map(n => n.toLowerCase());
   const missingNames = searchedTerms.filter(term => {
-    const normalizedTerm = term.toLowerCase();
+    const normalizedTerm = normalizeText(term).toLowerCase();
     return !normalizedFoundNames.some(found => found.includes(normalizedTerm) || normalizedTerm.includes(found));
   });
   

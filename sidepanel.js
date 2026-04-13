@@ -2811,6 +2811,11 @@ function removeDniNie(text) {
     .trim();
 }
 
+function normalizeText(text) {
+  // Remove accents and normalize for comparison (e.g. García → Garcia)
+  return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 // Search signatures in Supabase (one name per line - commas are part of the name)
 async function searchSignatures() {
   const searchInput = $('signatureSearchInput').value.trim();
@@ -2843,28 +2848,35 @@ async function searchSignatures() {
 
     // Search for each term
     for (const term of searchTerms) {
-      // Query signatures table - search for exact or partial match
-      const query = `?select=*&name=ilike.*${encodeURIComponent(term)}*&order=name.asc`;
-      const url = `${SUPABASE_URL}/rest/v1/signatures${query}`;
+      // Search with original term AND normalized (no accents) term for better matching
+      const normalizedTerm = normalizeText(term);
+      const searchValues = [term];
+      if (normalizedTerm !== term) searchValues.push(normalizedTerm);
+      
+      for (const searchTerm of searchValues) {
+        // Query signatures table - search for exact or partial match
+        const query = `?select=*&name=ilike.*${encodeURIComponent(searchTerm)}*&order=name.asc`;
+        const url = `${SUPABASE_URL}/rest/v1/signatures${query}`;
 
-      const res = await fetch(url, {
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': `Bearer ${session.access_token}`
-        }
-      });
+        const res = await fetch(url, {
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${session.access_token}`
+          }
+        });
 
-      if (res.ok) {
-        const signatures = await res.json();
-        if (signatures && signatures.length > 0) {
-          // Add to results, avoiding duplicates by id
-          signatures.forEach(sig => {
-            if (!allSignatures.find(s => s.id === sig.id)) {
-              allSignatures.push(sig);
-              // Store in uppercase for comparison
-              foundNames.push(sig.name.toUpperCase());
-            }
-          });
+        if (res.ok) {
+          const signatures = await res.json();
+          if (signatures && signatures.length > 0) {
+            // Add to results, avoiding duplicates by id
+            signatures.forEach(sig => {
+              if (!allSignatures.find(s => s.id === sig.id)) {
+                allSignatures.push(sig);
+                // Store normalized for accent-insensitive comparison
+                foundNames.push(normalizeText(sig.name).toUpperCase());
+              }
+            });
+          }
         }
       }
     }
@@ -2887,9 +2899,8 @@ function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames
   // Determine which searched terms were NOT found
   const normalizedFoundNames = foundNames.map(n => n.toUpperCase());
   const missingNames = searchedTerms.filter(term => {
-    // Normalize term to uppercase for comparison
-    const normalizedTerm = term.toUpperCase();
-    // Check if term matches any found name (partial match)
+    // Normalize term (remove accents) and uppercase for comparison
+    const normalizedTerm = normalizeText(term).toUpperCase();
     return !normalizedFoundNames.some(found => found.includes(normalizedTerm) || normalizedTerm.includes(found));
   });
   
