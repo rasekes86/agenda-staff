@@ -2836,7 +2836,11 @@ body {
    ============================================ */
 
 .process-card.compact .process-card-header {
-  padding: 6px 10px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
 }
 
 .process-card.compact .process-card-name {
@@ -2848,70 +2852,166 @@ body {
 }
 
 .process-card.compact .process-card-meta {
-  padding: 0 10px 4px;
+  padding: 0;
   gap: 6px;
 }
 
 .process-card.compact .process-card-position,
 .process-card.compact .process-card-province,
-.process-card.compact .process-card-creator {
+.process-card.compact .process-card-creator,
+.process-card.compact .process-card-objetivo {
   font-size: 10px;
   padding: 1px 6px;
 }
 
-.process-channels.compact {
-  gap: 0;
-}
-
-.process-channels.compact .channel-header {
+.process-card-compact-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
   font-size: 10px;
-  padding: 4px 8px 2px;
+  color: var(--txt2);
+  font-family: monospace;
+  border-top: 1px dashed var(--bor);
+  border-bottom: 1px dashed var(--bor);
+  margin-top: 2px;
+  padding-top: 4px;
+  padding-bottom: 4px;
 }
 
-.channel-divider {
-  background: var(--bor);
-  width: 1px;
+.compact-track {
+  font-weight: 600;
+  white-space: nowrap;
 }
 
-.process-channels.compact .channel-divider {
-  width: 1px;
+.compact-divider-track {
+  color: var(--txt3);
+  font-size: 9px;
 }
 
-.counter-row.compact {
-  padding: 4px 8px;
+.compact-objetivo {
+  color: #f59e0b;
+  font-weight: 700;
 }
 
-.counter-row.compact .counter-icon {
+.process-card.compact .process-card-actions-header {
+  margin-top: 2px;
+}
+
+/* ============================================
+   COUNTER SUM INPUT
+   ============================================ */
+
+.counter-sum-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  background: var(--bg);
+  border: 2px solid var(--pri);
+  border-radius: 4px;
+  padding: 1px 2px;
+}
+
+.counter-sum-icon {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--pri);
+  line-height: 1;
+  padding-left: 2px;
+}
+
+.counter-sum-input {
+  width: 42px;
+  padding: 1px 3px;
+  border: none;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  outline: none;
+  color: var(--txt);
+  background: transparent;
+  line-height: 1.2;
+}
+
+.counter-sum-input::placeholder {
+  color: var(--txt3);
+  font-weight: 400;
   font-size: 11px;
 }
 
-.counter-row.compact .counter-label {
+.counter-sum-input::-webkit-inner-spin-button,
+.counter-sum-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.counter-sum-input[type=number] {
+  -moz-appearance: textfield;
+}
+
+/* ============================================
+   OBJETIVO (TARGET)
+   ============================================ */
+
+.process-card-objetivo {
+  font-size: 11px;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.objetivo-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 6px;
+}
+
+.objetivo-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #f59e0b;
+  white-space: nowrap;
+}
+
+.objetivo-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--bg3);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.objetivo-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #f59e0b, #10b981);
+  border-radius: 4px;
+  transition: width 0.3s;
+}
+
+.objetivo-progress {
   font-size: 10px;
+  color: var(--txt2);
+  font-weight: 600;
+  white-space: nowrap;
 }
 
-.counter-row.compact .counter-value {
-  font-size: 13px;
-  min-width: 24px;
+#processObjetivo {
+  padding: 8px 10px;
+  border: 1px solid var(--bor);
+  border-radius: var(--rad);
+  background: var(--bg);
+  color: var(--txt);
+  font-size: 12px;
+  outline: none;
 }
 
-.btn-counter.compact {
-  width: 24px;
-  height: 24px;
-  font-size: 14px;
+#processObjetivo:focus {
+  border-color: var(--pri);
 }
 
-.process-card-footer.compact {
-  padding: 5px 10px;
-}
-
-.process-card-footer.compact .footer-total {
-  font-size: 9px;
-}
-
-.process-card-footer.compact .process-rate-text {
-  font-size: 9px;
-}
-
-.process-card-footer.compact .process-rate-bar {
-  height: 4px;
+#processObjetivo::placeholder {
+  color: var(--txt3);
 }
