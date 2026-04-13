@@ -53,6 +53,8 @@ let processes = [];
 let processMonthFilter = 'all';
 let processDelegationFilter = 'all';
 let processTabFilter = 'active'; // 'active' or 'finalized'
+let processPositionFilter = 'all';
+let processCompactView = false;
 
 const DELEGATIONS = {
   'Madrid': ['Madrid'],
@@ -2997,6 +2999,16 @@ function setupProcessesListeners() {
     renderProcesses();
     renderGlobalStats();
   });
+  $('processPositionFilter').addEventListener('change', (e) => {
+    processPositionFilter = e.target.value;
+    renderProcesses();
+    renderGlobalStats();
+  });
+  $('btnCompactView').addEventListener('click', () => {
+    processCompactView = !processCompactView;
+    $('btnCompactView').classList.toggle('active', processCompactView);
+    renderProcesses();
+  });
   document.querySelectorAll('.process-tab').forEach(tab => {
     tab.addEventListener('click', () => {
       document.querySelectorAll('.process-tab').forEach(t => t.classList.remove('active'));
@@ -3148,6 +3160,41 @@ async function handleProcessActions(e) {
     return;
   }
   
+  const counterValue = e.target.closest('.counter-value');
+  if (counterValue) {
+    const proc = processes.find(p => p.id === counterValue.dataset.id);
+    if (!proc || proc.is_active === false) return;
+    const field = counterValue.dataset.field;
+    const currentVal = proc[field] || 0;
+    
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = '0';
+    input.value = currentVal;
+    input.className = 'counter-input';
+    input.style.cssText = 'width:50px;padding:2px 4px;border:1px solid var(--pri);border-radius:4px;font-size:14px;font-weight:700;text-align:center;outline:none;color:var(--txt);background:var(--bg);';
+    
+    const saveValue = async () => {
+      const newVal = Math.max(0, parseInt(input.value) || 0);
+      if (newVal !== currentVal) {
+        await updateCounter(id, field, newVal - currentVal);
+      } else {
+        input.replaceWith(counterValue);
+      }
+    };
+    
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+      if (ev.key === 'Escape') { input.value = currentVal; input.blur(); }
+    });
+    input.addEventListener('blur', saveValue);
+    
+    counterValue.replaceWith(input);
+    input.focus();
+    input.select();
+    return;
+  }
+  
   const delBtn = e.target.closest('.btn-process-del');
   if (delBtn) {
     deleteProcess(delBtn.dataset.id);
@@ -3247,6 +3294,11 @@ function getFilteredProcesses() {
       const procDelegation = getDelegationForProvince(p.province);
       return procDelegation === processDelegationFilter;
     });
+  }
+
+  // Filter by position
+  if (processPositionFilter !== 'all') {
+    filtered = filtered.filter(p => p.position === processPositionFilter);
   }
 
   // Filter by tab (active vs finalized)
@@ -3351,14 +3403,38 @@ function renderProcesses() {
     const isFinished = proc.is_active === false;
     
     // Helper to render a counter row (used inside .map(f => ...))
-    const renderCounter = (f) => isFinished ? `
+    const renderCounter = (f) => {
+      if (processCompactView) {
+        return isFinished ? `
+                <div class="counter-row compact" style="border-left: 3px solid ${f.color}">
+                  <div class="counter-info">
+                    <span class="counter-icon">${f.icon}</span>
+                    <span class="counter-label">${f.label}</span>
+                  </div>
+                  <div class="counter-controls counter-locked">
+                    <span class="counter-value" data-id="${proc.id}" data-field="${f.key}">${proc[f.key] || 0}</span>
+                  </div>
+                </div>` : `
+                <div class="counter-row compact" style="border-left: 3px solid ${f.color}">
+                  <div class="counter-info">
+                    <span class="counter-icon">${f.icon}</span>
+                    <span class="counter-label">${f.label}</span>
+                  </div>
+                  <div class="counter-controls">
+                    <button class="btn-counter compact" data-id="${proc.id}" data-field="${f.key}" data-delta="-1" title="Restar">−</button>
+                    <span class="counter-value clickable" data-id="${proc.id}" data-field="${f.key}" title="Clic para editar">${proc[f.key] || 0}</span>
+                    <button class="btn-counter compact" data-id="${proc.id}" data-field="${f.key}" data-delta="1" title="Sumar">+</button>
+                  </div>
+                </div>`;
+      }
+      return isFinished ? `
                 <div class="counter-row" style="border-left: 3px solid ${f.color}">
                   <div class="counter-info">
                     <span class="counter-icon">${f.icon}</span>
                     <span class="counter-label">${f.label}</span>
                   </div>
                   <div class="counter-controls counter-locked">
-                    <span class="counter-value">${proc[f.key] || 0}</span>
+                    <span class="counter-value" data-id="${proc.id}" data-field="${f.key}">${proc[f.key] || 0}</span>
                   </div>
                 </div>` : `
                 <div class="counter-row" style="border-left: 3px solid ${f.color}">
@@ -3368,13 +3444,14 @@ function renderProcesses() {
                   </div>
                   <div class="counter-controls">
                     <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="-1" title="Restar">−</button>
-                    <span class="counter-value">${proc[f.key] || 0}</span>
+                    <span class="counter-value clickable" data-id="${proc.id}" data-field="${f.key}" title="Clic para editar">${proc[f.key] || 0}</span>
                     <button class="btn-counter" data-id="${proc.id}" data-field="${f.key}" data-delta="1" title="Sumar">+</button>
                   </div>
                 </div>`;
+    };
 
     return `
-      <div class="process-card ${isFinished ? 'is-finished' : ''}">
+      <div class="process-card ${isFinished ? 'is-finished' : ''} ${processCompactView ? 'compact' : ''}">
         <div class="process-card-header">
           <div class="process-card-title-row">
             <h4 class="process-card-name">${esc(proc.name)}</h4>
@@ -3392,7 +3469,7 @@ function renderProcesses() {
             <button class="btn-process-del" data-id="${proc.id}" title="Eliminar">🗑</button>` : ''}
           </div>
         </div>
-        <div class="process-channels ${isFinished ? 'finished' : ''}">
+        <div class="process-channels ${isFinished ? 'finished' : ''} ${processCompactView ? 'compact' : ''}">
           <div class="process-channel">
             <div class="channel-header">🌐 Ofertas de Empleo</div>
             <div class="channel-counters">
@@ -3415,7 +3492,7 @@ function renderProcesses() {
             </div>
           </div>
         </div>
-        <div class="process-card-footer">
+        <div class="process-card-footer ${processCompactView ? 'compact' : ''}">
           <span class="footer-total">Total Base de Datos: ${total} | Seleccionados: ${totalSel}</span>
           <div class="process-rate">
             <div class="process-rate-bar">
