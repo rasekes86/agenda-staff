@@ -1346,11 +1346,27 @@ function setupPdfListeners() {
 }
 
 function openPdfModal() {
-  $('pdfModal').classList.add('show');
+  // Show the modal in fullscreen mode (occupy entire sidepanel)
+  $('pdfModal').classList.add('show', 'fullscreen');
+  
+  // Hide header, calendar and days list when modal is open
+  document.querySelector('.header').style.display = 'none';
+  document.querySelector('.days-section').style.display = 'none';
+  document.querySelector('.mini-calendar').style.display = 'none';
 }
 
 function closePdfModal() {
-  $('pdfModal').classList.remove('show');
+  $('pdfModal').classList.remove('show', 'fullscreen');
+  
+  // Restore header and days list when modal is closed
+  document.querySelector('.header').style.display = '';
+  document.querySelector('.days-section').style.display = '';
+  
+  // Only show mini-calendar if it was NOT hidden before (respect the hidden class)
+  const miniCal = document.querySelector('.mini-calendar');
+  if (miniCal) {
+    miniCal.style.display = '';
+  }
 }
 
 // Image to PDF functions
@@ -2554,9 +2570,15 @@ let bulkFiles = []; // Array of { file, name (UPPERCASE), base64, status: 'new'|
 
 // Setup signature listeners
 function setupSignatureListeners() {
-  // Open signatures modal
+  // Open signatures modal - fullscreen in sidepanel
   $('btnSignatures').addEventListener('click', () => {
-    $('signaturesModal').classList.add('show');
+    $('signaturesModal').classList.add('show', 'fullscreen');
+    
+    // Hide header, calendar and days list
+    document.querySelector('.header').style.display = 'none';
+    document.querySelector('.days-section').style.display = 'none';
+    document.querySelector('.mini-calendar').style.display = 'none';
+    
     $('signatureSearchInput').focus();
     resetSignatureState();
   });
@@ -2574,6 +2596,9 @@ function setupSignatureListeners() {
 
   // View all signatures button
   $('btnViewAllSignatures').addEventListener('click', loadAllSignatures);
+
+  // Preview all signatures button
+  $('btnPreviewSignatures').addEventListener('click', previewAllSignatures);
 
   // Single upload - Dropzone click
   $('signatureDropzone').addEventListener('click', () => {
@@ -2604,7 +2629,13 @@ function setupSignatureListeners() {
   // Upload single signature
   $('btnUploadSignature').addEventListener('click', uploadSignature);
 
-  // === BULK UPLOAD ===
+  // Bulk upload toggle
+  $('btnToggleBulk').addEventListener('click', () => {
+    const content = $('signaturesBulkContent');
+    const isVisible = content.style.display !== 'none';
+    content.style.display = isVisible ? 'none' : 'block';
+  });
+
   // Bulk dropzone click
   $('bulkDropzone').addEventListener('click', () => {
     $('bulkFileInput').click();
@@ -2612,7 +2643,9 @@ function setupSignatureListeners() {
 
   // Bulk file input change
   $('bulkFileInput').addEventListener('change', (e) => {
-    if (e.target.files.length > 0) handleBulkFiles(Array.from(e.target.files));
+    if (e.target.files && e.target.files.length > 0) {
+      handleBulkUpload(e.target.files);
+    }
   });
 
   // Bulk drag and drop
@@ -2626,15 +2659,23 @@ function setupSignatureListeners() {
   $('bulkDropzone').addEventListener('drop', (e) => {
     e.preventDefault();
     $('bulkDropzone').classList.remove('drag-over');
-    if (e.dataTransfer.files.length > 0) handleBulkFiles(Array.from(e.dataTransfer.files));
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleBulkUpload(e.dataTransfer.files);
+    }
   });
-
-  // Bulk upload button
-  $('btnBulkUpload').addEventListener('click', executeBulkUpload);
 }
 
 function closeSignaturesModal() {
-  $('signaturesModal').classList.remove('show');
+  $('signaturesModal').classList.remove('show', 'fullscreen');
+  
+  // Restore header, calendar and days list
+  document.querySelector('.header').style.display = '';
+  document.querySelector('.days-section').style.display = '';
+  const miniCal = document.querySelector('.mini-calendar');
+  if (miniCal) {
+    miniCal.style.display = '';
+  }
+  
   // Remove preview overlay if exists
   const overlay = document.querySelector('.sig-preview-overlay');
   if (overlay) overlay.remove();
@@ -2665,18 +2706,29 @@ function resetSignatureState() {
 }
 
 // Search signatures in Supabase (supports multiple names, one per line)
+// Remove DNI/NIE patterns from text
+function removeDniNie(text) {
+  return text
+    .replace(/\s*\d{8}[A-Za-z]\s*/gi, ' ')
+    .replace(/\s*[XYZ]\d{7}[A-Za-z]\s*/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 async function searchSignatures() {
   const searchInput = $('signatureSearchInput').value.trim();
-  
+
   if (!searchInput) {
     showToast('Introduce un nombre para buscar');
     return;
   }
 
+  // Split ONLY by newlines (Enter) - commas can be part of the name!
+  // Also remove DNI/NIE from each term automatically
   const searchTerms = searchInput.split('\n')
-    .map(term => term.trim().toLowerCase())
+    .map(term => removeDniNie(term.trim()))
     .filter(term => term.length > 0);
-  
+
   if (searchTerms.length === 0) {
     showToast('Introduce un nombre para buscar');
     return;
@@ -2684,14 +2736,16 @@ async function searchSignatures() {
 
   signatureSearchTerm = searchInput;
   $('signaturesResults').innerHTML = '<div class="signatures-loading"></div>';
+  $('signaturesUploadSection').style.display = 'none';
 
   try {
     let allSignatures = [];
-    
+    const foundNames = [];
+
     for (const term of searchTerms) {
       const query = `?select=*&name=ilike.*${encodeURIComponent(term)}*&order=name.asc`;
       const url = `${SUPABASE_URL}/rest/v1/signatures${query}`;
-      
+
       const res = await fetch(url, {
         headers: {
           'apikey': SUPABASE_KEY,
@@ -2705,23 +2759,496 @@ async function searchSignatures() {
           signatures.forEach(sig => {
             if (!allSignatures.find(s => s.id === sig.id)) {
               allSignatures.push(sig);
+              foundNames.push(sig.name.toUpperCase());
             }
           });
         }
       }
     }
 
-    if (allSignatures.length > 0) {
-      allSignatures.sort((a, b) => a.name.localeCompare(b.name));
-      renderSignatureResults(allSignatures);
-    } else {
-      showSignaturesUploadSection(searchTerms.join(', '));
-    }
+    allSignatures.sort((a, b) => a.name.localeCompare(b.name));
+    renderSignatureResultsWithMissing(allSignatures, searchTerms, foundNames);
 
   } catch (err) {
     console.error('Search error:', err);
     showSignaturesUploadSection(searchTerms.join(', '));
   }
+}
+
+// Render signatures with missing names in red (for sidepanel)
+function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames) {
+  const normalizedFoundNames = foundNames.map(n => n.toUpperCase());
+  const missingNames = searchedTerms.filter(term => {
+    const normalizedTerm = term.toUpperCase();
+    return !normalizedFoundNames.some(found => found.includes(normalizedTerm) || normalizedTerm.includes(found));
+  });
+
+  let html = '';
+
+  if (signatures.length > 0) {
+    html += `<div class="signature-found-header">✓ Encontradas (${signatures.length})</div>`;
+    signatures.forEach(sig => {
+      const displayName = sig.name.toUpperCase();
+      html += `
+        <div class="signature-result-item signature-found" data-id="${sig.id}" data-url="${sig.image_url}" data-name="${esc(displayName)}" title="Clic para ${window.selectSignatureForEditor ? 'seleccionar' : 'descargar'}">
+          <span class="signature-result-name">${esc(displayName)}</span>
+          <div class="signature-actions">
+            <button class="signature-delete-btn" data-id="${sig.id}" data-name="${esc(displayName)}" title="Eliminar firma">🗑️</button>
+            <svg class="signature-download-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+          </div>
+        </div>
+      `;
+    });
+  }
+
+  if (missingNames.length > 0) {
+    html += `<div class="signature-missing-header">⚠ No encontradas (${missingNames.length})</div>`;
+    missingNames.forEach(name => {
+      const displayName = name.toUpperCase();
+      html += `
+        <div class="signature-result-item signature-missing">
+          <span class="signature-missing-name">${esc(displayName)}</span>
+          <button class="signature-upload-btn-sidepanel" data-name="${esc(displayName)}" title="Subir firma">📤 Subir</button>
+        </div>
+      `;
+    });
+  }
+
+  if (html === '') {
+    html = `
+      <div class="signatures-empty">
+        <div class="signatures-empty-icon">🔍</div>
+        <div class="signatures-empty-text">Sin resultados</div>
+      </div>
+    `;
+  }
+
+  $('signaturesResults').innerHTML = html;
+
+  // Add click handlers for found signatures (download or select for editor)
+  document.querySelectorAll('.signature-found').forEach(item => {
+    item.addEventListener('click', (e) => {
+      if (e.target.closest('.signature-delete-btn')) return;
+      const url = item.dataset.url;
+      const name = item.dataset.name;
+      if (window.selectSignatureForEditor) {
+        window.selectSignatureForEditor(url, name);
+        closeSignaturesModal();
+      } else {
+        downloadSignature(url, name);
+      }
+    });
+  });
+
+  // Add click handlers for delete buttons
+  document.querySelectorAll('.signature-delete-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      const name = btn.dataset.name;
+      if (confirm(`¿Eliminar la firma de "${name}"?`)) {
+        deleteSignatureFromSidepanel(id, name);
+      }
+    });
+  });
+
+  // Add click handlers for missing signature upload buttons
+  document.querySelectorAll('.signature-upload-btn-sidepanel').forEach(btn => {
+    btn.addEventListener('click', () => {
+      quickUploadMissingSignature(btn.dataset.name);
+    });
+  });
+}
+
+async function deleteSignatureFromSidepanel(id, name) {
+  try {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?id=eq.${id}`, {
+      method: 'DELETE',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${session.access_token}`
+      }
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('Delete error:', errText);
+      throw new Error('Error al eliminar: ' + response.status);
+    }
+
+    showToast('✓ Firma eliminada: ' + name);
+    searchSignatures();
+
+  } catch (err) {
+    console.error('Delete error:', err);
+    showToast('Error: ' + err.message);
+  }
+}
+
+async function quickUploadMissingSignature(name) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    showToast('Subiendo firma de ' + name + '...');
+
+    try {
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify({
+          id,
+          name: name.toUpperCase(),
+          image_url: base64,
+          user_id: currentUser.id,
+          user_name: currentUser.name
+        })
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error('Upload error:', errText);
+        throw new Error('Error al subir firma');
+      }
+
+      showToast('✓ Firma subida: ' + name);
+      searchSignatures();
+
+    } catch (err) {
+      console.error('Upload error:', err);
+      showToast('Error: ' + err.message);
+    }
+  };
+
+  input.click();
+}
+
+async function checkExistingSignatures(names) {
+  const existing = {};
+
+  if (!session) return existing;
+
+  try {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=id,name`, {
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${session.access_token}`
+      }
+    });
+
+    if (response.ok) {
+      const allSigs = await response.json();
+      allSigs.forEach(sig => {
+        const upperName = sig.name.toUpperCase();
+        existing[upperName] = sig;
+      });
+    }
+  } catch (err) {
+    console.error('Error checking existing signatures:', err);
+  }
+
+  return existing;
+}
+
+async function askDuplicateAction(duplicates, existingSignatures) {
+  return new Promise((resolve) => {
+    const modalHtml = `
+      <div class="bulk-duplicate-modal" id="duplicateModal">
+        <div class="bulk-duplicate-content">
+          <div class="bulk-duplicate-header">
+            <h3>⚠️ Firmas duplicadas encontradas</h3>
+          </div>
+          <div class="bulk-duplicate-body">
+            <p>Se encontraron <strong>${duplicates.length}</strong> firma(s) que ya existen:</p>
+            <div class="bulk-duplicate-list">
+              ${duplicates.slice(0, 5).map(d => `
+                <div class="bulk-duplicate-item">
+                  <span class="bulk-duplicate-name">${esc(d.fileName)}</span>
+                  <span class="bulk-duplicate-status">ya existe</span>
+                </div>
+              `).join('')}
+              ${duplicates.length > 5 ? `<div class="bulk-duplicate-more">...y ${duplicates.length - 5} más</div>` : ''}
+            </div>
+            <p class="bulk-duplicate-question">¿Qué deseas hacer con los duplicados?</p>
+          </div>
+          <div class="bulk-duplicate-actions">
+            <button class="bulk-duplicate-btn replace" data-action="replace">🔄 Reemplazar todas</button>
+            <button class="bulk-duplicate-btn keep" data-action="keep">✓ Mantener existentes</button>
+            <button class="bulk-duplicate-btn skip" data-action="skip">⊘ Saltar duplicados</button>
+            <button class="bulk-duplicate-btn cancel" data-action="cancel">✕ Cancelar todo</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    const modal = document.getElementById('duplicateModal');
+
+    modal.querySelectorAll('.bulk-duplicate-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const action = btn.dataset.action;
+        modal.remove();
+        resolve(action);
+      });
+    });
+  });
+}
+
+async function handleBulkUpload(files) {
+  if (!session || !currentUser) {
+    showToast('Debes iniciar sesión para subir firmas');
+    return;
+  }
+
+  const totalFiles = files.length;
+  if (totalFiles === 0) return;
+
+  const fileData = [];
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const fileName = file.name.replace(/\.[^/.]+$/, '').toUpperCase().trim();
+    fileData.push({ file, fileName, base64: null });
+  }
+
+  showToast('Verificando firmas existentes...');
+
+  const existingSignatures = await checkExistingSignatures(fileData.map(f => f.fileName));
+
+  let actionForDuplicates = 'ask';
+  const duplicates = fileData.filter(f => existingSignatures[f.fileName]);
+
+  if (duplicates.length > 0) {
+    actionForDuplicates = await askDuplicateAction(duplicates, existingSignatures);
+    if (actionForDuplicates === 'cancel') {
+      showToast('Carga cancelada');
+      return;
+    }
+  }
+
+  $('bulkProgress').style.display = 'block';
+  $('bulkResults').style.display = 'block';
+  $('bulkResults').innerHTML = '';
+  $('bulkProgressFill').style.width = '0%';
+  $('bulkProgressText').textContent = `0 / ${totalFiles}`;
+
+  let successCount = 0;
+  let errorCount = 0;
+  let skippedCount = 0;
+  let replacedCount = 0;
+
+  for (let i = 0; i < fileData.length; i++) {
+    const { file, fileName } = fileData[i];
+    const existing = existingSignatures[fileName];
+
+    const progress = ((i + 1) / totalFiles) * 100;
+    $('bulkProgressFill').style.width = `${progress}%`;
+    $('bulkProgressText').textContent = `${i + 1} / ${totalFiles}`;
+
+    if (existing) {
+      if (actionForDuplicates === 'skip') {
+        skippedCount++;
+        $('bulkResults').innerHTML += `<div class="bulk-result-item skipped"><span class="bulk-result-icon">⊘</span><span class="bulk-result-name">${esc(fileName)} (ya existe)</span></div>`;
+        continue;
+      } else if (actionForDuplicates === 'keep') {
+        skippedCount++;
+        $('bulkResults').innerHTML += `<div class="bulk-result-item skipped"><span class="bulk-result-icon">→</span><span class="bulk-result-name">${esc(fileName)} (mantenida)</span></div>`;
+        continue;
+      } else if (actionForDuplicates === 'replace') {
+        try {
+          await fetch(`${SUPABASE_URL}/rest/v1/signatures?id=eq.${existing.id}`, {
+            method: 'DELETE',
+            headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${session.access_token}` }
+          });
+        } catch (err) {
+          console.error('Error deleting old signature:', err);
+        }
+      }
+    }
+
+    try {
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify({
+          id,
+          name: fileName.toUpperCase(),
+          image_url: base64,
+          user_id: currentUser.id,
+          user_name: currentUser.name
+        })
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error('Upload error for', fileName, ':', errText);
+        throw new Error('Error al subir');
+      }
+
+      successCount++;
+      if (existing && actionForDuplicates === 'replace') replacedCount++;
+
+      $('bulkResults').innerHTML += `<div class="bulk-result-item success"><span class="bulk-result-icon">✓</span><span class="bulk-result-name">${esc(fileName)}${existing && actionForDuplicates === 'replace' ? ' (reemplazada)' : ''}</span></div>`;
+    } catch (err) {
+      errorCount++;
+      $('bulkResults').innerHTML += `<div class="bulk-result-item error"><span class="bulk-result-icon">✗</span><span class="bulk-result-name">${esc(fileName)}</span></div>`;
+    }
+
+    if (i < fileData.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+
+  let summaryMsg = `✓ ${successCount} subidas`;
+  if (replacedCount > 0) summaryMsg += `, ${replacedCount} reemplazadas`;
+  if (skippedCount > 0) summaryMsg += `, ${skippedCount} omitidas`;
+  if (errorCount > 0) summaryMsg += `, ${errorCount} errores`;
+
+  showToast(summaryMsg);
+  $('bulkProgressText').textContent = summaryMsg;
+  $('bulkFileInput').value = '';
+}
+
+async function previewAllSignatures() {
+  $('signaturesResults').innerHTML = '<div class="signatures-loading"></div>';
+  $('signaturesUploadSection').style.display = 'none';
+
+  try {
+    const query = `?select=*&order=name.asc`;
+    const url = `${SUPABASE_URL}/rest/v1/signatures${query}`;
+
+    const res = await fetch(url, {
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${session.access_token}`
+      }
+    });
+
+    if (!res.ok) {
+      if (res.status === 404) {
+        $('signaturesResults').innerHTML = `<div class="signatures-empty"><div class="signatures-empty-icon">📭</div><div class="signatures-empty-text">No hay firmas guardadas</div></div>`;
+        return;
+      }
+      throw new Error('Error al cargar firmas');
+    }
+
+    const signatures = await res.json();
+
+    if (!signatures || signatures.length === 0) {
+      $('signaturesResults').innerHTML = `<div class="signatures-empty"><div class="signatures-empty-icon">📭</div><div class="signatures-empty-text">No hay firmas guardadas</div></div>`;
+      return;
+    }
+
+    let html = `
+      <div class="signatures-preview-header">
+        <span>📷 Vista previa de firmas (${signatures.length})</span>
+        <button class="btn-close-preview" id="btnClosePreview" title="Cerrar vista previa">✕</button>
+      </div>
+      <div class="signatures-preview-grid">
+    `;
+
+    signatures.forEach(sig => {
+      const displayName = sig.name || 'Sin nombre';
+      html += `
+        <div class="signature-preview-card" data-id="${sig.id}" data-name="${esc(displayName)}">
+          <div class="signature-preview-image-container">
+            <img src="${sig.image_url}" alt="${esc(displayName)}" class="signature-preview-image" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 50%22><text x=%2250%%22 y=%2250%%22 text-anchor=%22middle%22 fill=%22%23999%22>Sin imagen</text></svg>'">
+          </div>
+          <div class="signature-preview-name">${esc(displayName)}</div>
+          <button class="signature-preview-delete" data-id="${sig.id}" data-name="${esc(displayName)}" title="Eliminar firma">🗑️</button>
+        </div>
+      `;
+    });
+
+    html += '</div>';
+    $('signaturesResults').innerHTML = html;
+
+    $('btnClosePreview').addEventListener('click', () => {
+      $('signaturesResults').innerHTML = `<div class="signatures-empty"><div class="signatures-empty-icon">🔍</div><div class="signatures-empty-text">Busca una firma o pulsa el botón de lista</div></div>`;
+    });
+
+    document.querySelectorAll('.signature-preview-delete').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        const name = btn.dataset.name;
+        if (confirm(`¿Eliminar la firma de "${name}"?`)) {
+          try {
+            await deleteSignatureFromPreview(id, name);
+            const card = btn.closest('.signature-preview-card');
+            if (card) {
+              card.style.opacity = '0';
+              card.style.transform = 'scale(0.8)';
+              setTimeout(() => {
+                card.remove();
+                const header = document.querySelector('.signatures-preview-header span');
+                if (header) {
+                  const remaining = document.querySelectorAll('.signature-preview-card').length;
+                  header.textContent = `📷 Vista previa de firmas (${remaining})`;
+                }
+              }, 300);
+            }
+          } catch (err) {
+            showToast('Error al eliminar: ' + err.message);
+          }
+        }
+      });
+    });
+
+  } catch (err) {
+    console.error('Preview error:', err);
+    $('signaturesResults').innerHTML = `<div class="signatures-empty"><div class="signatures-empty-icon">⚠️</div><div class="signatures-empty-text">Error al cargar firmas</div></div>`;
+  }
+}
+
+async function deleteSignatureFromPreview(id, name) {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?id=eq.${id}`, {
+    method: 'DELETE',
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': `Bearer ${session.access_token}`,
+      'Prefer': 'return=minimal'
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al eliminar');
+  }
+
+  showToast(`Firma de "${name}" eliminada`);
 }
 
 // Render signatures with thumbnail, preview, download, delete buttons
