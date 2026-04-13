@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "AGENDA STAFF",
-  "version": "6.0.0",
-  "description": "Agenda colaborativa con autenticaci\u00f3n de usuarios, notificaciones, herramientas PDF y control de procesos",
+  "version": "6.1.0",
+  "description": "Agenda colaborativa con autenticaci\u00f3n, notificaciones, herramientas PDF, firmas y control de procesos",
   "permissions": [
     "sidePanel",
     "storage",
@@ -47,7 +47,11 @@
         "pdf-lib.min.js",
         "pdf.min.js",
         "pdf.worker.min.js",
-        "mammoth.browser.min.js"
+        "mammoth.browser.min.js",
+        "screenshot-selector.js",
+        "supabase-config.js",
+        "offscreen.html",
+        "offscreen.js"
       ],
       "matches": [
         "<all_urls>"

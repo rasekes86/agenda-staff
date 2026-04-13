@@ -1,5 +1,5 @@
 // Background Service Worker for AGENDA STAFF
-// v5.6.0 - Con notificaciones (excluye eventos completados)
+// v5.23.20 - Con notificaciones (excluye eventos completados)
 
 // Open side panel when extension icon is clicked
 chrome.action.onClicked.addListener((tab) => {
@@ -189,7 +189,8 @@ async function handleStartScreenshot() {
       throw new Error('No hay pestaña activa');
     }
     
-    if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
+    // Check if tab.url exists before using startsWith
+    if (tab.url && (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://'))) {
       throw new Error('No se puede capturar páginas de Chrome');
     }
     
@@ -274,7 +275,7 @@ async function notifySidepanel(message) {
 // ============================================
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('AGENDA STAFF v5.6.0 instalada');
+  console.log('AGENDA STAFF v5.23.20 instalada');
   
   chrome.contextMenus.create({
     id: "sendToAgenda",

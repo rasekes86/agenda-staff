@@ -1,5 +1,5 @@
 // ============================================
-// AGENDA STAFF v6.0.0 - FULL FEATURES
+// AGENDA STAFF v5.23.20 - STICKY SIDEBAR
 // ============================================
 
 const SUPABASE_URL = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
@@ -36,7 +36,7 @@ let mergePdfs = [];
 let splitPdfFile = null;
 
 // Word to PDF state
-let wordFiles = [];
+let wordFile = null;
 
 // PDF Editor state
 let editorPdfBytes = null;
@@ -48,21 +48,22 @@ let editorScale = 1;
 let editorCanvas = null;
 let selectedElement = null;
 
+
 // Processes state
 let processes = [];
 let processMonthFilter = 'all';
 let processDelegationFilter = 'all';
-let processTabFilter = 'active'; // 'active' or 'finalized'
+let processTabFilter = 'active';
 let processPositionFilter = 'all';
 let processCompactView = false;
-let collapsedProcesses = new Set(); // IDs of individually collapsed processes
+let collapsedProcesses = new Set();
 
 const DELEGATIONS = {
   'Madrid': ['Madrid'],
   'Valencia': ['Alicante', 'Castellón', 'Valencia'],
   'Barcelona': ['Barcelona', 'Girona', 'Lleida', 'Tarragona'],
   'Sevilla': ['Almería', 'Cádiz', 'Córdoba', 'Granada', 'Huelva', 'Jaén', 'Málaga', 'Sevilla'],
-  'Nacional': [] // All other provinces
+  'Nacional': []
 };
 
 // DOM
@@ -465,7 +466,16 @@ async function api(method, body, query = '') {
 // ============================================
 
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('AGENDA STAFF v6.0.0 iniciado...');
+  console.log('AGENDA STAFF v5.23.20 iniciado...');
+  
+  // Configure PDF.js worker after library is loaded
+  if (typeof pdfjsLib !== 'undefined') {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('pdf.worker.min.js');
+    console.log('PDF.js worker configured');
+  } else {
+    console.log('PDF.js library not loaded - PDF preview will use placeholder');
+  }
+  
   checkSession();
   setupListeners();
 });
@@ -567,9 +577,10 @@ function setupListeners() {
   
   // Signatures Manager
   setupSignatureListeners();
-  
+
   // Processes Manager
   setupProcessesListeners();
+
   
   // Drag events
   daysList.addEventListener('dragstart', handleDragStart);
@@ -1280,38 +1291,7 @@ function setupPdfListeners() {
   $('btnPdf').addEventListener('click', openPdfModal);
   $('closePdfModal').addEventListener('click', closePdfModal);
   
-  // Tab switching
-  document.querySelectorAll('.pdf-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.pdf-tab').forEach(t => t.classList.remove('active'));
-      document.querySelectorAll('.pdf-tab-content').forEach(c => c.classList.remove('active'));
-      tab.classList.add('active');
-      const tabId = tab.dataset.tab + 'Tab';
-      $(tabId).classList.add('active');
-    });
-  });
-  
-  // Tab 1: Image to PDF
-  $('pdfDropzone').addEventListener('click', () => $('pdfFileInput').click());
-  $('pdfFileInput').addEventListener('change', handlePdfFileSelect);
-  $('pdfDropzone').addEventListener('dragover', handlePdfDragOver);
-  $('pdfDropzone').addEventListener('dragleave', handlePdfDragLeave);
-  $('pdfDropzone').addEventListener('drop', handlePdfDrop);
-  $('pdfClearBtn').addEventListener('click', clearPdfFiles);
-  $('btnPortrait').addEventListener('click', () => selectOrientation('portrait'));
-  $('btnLandscape').addEventListener('click', () => selectOrientation('landscape'));
-  $('btnConvertPdf').addEventListener('click', convertToPdf);
-  
-  // Tab 2: Word to PDF
-  $('wordDropzone').addEventListener('click', () => $('wordFileInput').click());
-  $('wordFileInput').addEventListener('change', handleWordFileSelect);
-  $('wordDropzone').addEventListener('dragover', handleWordDragOver);
-  $('wordDropzone').addEventListener('dragleave', handleWordDragLeave);
-  $('wordDropzone').addEventListener('drop', handleWordDrop);
-  $('wordClearBtn').addEventListener('click', clearWordFile);
-  $('btnWordToPdf').addEventListener('click', convertWordToPdf);
-  
-  // Tab 3: PDF Editor
+  // PDF Editor (simplified - no tabs)
   $('pdfEditorUpload').addEventListener('click', () => $('editorFileInput').click());
   $('editorFileInput').addEventListener('change', handleEditorFileSelect);
   $('pdfEditorUpload').addEventListener('dragover', (e) => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); });
@@ -1325,32 +1305,31 @@ function setupPdfListeners() {
   $('btnNextPage').addEventListener('click', () => navigateEditorPage(1));
   $('btnSavePdf').addEventListener('click', saveEditedPdf);
   $('btnOpenFullEditor').addEventListener('click', openFullPdfEditor);
-  
-  // Tab 4: Merge PDFs
-  $('mergeDropzone').addEventListener('click', () => $('mergeFileInput').click());
-  $('mergeFileInput').addEventListener('change', handleMergeFileSelect);
-  $('mergeDropzone').addEventListener('dragover', handleMergeDragOver);
-  $('mergeDropzone').addEventListener('dragleave', handleMergeDragLeave);
-  $('mergeDropzone').addEventListener('drop', handleMergeDrop);
-  $('mergeClearBtn').addEventListener('click', clearMergeFiles);
-  $('btnMergePdf').addEventListener('click', mergePdfsAction);
-  
-  // Tab 5: Split PDF
-  $('splitDropzone').addEventListener('click', () => $('splitFileInput').click());
-  $('splitFileInput').addEventListener('change', handleSplitFileSelect);
-  $('splitDropzone').addEventListener('dragover', handleSplitDragOver);
-  $('splitDropzone').addEventListener('dragleave', handleSplitDragLeave);
-  $('splitDropzone').addEventListener('drop', handleSplitDrop);
-  $('splitClearBtn').addEventListener('click', clearSplitFile);
-  $('btnSplitPdf').addEventListener('click', splitPdfAction);
 }
 
 function openPdfModal() {
-  $('pdfModal').classList.add('show');
+  // Show the modal in fullscreen mode (occupy entire sidepanel)
+  $('pdfModal').classList.add('show', 'fullscreen');
+  
+  // Hide header, calendar and days list when modal is open
+  document.querySelector('.header').style.display = 'none';
+  document.querySelector('.days-section').style.display = 'none';
+  document.querySelector('.mini-calendar').style.display = 'none';
 }
 
 function closePdfModal() {
-  $('pdfModal').classList.remove('show');
+  $('pdfModal').classList.remove('show', 'fullscreen');
+  
+  // Restore header and days list when modal is closed
+  document.querySelector('.header').style.display = '';
+  document.querySelector('.days-section').style.display = '';
+  
+  // Only show mini-calendar if it was NOT hidden before (respect the hidden class)
+  const miniCal = document.querySelector('.mini-calendar');
+  if (miniCal) {
+    // Remove any inline display style, let the CSS class control visibility
+    miniCal.style.display = '';
+  }
 }
 
 // Image to PDF functions
@@ -1793,6 +1772,7 @@ async function handleScreenshotResult(dataUrl) {
     
     if (!blob || blob.size === 0) throw new Error('Blob vacío');
     
+    // Try clipboard first
     let clipboardSuccess = false;
     try {
       await navigator.clipboard.write([
@@ -1803,20 +1783,24 @@ async function handleScreenshotResult(dataUrl) {
       console.log('Clipboard no disponible:', clipErr.message);
     }
     
-    try {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `captura-${Date.now()}.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (downloadErr) {
-      console.log('Download error:', downloadErr.message);
+    // Only download if clipboard failed
+    if (!clipboardSuccess) {
+      try {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `captura-${Date.now()}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (downloadErr) {
+        console.log('Download error:', downloadErr.message);
+      }
+      showToast('✅ Captura descargada');
+    } else {
+      showToast('✅ Captura copiada al portapapeles');
     }
-    
-    showToast(clipboardSuccess ? '✅ Captura copiada y descargada' : '✅ Captura descargada');
   } catch (err) {
     console.error('Error processing screenshot:', err);
     showToast('Error al procesar: ' + err.message);
@@ -1896,158 +1880,103 @@ function handleWordDragLeave(e) {
 function handleWordDrop(e) {
   e.preventDefault();
   $('wordDropzone').classList.remove('drag-over');
-  const files = Array.from(e.dataTransfer.files).filter(f => {
-    const ext = f.name.split('.').pop().toLowerCase();
-    return ['docx', 'doc'].includes(ext);
-  });
+  const files = e.dataTransfer.files;
   if (files.length > 0) {
-    addWordFiles(files);
+    processWordFile(files[0]);
   }
 }
 
 function handleWordFileSelect(e) {
-  const files = Array.from(e.target.files);
-  if (files.length > 0) {
-    addWordFiles(files);
-  }
+  const file = e.target.files[0];
+  if (file) processWordFile(file);
 }
 
-async function addWordFiles(files) {
-  for (const file of files) {
-    const ext = file.name.split('.').pop().toLowerCase();
-    if (!['docx', 'doc'].includes(ext)) {
-      showToast(`${file.name} no es un archivo Word válido`);
-      continue;
-    }
-    
-    const arrayBuffer = await file.arrayBuffer();
-    wordFiles.push({ name: file.name, data: arrayBuffer });
-  }
-  renderWordPreview();
-}
-
-function renderWordPreview() {
-  if (wordFiles.length === 0) {
-    $('wordPreviewArea').style.display = 'none';
-    $('wordDropzone').style.display = 'flex';
+function processWordFile(file) {
+  const validTypes = [
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/msword'
+  ];
+  const ext = file.name.split('.').pop().toLowerCase();
+  
+  if (!validTypes.includes(file.type) && !['docx', 'doc'].includes(ext)) {
+    showToast('Por favor, selecciona un archivo Word (.docx o .doc)');
     return;
   }
   
+  wordFile = file;
+  $('wordFileInfo').innerHTML = `<span style="font-size:16px">📝</span> ${file.name}`;
   $('wordPreviewArea').style.display = 'block';
   $('wordDropzone').style.display = 'none';
-  $('wordPreviewList').innerHTML = wordFiles.map((file, i) => `
-    <div class="pdf-preview-item" data-index="${i}">
-      <span class="pdf-icon">📝</span>
-      <span class="pdf-preview-name">${file.name}</span>
-      <button class="pdf-remove-btn" data-index="${i}">✕</button>
-    </div>
-  `).join('');
-  
-  document.querySelectorAll('#wordPreviewList .pdf-remove-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const index = parseInt(e.target.dataset.index);
-      wordFiles.splice(index, 1);
-      renderWordPreview();
-    });
-  });
 }
 
 function clearWordFile() {
-  wordFiles = [];
+  wordFile = null;
   $('wordPreviewArea').style.display = 'none';
-  $('wordDropzone').style.display = 'flex';
+  $('wordDropzone').style.display = 'block';
   $('wordFileInput').value = '';
 }
 
 async function convertWordToPdf() {
-  if (wordFiles.length === 0) {
-    showToast('Selecciona al menos un archivo Word');
+  if (!wordFile) {
+    showToast('Selecciona un archivo Word');
     return;
   }
   
   const btn = $('btnWordToPdf');
   btn.disabled = true;
-  
-  const totalFiles = wordFiles.length;
-  let successCount = 0;
-  let errorCount = 0;
+  btn.querySelector('.btn-text').textContent = 'Convirtiendo...';
+  btn.querySelector('.btn-loader').style.display = 'inline-block';
   
   try {
-    // Check if mammoth is available
+    // Read the Word file
+    const arrayBuffer = await wordFile.arrayBuffer();
+    
+    // Check if mammoth is available (use window.mammoth for global access)
     const mammothLib = window.mammoth;
     if (!mammothLib) {
       throw new Error('La librería mammoth no está cargada. Recarga la extensión.');
     }
     
-    // Check if jsPDF is available
+    const result = await mammothLib.convertToHtml({ arrayBuffer });
+    const html = result.value;
+    
+    // Create PDF from HTML using jspdf
     if (typeof window.jspdf === 'undefined') {
       throw new Error('La librería jsPDF no está cargada. Recarga la extensión.');
     }
     
     const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
     
-    for (let i = 0; i < wordFiles.length; i++) {
-      const wordFile = wordFiles[i];
-      btn.querySelector('.btn-text').textContent = `Convirtiendo ${i + 1}/${totalFiles}...`;
-      
-      try {
-        // Convert Word to HTML
-        const result = await mammothLib.convertToHtml({ arrayBuffer: wordFile.data });
-        const html = result.value;
-        
-        // Create PDF
-        const doc = new jsPDF();
-        
-        // Parse HTML and add to PDF
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = html;
-        tempDiv.style.width = '170mm';
-        document.body.appendChild(tempDiv);
-        
-        // Extract text content
-        const textContent = tempDiv.innerText || tempDiv.textContent;
-        const lines = doc.splitTextToSize(textContent, 180);
-        
-        let y = 20;
-        const pageHeight = doc.internal.pageSize.height;
-        
-        for (let j = 0; j < lines.length; j++) {
-          if (y > pageHeight - 20) {
-            doc.addPage();
-            y = 20;
-          }
-          doc.text(lines[j], 15, y);
-          y += 7;
-        }
-        
-        document.body.removeChild(tempDiv);
-        
-        // Download PDF
-        const fileName = wordFile.name.replace(/\.(docx|doc)$/i, '.pdf');
-        doc.save(fileName);
-        
-        successCount++;
-        
-        // Small delay between downloads to prevent browser blocking
-        if (i < wordFiles.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 300));
-        }
-        
-      } catch (fileErr) {
-        console.error(`Error converting ${wordFile.name}:`, fileErr);
-        errorCount++;
+    // Parse HTML and add to PDF
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = html;
+    tempDiv.style.width = '170mm';
+    document.body.appendChild(tempDiv);
+    
+    // Extract text content
+    const textContent = tempDiv.innerText || tempDiv.textContent;
+    const lines = doc.splitTextToSize(textContent, 180);
+    
+    let y = 20;
+    const pageHeight = doc.internal.pageSize.height;
+    
+    for (let i = 0; i < lines.length; i++) {
+      if (y > pageHeight - 20) {
+        doc.addPage();
+        y = 20;
       }
+      doc.text(lines[i], 15, y);
+      y += 7;
     }
     
-    // Show result
-    if (successCount === totalFiles) {
-      showToast(`✅ ${successCount} PDFs creados correctamente`);
-    } else if (successCount > 0) {
-      showToast(`✅ ${successCount} convertidos, ❌ ${errorCount} errores`);
-    } else {
-      showToast('❌ Error al convertir los archivos');
-    }
+    document.body.removeChild(tempDiv);
     
+    // Download PDF
+    const fileName = wordFile.name.replace(/\.(docx|doc)$/i, '.pdf');
+    doc.save(fileName);
+    
+    showToast('✅ PDF creado correctamente');
     clearWordFile();
     
   } catch (err) {
@@ -2100,6 +2029,12 @@ async function loadPdfForEditor(file) {
     return;
   }
   
+  // Ensure modal is open
+  const pdfModal = $('pdfModal');
+  if (pdfModal && !pdfModal.classList.contains('show')) {
+    openPdfModal();
+  }
+  
   try {
     const arrayBuffer = await file.arrayBuffer();
     editorPdfBytes = new Uint8Array(arrayBuffer);
@@ -2119,10 +2054,14 @@ async function loadPdfForEditor(file) {
     // Render first page
     await renderEditorPage();
     
-    // Show UI
-    $('pdfEditorUpload').style.display = 'none';
-    $('pdfEditorNav').style.display = 'flex';
-    $('btnSavePdf').style.display = 'flex';
+    // Show UI (with null checks)
+    const uploadEl = $('pdfEditorUpload');
+    const navEl = $('pdfEditorNav');
+    const saveBtn = $('btnSavePdf');
+    
+    if (uploadEl) uploadEl.style.display = 'none';
+    if (navEl) navEl.style.display = 'flex';
+    if (saveBtn) saveBtn.style.display = 'flex';
     
     showToast(`PDF cargado: ${editorTotalPages} páginas`);
     
@@ -2133,71 +2072,96 @@ async function loadPdfForEditor(file) {
 }
 
 async function renderEditorPage() {
-  if (!editorPdfDoc) return;
-  
-  const container = $('pdfEditorPages');
-  container.innerHTML = '';
-  
-  // Get page dimensions
-  const page = editorPdfDoc.getPage(editorCurrentPage - 1);
-  const { width, height } = page.getSize();
-  
-  // Calculate scale to fit container (max width ~280px)
-  editorScale = Math.min(280 / width, 400 / height, 1);
-  
-  // Create canvas for rendering
-  const canvasContainer = document.createElement('div');
-  canvasContainer.className = 'pdf-canvas-container';
-  canvasContainer.style.position = 'relative';
-  
-  const canvas = document.createElement('canvas');
-  canvas.width = width * editorScale;
-  canvas.height = height * editorScale;
-  editorCanvas = canvas;
-  
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = 'white';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  
-  // Try to render with pdf.js if available, otherwise show placeholder
-  if (typeof pdfjsLib !== 'undefined') {
-    try {
-      const pdfJsDoc = await pdfjsLib.getDocument(editorPdfBytes).promise;
-      const pdfJsPage = await pdfJsDoc.getPage(editorCurrentPage);
-      const viewport = pdfJsPage.getViewport({ scale: editorScale });
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      await pdfJsPage.render({ canvasContext: ctx, viewport }).promise;
-    } catch (e) {
-      console.log('pdf.js render failed, using placeholder');
-      drawPlaceholder(ctx, canvas.width, canvas.height);
-    }
-  } else {
-    drawPlaceholder(ctx, canvas.width, canvas.height);
+  if (!editorPdfDoc) {
+    console.error('renderEditorPage: No PDF document loaded');
+    return;
   }
   
-  canvasContainer.appendChild(canvas);
+  const container = $('pdfEditorPages');
   
-  // Create overlay for elements
-  const overlay = document.createElement('div');
-  overlay.className = 'pdf-editor-overlay';
-  overlay.id = 'editorOverlay';
-  overlay.style.width = canvas.width + 'px';
-  overlay.style.height = canvas.height + 'px';
+  // Ensure elements array exists for current page
+  if (!editorElements[editorCurrentPage]) {
+    editorElements[editorCurrentPage] = [];
+  }
   
-  // Render existing elements for this page
-  const pageElements = editorElements[editorCurrentPage] || [];
-  pageElements.forEach((el, idx) => {
-    const elDiv = createEditorElement(el, idx);
-    overlay.appendChild(elDiv);
-  });
-  
-  canvasContainer.appendChild(overlay);
-  container.appendChild(canvasContainer);
-  
-  // Update page info
-  $('currentPageNum').textContent = editorCurrentPage;
-  $('totalPages').textContent = editorTotalPages;
+  try {
+    // Get page dimensions first (before clearing container)
+    const page = editorPdfDoc.getPage(editorCurrentPage - 1);
+    const { width, height } = page.getSize();
+    
+    // Calculate scale to fit container (max width ~280px)
+    editorScale = Math.min(280 / width, 400 / height, 1);
+    
+    // Create canvas for rendering
+    const canvasContainer = document.createElement('div');
+    canvasContainer.className = 'pdf-canvas-container';
+    canvasContainer.style.position = 'relative';
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = width * editorScale;
+    canvas.height = height * editorScale;
+    editorCanvas = canvas;
+    
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Try to render with pdf.js if available, otherwise show placeholder
+    let renderSuccess = false;
+    if (typeof pdfjsLib !== 'undefined') {
+      try {
+        const pdfJsDoc = await pdfjsLib.getDocument(editorPdfBytes).promise;
+        const pdfJsPage = await pdfJsDoc.getPage(editorCurrentPage);
+        const viewport = pdfJsPage.getViewport({ scale: editorScale });
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        await pdfJsPage.render({ canvasContext: ctx, viewport }).promise;
+        renderSuccess = true;
+      } catch (e) {
+        console.log('pdf.js render failed, using placeholder:', e);
+      }
+    }
+    
+    // If pdf.js failed, draw placeholder
+    if (!renderSuccess) {
+      drawPlaceholder(ctx, canvas.width, canvas.height);
+    }
+    
+    canvasContainer.appendChild(canvas);
+    
+    // Create overlay for elements
+    const overlay = document.createElement('div');
+    overlay.className = 'pdf-editor-overlay';
+    overlay.id = 'editorOverlay';
+    overlay.style.width = canvas.width + 'px';
+    overlay.style.height = canvas.height + 'px';
+    
+    // Render existing elements for this page
+    const pageElements = editorElements[editorCurrentPage] || [];
+    pageElements.forEach((el, idx) => {
+      const elDiv = createEditorElement(el, idx);
+      overlay.appendChild(elDiv);
+    });
+    
+    canvasContainer.appendChild(overlay);
+    
+    // Only clear container AFTER canvas is fully prepared
+    container.innerHTML = '';
+    container.appendChild(canvasContainer);
+    
+    // Update page info
+    $('currentPageNum').textContent = editorCurrentPage;
+    $('totalPages').textContent = editorTotalPages;
+    
+  } catch (err) {
+    console.error('Error rendering PDF page:', err);
+    // Show error message in container instead of leaving it empty
+    container.innerHTML = `<div class="pdf-error" style="padding: 20px; text-align: center; color: #dc2626;">
+      <p>Error al renderizar la página</p>
+      <p style="font-size: 12px; color: #666;">${err.message}</p>
+      <button onclick="renderEditorPage()" style="margin-top: 10px; padding: 8px 16px; cursor: pointer;">Reintentar</button>
+    </div>`;
+  }
 }
 
 function drawPlaceholder(ctx, width, height) {
@@ -2217,9 +2181,21 @@ function createEditorElement(el, idx) {
   div.style.top = (el.y * editorScale) + 'px';
   
   if (el.type === 'text') {
-    div.textContent = el.text;
+    // Create text span (to allow child elements like name label)
+    const textSpan = document.createElement('span');
+    textSpan.textContent = el.text;
+    div.appendChild(textSpan);
     div.style.fontSize = (el.size || 14) * editorScale + 'px';
     div.style.color = el.color || '#000';
+    
+    // Show name label for DNI/NIE texts
+    if (el.name) {
+      const nameLabel = document.createElement('div');
+      nameLabel.className = 'text-name-label';
+      nameLabel.textContent = el.name;
+      div.appendChild(nameLabel);
+      div.title = `DNI de: ${el.name}`;
+    }
   } else if (el.type === 'image' || el.type === 'signature') {
     const img = document.createElement('img');
     img.src = el.src;
@@ -2236,8 +2212,11 @@ function createEditorElement(el, idx) {
   deleteBtn.textContent = '✕';
   deleteBtn.onclick = (e) => {
     e.stopPropagation();
-    editorElements[editorCurrentPage].splice(idx, 1);
-    renderEditorPage();
+    // Ensure the page array exists
+    if (editorElements[editorCurrentPage]) {
+      editorElements[editorCurrentPage].splice(idx, 1);
+      renderEditorPage();
+    }
   };
   div.appendChild(deleteBtn);
   
@@ -2292,7 +2271,7 @@ function addTextToPdf() {
   modal.className = 'pdf-text-input-modal';
   modal.innerHTML = `
     <h4>📝 Añadir texto</h4>
-    <textarea id="textInputText" placeholder="Escribe el texto..."></textarea>
+    <textarea id="textInputText" placeholder="Escribe el texto...&#10;&#10;Puedes añadir múltiples líneas:&#10;NOMBRE APELLIDOS 12345678A&#10;OTRO NOMBRE X1234567B" style="min-height: 120px;"></textarea>
     <input type="number" id="textInputSize" placeholder="Tamaño de fuente" value="14" min="8" max="72">
     <input type="color" id="textInputColor" value="#000000" title="Color del texto">
     <div class="pdf-text-input-actions">
@@ -2315,14 +2294,132 @@ function addTextToPdf() {
       return;
     }
     
-    editorElements[editorCurrentPage].push({
-      type: 'text',
-      text,
-      x: 50,
-      y: 50,
-      size,
-      color
-    });
+    // Ensure the elements array for current page exists
+    if (!editorElements[editorCurrentPage]) {
+      editorElements[editorCurrentPage] = [];
+    }
+    
+    // DNI/NIE patterns
+    const dniPatterns = [
+      /\b\d{8}[A-Za-z]\b/g,           // DNI: 12345678A
+      /\b[XYZ]\d{7}[A-Za-z]\b/g,      // NIE: X1234567A
+      /\b\d{8}-[A-Za-z]\b/g,          // DNI con guión: 12345678-A
+      /\b[XYZ]\d{7}-[A-Za-z]\b/g      // NIE con guión: X1234567-A
+    ];
+    
+    // Check if text has multiple lines
+    const lines = text.split(/\n|\r\n|\r/).map(l => l.trim()).filter(l => l);
+    
+    let startX = 50;
+    let startY = 50;
+    
+    if (lines.length > 1) {
+      // Multi-line mode: process each line
+      let currentY = startY;
+      let totalCreated = 0;
+      
+      lines.forEach(line => {
+        let foundDni = null;
+        let textWithoutDni = line;
+        
+        // Search for DNI/NIE in line
+        for (const pattern of dniPatterns) {
+          const match = line.match(pattern);
+          if (match) {
+            foundDni = match[0];
+            textWithoutDni = line.replace(pattern, '').replace(/\s+/g, ' ').trim();
+            break;
+          }
+        }
+        
+        if (foundDni && textWithoutDni) {
+          // Create name text
+          editorElements[editorCurrentPage].push({
+            type: 'text',
+            text: textWithoutDni,
+            x: startX,
+            y: currentY,
+            size,
+            color
+          });
+          
+          // Create DNI text with name reference
+          editorElements[editorCurrentPage].push({
+            type: 'text',
+            text: foundDni,
+            x: startX,
+            y: currentY + size + 3,
+            size,
+            color,
+            name: textWithoutDni  // Store name for tooltip
+          });
+          
+          currentY += (size * 2) + 15; // Space between pairs
+          totalCreated += 2;
+        } else if (line) {
+          // No DNI found, add as single text
+          editorElements[editorCurrentPage].push({
+            type: 'text',
+            text: line,
+            x: startX,
+            y: currentY,
+            size,
+            color
+          });
+          currentY += size + 10;
+          totalCreated++;
+        }
+      });
+      
+      showToast(`${totalCreated} textos creados (${lines.length} líneas)`);
+    } else {
+      // Single line mode
+      let foundDni = null;
+      let textWithoutDni = text;
+      
+      for (const pattern of dniPatterns) {
+        const match = text.match(pattern);
+        if (match) {
+          foundDni = match[0];
+          textWithoutDni = text.replace(pattern, '').replace(/\s+/g, ' ').trim();
+          break;
+        }
+      }
+      
+      if (foundDni && textWithoutDni) {
+        // Create two separate text elements
+        editorElements[editorCurrentPage].push({
+          type: 'text',
+          text: textWithoutDni,
+          x: startX,
+          y: startY,
+          size,
+          color
+        });
+        
+        editorElements[editorCurrentPage].push({
+          type: 'text',
+          text: foundDni,
+          x: startX,
+          y: startY + size + 3,
+          size,
+          color,
+          name: textWithoutDni  // Store name for tooltip
+        });
+        
+        showToast('Texto separado: Nombre + DNI/NIE');
+      } else {
+        // Single text element
+        editorElements[editorCurrentPage].push({
+          type: 'text',
+          text,
+          x: startX,
+          y: startY,
+          size,
+          color
+        });
+      }
+    }
     
     closeModal();
     renderEditorPage();
@@ -2333,6 +2430,11 @@ function addImageToPdf() {
   if (!editorPdfDoc) {
     showToast('Primero carga un PDF');
     return;
+  }
+  
+  // Ensure the elements array for current page exists
+  if (!editorElements[editorCurrentPage]) {
+    editorElements[editorCurrentPage] = [];
   }
   
   const input = document.createElement('input');
@@ -2379,6 +2481,11 @@ async function addSignatureToPdf() {
     return;
   }
   
+  // Ensure the elements array for current page exists
+  if (!editorElements[editorCurrentPage]) {
+    editorElements[editorCurrentPage] = [];
+  }
+  
   // Open signature search modal
   $('signaturesModal').classList.add('show');
   resetSignatureState();
@@ -2394,6 +2501,11 @@ async function addSignatureToPdf() {
         const ratio = Math.min(maxSize / width, maxSize / height);
         width *= ratio;
         height *= ratio;
+      }
+      
+      // Ensure the page array exists
+      if (!editorElements[editorCurrentPage]) {
+        editorElements[editorCurrentPage] = [];
       }
       
       editorElements[editorCurrentPage].push({
@@ -2549,17 +2661,20 @@ let signatureSearchTerm = '';
 let signatureFile = null;
 let signaturePreviewUrl = null;
 
-// Bulk upload state
-let bulkFiles = []; // Array of { file, name (UPPERCASE), base64, status: 'new'|'replace'|'skip', existingId? }
-
-
 // Setup signature listeners
-
 function setupSignatureListeners() {
-  // Open signatures modal
+  // Open signatures modal - fullscreen in sidepanel
   $('btnSignatures').addEventListener('click', () => {
-    $('signaturesModal').classList.add('show');
+    // Show modal in fullscreen mode
+    $('signaturesModal').classList.add('show', 'fullscreen');
+    
+    // Hide header, calendar and days list
+    document.querySelector('.header').style.display = 'none';
+    document.querySelector('.days-section').style.display = 'none';
+    document.querySelector('.mini-calendar').style.display = 'none';
+    
     $('signatureSearchInput').focus();
+    // Reset state
     resetSignatureState();
   });
 
@@ -2577,36 +2692,51 @@ function setupSignatureListeners() {
   // View all signatures button
   $('btnViewAllSignatures').addEventListener('click', loadAllSignatures);
 
-  // Single upload - Dropzone click
+  // Preview all signatures button
+  $('btnPreviewSignatures').addEventListener('click', previewAllSignatures);
+
+  // Dropzone click
   $('signatureDropzone').addEventListener('click', () => {
     $('signatureFileInput').click();
   });
 
-  // Single upload - File input change
+  // File input change
   $('signatureFileInput').addEventListener('change', handleSignatureFileSelect);
 
-  // Single upload - Drag and drop
+  // Drag and drop
   $('signatureDropzone').addEventListener('dragover', (e) => {
     e.preventDefault();
     $('signatureDropzone').classList.add('drag-over');
   });
+
   $('signatureDropzone').addEventListener('dragleave', () => {
     $('signatureDropzone').classList.remove('drag-over');
   });
+
   $('signatureDropzone').addEventListener('drop', (e) => {
     e.preventDefault();
     $('signatureDropzone').classList.remove('drag-over');
     const files = e.dataTransfer.files;
-    if (files.length > 0) handleSignatureFile(files[0]);
+    if (files.length > 0) {
+      handleSignatureFile(files[0]);
+    }
   });
 
-  // Clear single signature preview
-  $('btnClearSignature').addEventListener('click', clearSignaturePreview);
+  // Clear signature preview
+  $('btnClearSignature').addEventListener('click', () => {
+    clearSignaturePreview();
+  });
 
-  // Upload single signature
+  // Upload signature
   $('btnUploadSignature').addEventListener('click', uploadSignature);
 
-  // === BULK UPLOAD ===
+  // Bulk upload toggle
+  $('btnToggleBulk').addEventListener('click', () => {
+    const content = $('signaturesBulkContent');
+    const isVisible = content.style.display !== 'none';
+    content.style.display = isVisible ? 'none' : 'block';
+  });
+
   // Bulk dropzone click
   $('bulkDropzone').addEventListener('click', () => {
     $('bulkFileInput').click();
@@ -2614,7 +2744,9 @@ function setupSignatureListeners() {
 
   // Bulk file input change
   $('bulkFileInput').addEventListener('change', (e) => {
-    if (e.target.files.length > 0) handleBulkFiles(Array.from(e.target.files));
+    if (e.target.files && e.target.files.length > 0) {
+      handleBulkUpload(e.target.files);
+    }
   });
 
   // Bulk drag and drop
@@ -2622,24 +2754,31 @@ function setupSignatureListeners() {
     e.preventDefault();
     $('bulkDropzone').classList.add('drag-over');
   });
+
   $('bulkDropzone').addEventListener('dragleave', () => {
     $('bulkDropzone').classList.remove('drag-over');
   });
+
   $('bulkDropzone').addEventListener('drop', (e) => {
     e.preventDefault();
     $('bulkDropzone').classList.remove('drag-over');
-    if (e.dataTransfer.files.length > 0) handleBulkFiles(Array.from(e.dataTransfer.files));
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleBulkUpload(e.dataTransfer.files);
+    }
   });
-
-  // Bulk upload button
-  $('btnBulkUpload').addEventListener('click', executeBulkUpload);
 }
 
 function closeSignaturesModal() {
-  $('signaturesModal').classList.remove('show');
-  // Remove preview overlay if exists
-  const overlay = document.querySelector('.sig-preview-overlay');
-  if (overlay) overlay.remove();
+  $('signaturesModal').classList.remove('show', 'fullscreen');
+  
+  // Restore header, calendar and days list
+  document.querySelector('.header').style.display = '';
+  document.querySelector('.days-section').style.display = '';
+  const miniCal = document.querySelector('.mini-calendar');
+  if (miniCal) {
+    miniCal.style.display = '';
+  }
+  
   resetSignatureState();
 }
 
@@ -2647,7 +2786,6 @@ function resetSignatureState() {
   signatureSearchTerm = '';
   signatureFile = null;
   signaturePreviewUrl = null;
-  bulkFiles = [];
   $('signatureSearchInput').value = '';
   $('signaturesResults').innerHTML = `
     <div class="signatures-empty">
@@ -2657,43 +2795,58 @@ function resetSignatureState() {
   `;
   $('signaturesUploadSection').style.display = 'none';
   $('signaturePreviewArea').style.display = 'none';
-  $('signatureDropzone').style.display = '';
   $('newSignatureName').value = '';
-  $('bulkFileInput').value = '';
-  $('bulkList').innerHTML = '';
-  $('bulkListContainer').style.display = 'none';
-  $('bulkCount').textContent = '';
-  $('bulkDropzone').style.display = '';
 }
 
-// Search signatures in Supabase (supports multiple names, one per line)
+// Helper function to remove DNI/NIE from a string
+// DNI format: 8 digits + 1 letter (e.g., 12345678A)
+// NIE format: X/Y/Z + 7 digits + 1 letter (e.g., X1234567A)
+function removeDniNie(text) {
+  // Remove DNI pattern: 8 digits followed by a letter
+  // Remove NIE pattern: X, Y, or Z followed by 7 digits and a letter
+  return text
+    .replace(/\s*\d{8}[A-Za-z]\s*/gi, ' ')  // DNI: 8 digits + letter
+    .replace(/\s*[XYZ]\d{7}[A-Za-z]\s*/gi, ' ')  // NIE: X/Y/Z + 7 digits + letter
+    .replace(/\s+/g, ' ')  // Normalize multiple spaces to single space
+    .trim();
+}
+
+// Search signatures in Supabase (one name per line - commas are part of the name)
 async function searchSignatures() {
   const searchInput = $('signatureSearchInput').value.trim();
-  
+
   if (!searchInput) {
     showToast('Introduce un nombre para buscar');
     return;
   }
 
+  // Split ONLY by newlines (Enter) - commas can be part of the name!
+  // Example: "GARCIA, JUAN" is ONE complete name, not two names
+  // Also remove DNI/NIE from each term automatically
   const searchTerms = searchInput.split('\n')
-    .map(term => term.trim().toLowerCase())
+    .map(term => removeDniNie(term.trim()))
     .filter(term => term.length > 0);
-  
+
   if (searchTerms.length === 0) {
     showToast('Introduce un nombre para buscar');
     return;
   }
 
   signatureSearchTerm = searchInput;
+
+  // Show loading
   $('signaturesResults').innerHTML = '<div class="signatures-loading"></div>';
 
   try {
     let allSignatures = [];
-    
+    const foundNames = [];
+
+    // Search for each term
     for (const term of searchTerms) {
+      // Query signatures table - search for exact or partial match
       const query = `?select=*&name=ilike.*${encodeURIComponent(term)}*&order=name.asc`;
       const url = `${SUPABASE_URL}/rest/v1/signatures${query}`;
-      
+
       const res = await fetch(url, {
         headers: {
           'apikey': SUPABASE_KEY,
@@ -2704,101 +2857,125 @@ async function searchSignatures() {
       if (res.ok) {
         const signatures = await res.json();
         if (signatures && signatures.length > 0) {
+          // Add to results, avoiding duplicates by id
           signatures.forEach(sig => {
             if (!allSignatures.find(s => s.id === sig.id)) {
               allSignatures.push(sig);
+              // Store in uppercase for comparison
+              foundNames.push(sig.name.toUpperCase());
             }
           });
         }
       }
     }
 
-    if (allSignatures.length > 0) {
-      allSignatures.sort((a, b) => a.name.localeCompare(b.name));
-      renderSignatureResults(allSignatures);
-    } else {
-      showSignaturesUploadSection(searchTerms.join(', '));
-    }
+    // Sort alphabetically by name
+    allSignatures.sort((a, b) => a.name.localeCompare(b.name));
+
+    // Render with missing names highlighted in red
+    renderSignatureResultsWithMissing(allSignatures, searchTerms, foundNames);
 
   } catch (err) {
     console.error('Search error:', err);
+    // Show upload section on error (table might not exist)
     showSignaturesUploadSection(searchTerms.join(', '));
   }
 }
 
-// Render signatures with thumbnail, preview, download, delete buttons
-function renderSignatureResults(signatures, isAlphabetical = false) {
-  let html = '';
-  let currentLetter = '';
+// Render signatures with missing names in red (for sidepanel)
+function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames) {
+  // Determine which searched terms were NOT found
+  const normalizedFoundNames = foundNames.map(n => n.toUpperCase());
+  const missingNames = searchedTerms.filter(term => {
+    // Normalize term to uppercase for comparison
+    const normalizedTerm = term.toUpperCase();
+    // Check if term matches any found name (partial match)
+    return !normalizedFoundNames.some(found => found.includes(normalizedTerm) || normalizedTerm.includes(found));
+  });
   
-  signatures.forEach(sig => {
-    if (isAlphabetical) {
-      const firstLetter = sig.name.charAt(0).toUpperCase();
-      if (firstLetter !== currentLetter) {
-        currentLetter = firstLetter;
-        html += `<div class="signature-letter-sep">${currentLetter}</div>`;
-      }
-    }
-    
-    const thumbSrc = sig.image_url || '';
-    html += `
-      <div class="signature-result-item" data-id="${sig.id}" data-url="${esc(sig.image_url)}" data-name="${esc(sig.name)}">
-        <img class="signature-result-thumb" src="${thumbSrc}" alt="${esc(sig.name)}">
-        <div class="signature-result-info">
-          <span class="signature-result-name">${esc(sig.name)}</span>
-          <span class="signature-result-date">${sig.created_at ? new Date(sig.created_at).toLocaleDateString('es-ES') : ''}</span>
-        </div>
-        <div class="signature-result-actions">
-          <button class="btn-download-signature" data-url="${esc(sig.image_url)}" data-name="${esc(sig.name)}" title="Descargar">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+  let html = '';
+  
+  // Show found signatures
+  if (signatures.length > 0) {
+    html += `<div class="signature-found-header">✓ Encontradas (${signatures.length})</div>`;
+    signatures.forEach(sig => {
+      // Display name in uppercase
+      const displayName = sig.name.toUpperCase();
+      html += `
+        <div class="signature-result-item signature-found" data-id="${sig.id}" data-url="${sig.image_url}" data-name="${esc(displayName)}" title="Clic para ${window.selectSignatureForEditor ? 'seleccionar' : 'descargar'}">
+          <span class="signature-result-name">${esc(displayName)}</span>
+          <div class="signature-actions">
+            <button class="signature-delete-btn" data-id="${sig.id}" data-name="${esc(displayName)}" title="Eliminar firma">🗑️</button>
+            <svg class="signature-download-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
               <polyline points="7 10 12 15 17 10"></polyline>
               <line x1="12" y1="15" x2="12" y2="3"></line>
             </svg>
-          </button>
-          <button class="btn-delete-signature" data-id="${sig.id}" data-name="${esc(sig.name)}" title="Eliminar">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-            </svg>
-          </button>
+          </div>
         </div>
-      </div>
-    `;
-  });
-
+      `;
+    });
+  }
+  
+  // Show missing names in red with upload option
+  if (missingNames.length > 0) {
+    html += `<div class="signature-missing-header">⚠ No encontradas (${missingNames.length})</div>`;
+    missingNames.forEach(name => {
+      // Display in uppercase
+      const displayName = name.toUpperCase();
+      html += `
+        <div class="signature-result-item signature-missing">
+          <span class="signature-missing-name">${esc(displayName)}</span>
+          <button class="signature-upload-btn-sidepanel" data-name="${esc(displayName)}">📤 Subir</button>
+        </div>
+      `;
+    });
+  }
+  
+  // If nothing found at all
+  if (signatures.length === 0 && missingNames.length === 0) {
+    showSignaturesUploadSection(searchedTerms.join(', '));
+    return;
+  }
+  
   $('signaturesResults').innerHTML = html;
   $('signaturesUploadSection').style.display = 'none';
 
-  // Add click handlers
-  document.querySelectorAll('.signature-result-item').forEach(item => {
-    // Click on item body (not buttons) = preview
+  // Add click handlers for found signatures
+  document.querySelectorAll('.signature-result-item.signature-found').forEach(item => {
     item.addEventListener('click', (e) => {
-      if (e.target.closest('.signature-result-actions')) return;
-      showSignaturePreview(item.dataset.url, item.dataset.name, item.dataset.id);
-    });
-  });
-
-  // Download buttons
-  document.querySelectorAll('.btn-download-signature').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      downloadSignature(btn.dataset.url, btn.dataset.name);
-    });
-  });
-
-  // Delete buttons
-  document.querySelectorAll('.btn-delete-signature').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (confirm(`¿Eliminar la firma "${btn.dataset.name}"?`)) {
-        deleteSignature(btn.dataset.id);
+      // Don't trigger if clicking delete button
+      if (e.target.classList.contains('signature-delete-btn')) return;
+      
+      if (window.selectSignatureForEditor) {
+        // Called from PDF editor
+        window.selectSignatureForEditor(item.dataset.url, item.dataset.name);
+      } else {
+        // Normal download
+        downloadSignature(item.dataset.url, item.dataset.name);
       }
+    });
+  });
+  
+  // Add click handlers for delete buttons
+  document.querySelectorAll('.signature-delete-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (confirm('¿Eliminar la firma de "' + btn.dataset.name + '"?')) {
+        deleteSignatureFromSidepanel(btn.dataset.id, btn.dataset.name);
+      }
+    });
+  });
+  
+  // Add click handlers for missing signatures upload button
+  document.querySelectorAll('.signature-upload-btn-sidepanel').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      quickUploadMissingSignature(btn.dataset.name);
     });
   });
 }
 
-// Show signature in a preview overlay
 function showSignaturePreview(url, name, id) {
   // Remove existing overlay if any
   const existing = document.querySelector('.sig-preview-overlay');
@@ -2808,7 +2985,7 @@ function showSignaturePreview(url, name, id) {
   overlay.className = 'sig-preview-overlay';
   overlay.innerHTML = `
     <div class="sig-preview-card">
-      <img src="${url}" alt="${esc(name)}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%2240%22><text y=%2225%22 font-size=%2214%22 fill=%22%23999%22>Error</text></svg>'">
+      <img src="${url}" alt="${esc(name)}"image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%2240%22><text y=%2225%22 font-size=%2214%22 fill=%22%23999%22>Error</text></svg>'">
       <div class="sig-preview-name">${esc(name)}</div>
       <div class="sig-preview-actions">
         ${window.selectSignatureForEditor ? `
@@ -2859,11 +3036,148 @@ function showSignaturePreview(url, name, id) {
   }
 }
 
+// Delete a signature from sidepanel
+async function deleteSignatureFromSidepanel(id, name) {
+  try {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?id=eq.${id}`, {
+      method: 'DELETE',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${session.access_token}`
+      }
+    });
+    
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('Delete error:', errText);
+      throw new Error('Error al eliminar: ' + response.status);
+    }
+    
+    showToast('✓ Firma eliminada: ' + name);
+    
+    // Re-run search to update results
+    searchSignatures();
+    
+  } catch (err) {
+    console.error('Delete error:', err);
+    showToast('Error: ' + err.message);
+  }
+}
+
+// Quick upload a missing signature from sidepanel
+async function quickUploadMissingSignature(name) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    showToast('Subiendo firma de ' + name + '...');
+    
+    try {
+      // Convert to base64
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      
+      // Upload to Supabase
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify({
+          id,
+          name: name.toUpperCase(),
+          image_url: base64,
+          user_id: currentUser.id,
+          user_name: currentUser.name
+        })
+      });
+      
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error('Upload error:', errText);
+        throw new Error('Error al subir firma');
+      }
+      
+      showToast('✓ Firma subida: ' + name);
+      
+      // Re-run search to update results
+      searchSignatures();
+      
+    } catch (err) {
+      console.error('Upload error:', err);
+      showToast('Error: ' + err.message);
+    }
+  };
+  
+  input.click();
+}
+
+function renderSignatureResults(signatures, isAlphabetical = false) {
+  let html = '';
+  let currentLetter = '';
+  
+  signatures.forEach(sig => {
+    // Display name in uppercase
+    const displayName = sig.name.toUpperCase();
+    
+    // Add letter separator for alphabetical view
+    if (isAlphabetical) {
+      const firstLetter = displayName.charAt(0);
+      if (firstLetter !== currentLetter) {
+        currentLetter = firstLetter;
+        html += `<div class="signature-letter-sep">${currentLetter}</div>`;
+      }
+    }
+    
+    // Simple item: just name, clickable to download or select for editor
+    html += `
+      <div class="signature-result-item" data-id="${sig.id}" data-url="${sig.image_url}" data-name="${esc(displayName)}" title="Clic para ${window.selectSignatureForEditor ? 'seleccionar' : 'descargar'}">
+        <span class="signature-result-name">${esc(displayName)}</span>
+        <svg class="signature-download-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 10 12 15 17 10"></polyline>
+          <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+      </div>
+    `;
+  });
+
+  $('signaturesResults').innerHTML = html;
+  $('signaturesUploadSection').style.display = 'none';
+
+  // Add click handlers - click anywhere on item to download or select for editor
+  document.querySelectorAll('.signature-result-item').forEach(item => {
+    item.addEventListener('click', () => {
+      if (window.selectSignatureForEditor) {
+        // Called from PDF editor
+        window.selectSignatureForEditor(item.dataset.url, item.dataset.name);
+      } else {
+        // Normal download
+        downloadSignature(item.dataset.url, item.dataset.name);
+      }
+    });
+  });
+}
+
 // Load all signatures sorted alphabetically
 async function loadAllSignatures() {
+  // Show loading
   $('signaturesResults').innerHTML = '<div class="signatures-loading"></div>';
 
   try {
+    // Query all signatures ordered by name
     const query = `?select=*&order=name.asc`;
     const url = `${SUPABASE_URL}/rest/v1/signatures${query}`;
     
@@ -2891,7 +3205,7 @@ async function loadAllSignatures() {
     const signatures = await res.json();
 
     if (signatures && signatures.length > 0) {
-      renderSignatureResults(signatures, true);
+      renderSignatureResults(signatures, true); // true = alphabetical view with separators
     } else {
       $('signaturesResults').innerHTML = `
         <div class="signatures-empty">
@@ -2914,6 +3228,144 @@ async function loadAllSignatures() {
   }
 }
 
+// Preview all signatures with images in a grid
+async function previewAllSignatures() {
+  // Show loading
+  $('signaturesResults').innerHTML = '<div class="signatures-loading"></div>';
+  $('signaturesUploadSection').style.display = 'none';
+
+  try {
+    // Query all signatures ordered by name
+    const query = `?select=*&order=name.asc`;
+    const url = `${SUPABASE_URL}/rest/v1/signatures${query}`;
+
+    const res = await fetch(url, {
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${session.access_token}`
+      }
+    });
+
+    if (!res.ok) {
+      if (res.status === 404) {
+        $('signaturesResults').innerHTML = `
+          <div class="signatures-empty">
+            <div class="signatures-empty-icon">📭</div>
+            <div class="signatures-empty-text">No hay firmas guardadas</div>
+          </div>
+        `;
+        return;
+      }
+      throw new Error('Error al cargar firmas');
+    }
+
+    const signatures = await res.json();
+
+    if (!signatures || signatures.length === 0) {
+      $('signaturesResults').innerHTML = `
+        <div class="signatures-empty">
+          <div class="signatures-empty-icon">📭</div>
+          <div class="signatures-empty-text">No hay firmas guardadas</div>
+        </div>
+      `;
+      return;
+    }
+
+    // Render signatures in preview grid
+    let html = `
+      <div class="signatures-preview-header">
+        <span>📷 Vista previa de firmas (${signatures.length})</span>
+        <button class="btn-close-preview" id="btnClosePreview" title="Cerrar vista previa">✕</button>
+      </div>
+      <div class="signatures-preview-grid">
+    `;
+
+    signatures.forEach(sig => {
+      const displayName = sig.name || 'Sin nombre';
+      html += `
+        <div class="signature-preview-card" data-id="${sig.id}" data-name="${esc(displayName)}">
+          <div class="signature-preview-image-container">
+            <img src="${sig.image_url}" alt="${esc(displayName)}" class="signature-preview-image"image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 50%22><text x=%2250%%22 y=%2250%%22 text-anchor=%22middle%22 fill=%22%23999%22>Sin imagen</text></svg>'">
+          </div>
+          <div class="signature-preview-name">${esc(displayName)}</div>
+          <button class="signature-preview-delete" data-id="${sig.id}" data-name="${esc(displayName)}" title="Eliminar firma">🗑️</button>
+        </div>
+      `;
+    });
+
+    html += '</div>';
+    $('signaturesResults').innerHTML = html;
+
+    // Add click handler for close button
+    $('btnClosePreview').addEventListener('click', () => {
+      $('signaturesResults').innerHTML = `
+        <div class="signatures-empty">
+          <div class="signatures-empty-icon">🔍</div>
+          <div class="signatures-empty-text">Busca una firma o pulsa el botón de lista</div>
+        </div>
+      `;
+    });
+
+    // Add click handlers for delete buttons
+    document.querySelectorAll('.signature-preview-delete').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        const name = btn.dataset.name;
+        if (confirm(`¿Eliminar la firma de "${name}"?`)) {
+          try {
+            await deleteSignatureFromPreview(id, name);
+            // Remove the card from DOM
+            const card = btn.closest('.signature-preview-card');
+            if (card) {
+              card.style.opacity = '0';
+              card.style.transform = 'scale(0.8)';
+              setTimeout(() => {
+                card.remove();
+                // Update count
+                const header = document.querySelector('.signatures-preview-header span');
+                if (header) {
+                  const remaining = document.querySelectorAll('.signature-preview-card').length;
+                  header.textContent = `📷 Vista previa de firmas (${remaining})`;
+                }
+              }, 300);
+            }
+          } catch (err) {
+            showToast('Error al eliminar: ' + err.message);
+          }
+        }
+      });
+    });
+
+  } catch (err) {
+    console.error('Preview error:', err);
+    $('signaturesResults').innerHTML = `
+      <div class="signatures-empty">
+        <div class="signatures-empty-icon">⚠️</div>
+        <div class="signatures-empty-text">Error al cargar firmas</div>
+      </div>
+    `;
+  }
+}
+
+// Delete signature from preview mode
+async function deleteSignatureFromPreview(id, name) {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?id=eq.${id}`, {
+    method: 'DELETE',
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': `Bearer ${session.access_token}`,
+      'Prefer': 'return=minimal'
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al eliminar');
+  }
+
+  showToast(`Firma de "${name}" eliminada`);
+}
+
 function showSignaturesUploadSection(searchTerm) {
   $('signaturesResults').innerHTML = `
     <div class="signatures-empty">
@@ -2924,7 +3376,6 @@ function showSignaturesUploadSection(searchTerm) {
   $('signaturesUploadSection').style.display = 'block';
   $('newSignatureName').value = searchTerm;
   $('signaturePreviewArea').style.display = 'none';
-  $('signatureDropzone').style.display = '';
   signatureFile = null;
   signaturePreviewUrl = null;
 }
@@ -2935,6 +3386,7 @@ function handleSignatureFileSelect(e) {
 }
 
 function handleSignatureFile(file) {
+  // Check if file is an image (handle undefined type)
   const fileType = file.type || '';
   const fileName = file.name || '';
   const isImage = fileType.startsWith('image/') || 
@@ -2947,6 +3399,7 @@ function handleSignatureFile(file) {
 
   signatureFile = file;
 
+  // Create preview
   const reader = new FileReader();
   reader.onload = (e) => {
     signaturePreviewUrl = e.target.result;
@@ -2961,23 +3414,22 @@ function clearSignaturePreview() {
   signatureFile = null;
   signaturePreviewUrl = null;
   $('signaturePreviewArea').style.display = 'none';
-  $('signatureDropzone').style.display = '';
+  $('signatureDropzone').style.display = 'block';
   $('signatureFileInput').value = '';
 }
 
-// Upload single signature to Supabase
+// Upload signature to Supabase
 async function uploadSignature() {
   if (!signatureFile) {
     showToast('Selecciona una imagen de firma');
     return;
   }
 
-  let name = $('newSignatureName').value.trim();
+  const name = $('newSignatureName').value.trim();
   if (!name) {
     showToast('Introduce un nombre para la firma');
     return;
   }
-  name = name.toUpperCase(); // Store in uppercase
 
   const btn = $('btnUploadSignature');
   btn.disabled = true;
@@ -2985,7 +3437,18 @@ async function uploadSignature() {
   btn.querySelector('.btn-loader').style.display = 'inline-block';
 
   try {
-    const base64Image = await fileToBase64(signatureFile);
+    // Convert image to base64
+    const base64Image = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(signatureFile);
+    });
+
+    console.log('Subiendo firma:', name);
+    console.log('User ID:', currentUser?.id);
+
+    // Insert into signatures table
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
     
     const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/signatures`, {
@@ -2998,25 +3461,36 @@ async function uploadSignature() {
       },
       body: JSON.stringify({
         id,
-        name: name.toLowerCase(),
+        name: name.toUpperCase(),
         image_url: base64Image,
         user_id: currentUser.id,
         user_name: currentUser.name
       })
     });
+
+    console.log('Response status:', insertRes.status);
     
     if (!insertRes.ok) {
       const errText = await insertRes.text();
-      if (insertRes.status === 404) throw new Error('La tabla "signatures" no existe.');
-      if (errText.includes('permission denied') || errText.includes('policy')) throw new Error('Error de permisos.');
+      console.error('Insert error:', errText);
+      
+      if (insertRes.status === 404) {
+        throw new Error('La tabla "signatures" no existe. Ejecuta el SQL en Supabase.');
+      }
+      if (errText.includes('permission denied') || errText.includes('policy')) {
+        throw new Error('Error de permisos. Verifica las políticas RLS en Supabase.');
+      }
       throw new Error('Error al guardar: ' + errText);
     }
 
-    showToast('Firma guardada correctamente');
-    resetSignatureState();
+    const result = await insertRes.json();
+    console.log('Firma guardada:', result);
+
+    showToast('✅ Firma guardada correctamente');
     
-    // Reload to show the new signature
-    searchSignatures();
+    // Reset and close
+    resetSignatureState();
+    closeSignaturesModal();
 
   } catch (err) {
     console.error('Upload error:', err);
@@ -3026,237 +3500,6 @@ async function uploadSignature() {
     btn.querySelector('.btn-text').textContent = 'Guardar Firma';
     btn.querySelector('.btn-loader').style.display = 'none';
   }
-}
-
-// ============================================
-// BULK UPLOAD
-// ============================================
-
-// Convert File to base64 data URL
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-// Extract name from filename (remove extension, UPPERCASE)
-function getSignatureNameFromFile(fileName) {
-  return fileName.replace(/\.[^.]+$/, '').toUpperCase();
-}
-
-// Handle multiple files for bulk upload
-async function handleBulkFiles(files) {
-  // Filter only images
-  const imageFiles = files.filter(f => {
-    const t = f.type || '';
-    const n = f.name || '';
-    return t.startsWith('image/') || /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(n);
-  });
-
-  if (imageFiles.length === 0) {
-    showToast('No se encontraron imágenes válidas');
-    return;
-  }
-
-  // Read all files as base64
-  const fileDataList = [];
-  for (const f of imageFiles) {
-    const base64 = await fileToBase64(f);
-    fileDataList.push({
-      file: f,
-      name: getSignatureNameFromFile(f.name),
-      base64: base64
-    });
-  }
-
-  // Check for duplicates in Supabase
-  try {
-    // Get all existing signature names
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=id,name`, {
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${session.access_token}`
-      }
-    });
-
-    const existingSigs = res.ok ? await res.json() : [];
-    const existingMap = {};
-    existingSigs.forEach(s => {
-      existingMap[s.name.toUpperCase()] = s.id;
-    });
-
-    bulkFiles = fileDataList.map(fd => {
-      const upperName = fd.name;
-      const matchKey = Object.keys(existingMap).find(k => k === upperName);
-      if (matchKey) {
-        return {
-          ...fd,
-          status: 'skip', // default: keep existing
-          existingId: existingMap[matchKey],
-          existingName: matchKey
-        };
-      }
-      return { ...fd, status: 'new' };
-    });
-
-    renderBulkList();
-
-  } catch (err) {
-    console.error('Error checking duplicates:', err);
-    // If we can't check, mark all as new
-    bulkFiles = fileDataList.map(fd => ({ ...fd, status: 'new' }));
-    renderBulkList();
-  }
-}
-
-// Render bulk upload list
-function renderBulkList() {
-  const list = $('bulkList');
-  const container = $('bulkListContainer');
-
-  if (bulkFiles.length === 0) {
-    container.style.display = 'none';
-    $('bulkCount').textContent = '';
-    $('bulkDropzone').style.display = '';
-    return;
-  }
-
-  container.style.display = 'block';
-  $('bulkDropzone').style.display = 'none';
-
-  const newCount = bulkFiles.filter(f => f.status === 'new').length;
-  const replaceCount = bulkFiles.filter(f => f.status === 'replace').length;
-  const skipCount = bulkFiles.filter(f => f.status === 'skip').length;
-  
-  $('bulkCount').textContent = `${bulkFiles.length} archivo(s) · ${newCount} nuevas · ${skipCount} conservadas · ${replaceCount} sustituir`;
-
-  list.innerHTML = bulkFiles.map((f, i) => {
-    let statusClass = 'dup-new';
-    let statusText = 'Nueva';
-    let toggleText = '';
-    
-    if (f.status === 'skip') {
-      statusClass = 'dup-skip';
-      statusText = 'Conservar existente';
-      toggleText = 'Sustituir';
-    } else if (f.status === 'replace') {
-      statusClass = 'dup-exists';
-      statusText = 'Sustituir existente';
-      toggleText = 'Conservar';
-    }
-    
-    const hasDup = f.status === 'skip' || f.status === 'replace';
-    
-    return `
-      <div class="signatures-bulk-item ${statusClass}">
-        <img class="signatures-bulk-thumb" src="${f.base64}" alt="">
-        <span class="signatures-bulk-name" title="${esc(f.name)}">${esc(f.name)}</span>
-        <span class="signatures-bulk-status ${statusClass === 'dup-new' ? 'is-new' : statusClass === 'dup-exists' ? 'is-replace' : 'is-skip'}">${statusText}</span>
-        ${hasDup ? `<button class="signatures-bulk-toggle" data-idx="${i}">${toggleText}</button>` : ''}
-      </div>
-    `;
-  }).join('');
-
-  // Toggle buttons for duplicates
-  list.querySelectorAll('.signatures-bulk-toggle').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const idx = parseInt(btn.dataset.idx);
-      const item = bulkFiles[idx];
-      if (item.status === 'skip') {
-        item.status = 'replace';
-      } else if (item.status === 'replace') {
-        item.status = 'skip';
-      }
-      renderBulkList();
-    });
-  });
-
-  // Enable upload button if there's something to upload
-  const hasUploadable = bulkFiles.some(f => f.status === 'new' || f.status === 'replace');
-  $('btnBulkUpload').disabled = !hasUploadable;
-}
-
-// Execute bulk upload
-async function executeBulkUpload() {
-  const toUpload = bulkFiles.filter(f => f.status === 'new' || f.status === 'replace');
-  if (toUpload.length === 0) {
-    showToast('No hay firmas para subir');
-    return;
-  }
-
-  const btn = $('btnBulkUpload');
-  btn.disabled = true;
-  btn.querySelector('.btn-text').textContent = `Subiendo 0/${toUpload.length}...`;
-  btn.querySelector('.btn-loader').style.display = 'inline-block';
-
-  let success = 0;
-  let failed = 0;
-
-  for (let i = 0; i < toUpload.length; i++) {
-    const f = toUpload[i];
-    btn.querySelector('.btn-text').textContent = `Subiendo ${i + 1}/${toUpload.length}...`;
-
-    try {
-      if (f.status === 'replace' && f.existingId) {
-        // Delete existing, then insert new
-        await fetch(`${SUPABASE_URL}/rest/v1/signatures?id=eq.${f.existingId}`, {
-          method: 'DELETE',
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Authorization': `Bearer ${session.access_token}`
-          }
-        });
-      }
-
-      const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
-      const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/signatures`, {
-        method: 'POST',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=representation'
-        },
-        body: JSON.stringify({
-          id,
-          name: f.name.toLowerCase(), // Store lowercase for search, display uppercase
-          image_url: f.base64,
-          user_id: currentUser.id,
-          user_name: currentUser.name
-        })
-      });
-
-      if (insertRes.ok) {
-        success++;
-      } else {
-        failed++;
-        console.error('Bulk insert error:', await insertRes.text());
-      }
-    } catch (err) {
-      failed++;
-      console.error('Bulk upload error for', f.name, err);
-    }
-
-    // Small delay to avoid rate limiting
-    await new Promise(r => setTimeout(r, 100));
-  }
-
-  btn.querySelector('.btn-text').textContent = 'Subir firmas';
-  btn.querySelector('.btn-loader').style.display = 'none';
-
-  if (failed === 0) {
-    showToast(`${success} firma(s) guardada(s) correctamente`);
-  } else {
-    showToast(`${success} OK, ${failed} con error`);
-  }
-
-  // Reset bulk state and reload results
-  bulkFiles = [];
-  renderBulkList();
-  loadAllSignatures();
 }
 
 // Download signature
@@ -3276,7 +3519,7 @@ async function downloadSignature(url, name) {
     document.body.removeChild(a);
     URL.revokeObjectURL(downloadUrl);
     
-    showToast('Firma descargada');
+    showToast('✅ Firma descargada');
   } catch (err) {
     console.error('Download error:', err);
     showToast('Error al descargar la firma');
@@ -3298,8 +3541,7 @@ async function deleteSignature(id) {
     if (!res.ok) throw new Error('Error al eliminar');
 
     showToast('Firma eliminada');
-    // Reload current view
-    loadAllSignatures();
+    searchSignatures();
   } catch (err) {
     console.error('Delete error:', err);
     showToast('Error al eliminar la firma');
@@ -3307,6 +3549,266 @@ async function deleteSignature(id) {
 }
 
 // ============================================
+// BULK UPLOAD SIGNATURES
+// ============================================
+
+async function handleBulkUpload(files) {
+  if (!session || !currentUser) {
+    showToast('Debes iniciar sesión para subir firmas');
+    return;
+  }
+
+  const totalFiles = files.length;
+  if (totalFiles === 0) return;
+
+  // Extract file names (uppercase, without extension)
+  const fileData = [];
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const fileName = file.name.replace(/\.[^/.]+$/, '').toUpperCase().trim();
+    fileData.push({ file, fileName, base64: null });
+  }
+
+  // Check for existing signatures with same names
+  showToast('Verificando firmas existentes...');
+  
+  const existingSignatures = await checkExistingSignatures(fileData.map(f => f.fileName));
+  
+  // If there are duplicates, ask user what to do
+  let actionForDuplicates = 'ask'; // 'ask', 'replace', 'keep', 'skip'
+  const duplicates = fileData.filter(f => existingSignatures[f.fileName]);
+  
+  if (duplicates.length > 0) {
+    actionForDuplicates = await askDuplicateAction(duplicates, existingSignatures);
+    if (actionForDuplicates === 'cancel') {
+      showToast('Carga cancelada');
+      return;
+    }
+  }
+
+  // Show progress UI
+  $('bulkProgress').style.display = 'block';
+  $('bulkResults').style.display = 'block';
+  $('bulkResults').innerHTML = '';
+  $('bulkProgressFill').style.width = '0%';
+  $('bulkProgressText').textContent = `0 / ${totalFiles}`;
+
+  let successCount = 0;
+  let errorCount = 0;
+  let skippedCount = 0;
+  let replacedCount = 0;
+
+  for (let i = 0; i < fileData.length; i++) {
+    const { file, fileName } = fileData[i];
+    const existing = existingSignatures[fileName];
+    
+    // Update progress
+    const progress = ((i + 1) / totalFiles) * 100;
+    $('bulkProgressFill').style.width = `${progress}%`;
+    $('bulkProgressText').textContent = `${i + 1} / ${totalFiles}`;
+
+    // Handle duplicates based on user choice
+    if (existing) {
+      if (actionForDuplicates === 'skip') {
+        skippedCount++;
+        $('bulkResults').innerHTML += `
+          <div class="bulk-result-item skipped">
+            <span class="bulk-result-icon">⊘</span>
+            <span class="bulk-result-name">${esc(fileName)} (ya existe)</span>
+          </div>
+        `;
+        continue;
+      } else if (actionForDuplicates === 'keep') {
+        skippedCount++;
+        $('bulkResults').innerHTML += `
+          <div class="bulk-result-item skipped">
+            <span class="bulk-result-icon">→</span>
+            <span class="bulk-result-name">${esc(fileName)} (mantenida)</span>
+          </div>
+        `;
+        continue;
+      } else if (actionForDuplicates === 'replace') {
+        // Will replace - delete old first
+        try {
+          await fetch(`${SUPABASE_URL}/rest/v1/signatures?id=eq.${existing.id}`, {
+            method: 'DELETE',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${session.access_token}`
+            }
+          });
+        } catch (err) {
+          console.error('Error deleting old signature:', err);
+        }
+      }
+    }
+
+    try {
+      // Convert to base64
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      // Generate unique ID
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+
+      // Upload to Supabase
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify({
+          id,
+          name: fileName.toUpperCase(),
+          image_url: base64,
+          user_id: currentUser.id,
+          user_name: currentUser.name
+        })
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error('Upload error for', fileName, ':', errText);
+        throw new Error('Error al subir');
+      }
+
+      successCount++;
+      if (existing && actionForDuplicates === 'replace') {
+        replacedCount++;
+      }
+      
+      // Add to results display
+      $('bulkResults').innerHTML += `
+        <div class="bulk-result-item success">
+          <span class="bulk-result-icon">✓</span>
+          <span class="bulk-result-name">${esc(fileName)}${existing && actionForDuplicates === 'replace' ? ' (reemplazada)' : ''}</span>
+        </div>
+      `;
+
+    } catch (err) {
+      errorCount++;
+      
+      // Add to results display
+      $('bulkResults').innerHTML += `
+        <div class="bulk-result-item error">
+          <span class="bulk-result-icon">✗</span>
+          <span class="bulk-result-name">${esc(fileName)}</span>
+        </div>
+      `;
+    }
+
+    // Small delay to avoid rate limiting
+    if (i < fileData.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+
+  // Final summary
+  let summaryMsg = `✓ ${successCount} subidas`;
+  if (replacedCount > 0) summaryMsg += `, ${replacedCount} reemplazadas`;
+  if (skippedCount > 0) summaryMsg += `, ${skippedCount} omitidas`;
+  if (errorCount > 0) summaryMsg += `, ${errorCount} errores`;
+  
+  showToast(summaryMsg);
+  $('bulkProgressText').textContent = summaryMsg;
+
+  // Clear file input for next batch
+  $('bulkFileInput').value = '';
+}
+
+// Check if signatures with given names already exist
+async function checkExistingSignatures(names) {
+  const existing = {};
+  
+  if (!session) return existing;
+  
+  try {
+    // Query all signatures to check for duplicates (case-insensitive)
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=id,name`, {
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${session.access_token}`
+      }
+    });
+    
+    if (response.ok) {
+      const allSigs = await response.json();
+      
+      // Create a map of uppercase names to signature info
+      allSigs.forEach(sig => {
+        const upperName = sig.name.toUpperCase();
+        existing[upperName] = sig;
+      });
+    }
+  } catch (err) {
+    console.error('Error checking existing signatures:', err);
+  }
+  
+  return existing;
+}
+
+// Show dialog asking what to do with duplicates
+async function askDuplicateAction(duplicates, existingSignatures) {
+  return new Promise((resolve) => {
+    // Create modal HTML
+    const modalHtml = `
+      <div class="bulk-duplicate-modal" id="duplicateModal">
+        <div class="bulk-duplicate-content">
+          <div class="bulk-duplicate-header">
+            <h3>⚠️ Firmas duplicadas encontradas</h3>
+          </div>
+          <div class="bulk-duplicate-body">
+            <p>Se encontraron <strong>${duplicates.length}</strong> firma(s) que ya existen:</p>
+            <div class="bulk-duplicate-list">
+              ${duplicates.slice(0, 5).map(d => `
+                <div class="bulk-duplicate-item">
+                  <span class="bulk-duplicate-name">${esc(d.fileName)}</span>
+                  <span class="bulk-duplicate-status">ya existe</span>
+                </div>
+              `).join('')}
+              ${duplicates.length > 5 ? `<div class="bulk-duplicate-more">...y ${duplicates.length - 5} más</div>` : ''}
+            </div>
+            <p class="bulk-duplicate-question">¿Qué deseas hacer con los duplicados?</p>
+          </div>
+          <div class="bulk-duplicate-actions">
+            <button class="bulk-duplicate-btn replace" data-action="replace">
+              🔄 Reemplazar todas
+            </button>
+            <button class="bulk-duplicate-btn keep" data-action="keep">
+              ✓ Mantener existentes
+            </button>
+            <button class="bulk-duplicate-btn skip" data-action="skip">
+              ⊘ Saltar duplicados
+            </button>
+            <button class="bulk-duplicate-btn cancel" data-action="cancel">
+              ✕ Cancelar todo
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    // Add modal to page
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    const modal = document.getElementById('duplicateModal');
+    
+    // Handle button clicks
+    modal.querySelectorAll('.bulk-duplicate-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const action = btn.dataset.action;
+        modal.remove();
+        resolve(action);
+      });
+    });
+  });
+}
 
 // PROCESSES MODULE
 // ============================================
