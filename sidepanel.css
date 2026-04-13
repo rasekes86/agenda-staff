@@ -2412,6 +2412,18 @@ body {
 }
 .process-form-inline input:focus { border-color: var(--pri); }
 
+.process-form-grid select {
+  padding: 8px 10px;
+  border: 1px solid var(--bor);
+  border-radius: var(--rad);
+  background: var(--bg);
+  color: var(--txt);
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+}
+.process-form-grid select:focus { border-color: var(--pri); }
+
 .btn-add-process {
   display: flex;
   align-items: center;
@@ -2460,121 +2472,127 @@ body {
 .process-card-header {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: 5px;
+  padding: 7px 10px;
   background: var(--bg2);
   border-bottom: 1px solid var(--bor);
 }
 
-.process-card-line-top {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
+.process-card-line-top,
 .process-card-line-bottom {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--txt2);
+  line-height: 1;
+}
+
+.process-card-line-bottom {
   padding-left: 22px;
 }
 
-.process-card-actions-header {
-  display: flex;
-  gap: 4px;
-  margin-left: auto;
-}
-
-.process-card-position {
-  font-size: 11px;
-  color: #3b82f6;
-  background: rgba(59, 130, 246, 0.1);
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-weight: 600;
-}
-
-.process-card-province {
-  font-size: 11px;
-  color: var(--txt2);
-  background: var(--bg3);
-  padding: 2px 8px;
-  border-radius: 10px;
-}
-
-.process-card-creator {
-  font-size: 11px;
-  color: var(--txt3);
-}
-
-.process-form-grid select {
-  padding: 8px 10px;
-  border: 1px solid var(--bor);
-  border-radius: var(--rad);
-  background: var(--bg);
-  color: var(--txt);
-  font-size: 12px;
-  outline: none;
-  cursor: pointer;
-}
-
-.process-form-grid select:focus {
-  border-color: var(--pri);
+.process-card-line-top .hdr-sep,
+.process-card-line-bottom .hdr-sep {
+  color: var(--bor);
+  font-size: 9px;
+  user-select: none;
 }
 
 .process-card-name {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 700;
   color: var(--txt);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
 }
 
 .process-card-date {
-  font-size: 10px;
   color: var(--txt3);
   white-space: nowrap;
 }
 
-.process-card-creator {
+.process-card-province,
+.process-card-position,
+.process-card-creator,
+.process-card-objetivo,
+.process-card-objetivo-none {
   font-size: 11px;
-  color: var(--txt3);
+  font-weight: 500;
+  white-space: nowrap;
+  padding: 0;
+  background: none;
+  border-radius: 0;
 }
 
-.process-card-objetivo-none {
-  font-size: 10px;
-  color: var(--txt3);
-  font-style: italic;
+.process-card-province { color: var(--txt2); }
+.process-card-position { color: #3b82f6; }
+.process-card-creator { color: var(--txt3); }
+.process-card-objetivo { color: #f59e0b; font-weight: 600; }
+.process-card-objetivo-none { color: var(--txt3); font-style: italic; }
+
+.process-card-actions-header {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.btn-process-collapse,
+.btn-process-expand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: var(--bg3);
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--txt2);
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.btn-process-collapse:hover,
+.btn-process-expand:hover {
+  background: var(--pri);
+  color: white;
 }
 
 .btn-process-edit, .btn-process-del {
-  width: 26px; height: 26px;
+  width: 22px; height: 22px;
   border: none; background: transparent;
-  border-radius: 4px; cursor: pointer;
-  font-size: 12px;
+  border-radius: 3px; cursor: pointer;
+  font-size: 11px;
   display: flex; align-items: center; justify-content: center;
 }
 .btn-process-edit:hover { background: var(--bg3); }
 .btn-process-del:hover { background: #fee2e2; }
 
 .btn-process-finalize {
-  padding: 4px 10px;
-  border: 1px solid #d1fae5;
-  background: #ecfdf5;
-  color: #065f46;
-  border-radius: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--bor);
+  background: var(--bg3);
+  color: var(--txt2);
+  border-radius: 3px;
   font-size: 10px;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  transition: all 0.15s;
 }
 .btn-process-finalize:hover { background: #10b981; color: white; border-color: #10b981; }
 
 .process-finished-badge {
   font-size: 10px;
   font-weight: 600;
-  color: #065f46;
-  background: #d1fae5;
-  padding: 2px 10px;
-  border-radius: 10px;
+  color: var(--txt3);
+  padding: 0;
+  background: none;
+  border-radius: 0;
 }
 
 .process-counters.finished {
@@ -2803,32 +2821,6 @@ body {
   background: var(--pri);
   color: white;
   border-color: var(--pri);
-}
-
-/* ============================================
-   INDIVIDUAL COLLAPSE / EXPAND BUTTONS
-   ============================================ */
-
-.btn-process-collapse,
-.btn-process-expand {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border: none;
-  background: var(--bg3);
-  border-radius: 4px;
-  cursor: pointer;
-  color: var(--txt2);
-  transition: all 0.15s;
-  flex-shrink: 0;
-}
-
-.btn-process-collapse:hover,
-.btn-process-expand:hover {
-  background: var(--pri);
-  color: white;
 }
 
 /* ============================================
@@ -3097,17 +3089,8 @@ body {
 }
 
 /* ============================================
-   OBJETIVO (TARGET)
+   OBJETIVO SECTION (FOOTER BAR)
    ============================================ */
-
-.process-card-objetivo {
-  font-size: 11px;
-  color: #f59e0b;
-  background: rgba(245, 158, 11, 0.1);
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-weight: 600;
-}
 
 .objetivo-section {
   display: flex;
