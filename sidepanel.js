@@ -3372,8 +3372,7 @@ function populateMonthFilter() {
 function renderGlobalStats() {
   const filtered = getFilteredProcesses();
   let totalAdded = 0, totalCalled = 0, totalInterviewed = 0, totalSelected = 0;
-  let addedOfertas = 0, selectedOfertas = 0;
-  let addedErp = 0, selectedErp = 0;
+  let selectedOfertas = 0, selectedErp = 0;
   filtered.forEach(p => {
     const ao = p.added || 0, so = p.selected || 0;
     const ae = p.added_erp || 0, se = p.selected_erp || 0;
@@ -3381,8 +3380,8 @@ function renderGlobalStats() {
     totalCalled += (p.called || 0) + (p.called_erp || 0);
     totalInterviewed += (p.interviewed || 0) + (p.interviewed_erp || 0);
     totalSelected += so + se;
-    addedOfertas += ao; selectedOfertas += so;
-    addedErp += ae; selectedErp += se;
+    selectedOfertas += so;
+    selectedErp += se;
   });
   
   $('gsTotal').textContent = totalAdded;
@@ -3396,10 +3395,10 @@ function renderGlobalStats() {
   $('gsSelOfertas').textContent = selectedOfertas;
   $('gsSelErp').textContent = selectedErp;
   
-  const ofAdded = addedOfertas + addedErp;
-  if (ofAdded > 0) {
-    const pctOfertas = Math.round((selectedOfertas / ofAdded) * 100);
-    const pctErp = Math.round((selectedErp / ofAdded) * 100);
+  const totalSelBalance = selectedOfertas + selectedErp;
+  if (totalSelBalance > 0) {
+    const pctOfertas = Math.round((selectedOfertas / totalSelBalance) * 100);
+    const pctErp = Math.round((selectedErp / totalSelBalance) * 100);
     $('gsBalanceOfertas').style.width = pctOfertas + '%';
     $('gsBalanceErp').style.width = pctErp + '%';
     $('gsBalanceText').textContent = `Ofertas ${pctOfertas}% | ERP ${pctErp}%`;
@@ -3488,9 +3487,10 @@ function renderProcesses() {
 
     // Compact single-line: NOMBRE / PUESTO / LUGAR / OBJETIVO
     if (isCollapsed) {
+      const objColor = objetivo > 0 ? (objProgress >= 100 ? '#10b981' : (objProgress >= 68 ? '#eab308' : (objProgress >= 34 ? '#f97316' : '#ef4444'))) : 'var(--pri)';
       return `
         <div class="process-card ${isFinished ? 'is-finished' : ''} compact-single">
-          <div class="process-card-compact-line">
+          <div class="process-card-compact-line" style="border-left-color: ${objColor}">
             <button class="btn-process-expand" data-id="${proc.id}" title="Desplegar">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="9 18 15 12 9 6"></polyline></svg>
             </button>
