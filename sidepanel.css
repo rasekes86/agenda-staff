@@ -2793,6 +2793,208 @@ body {
 }
 
 /* ============================================
+   INDIVIDUAL COLLAPSE / EXPAND BUTTONS
+   ============================================ */
+
+.btn-process-collapse,
+.btn-process-expand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: var(--bg3);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--txt2);
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.btn-process-collapse:hover,
+.btn-process-expand:hover {
+  background: var(--pri);
+  color: white;
+}
+
+/* ============================================
+   COMPACT SINGLE-LINE VIEW
+   ============================================ */
+
+.process-card.compact-single {
+  padding: 0;
+  border-radius: var(--rad);
+  overflow: hidden;
+}
+
+.process-card.compact-single.is-finished {
+  opacity: 0.7;
+}
+
+.process-card-compact-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  font-size: 11px;
+  cursor: default;
+  border-left: 3px solid var(--pri);
+  background: var(--bg2);
+  transition: background 0.15s;
+}
+
+.process-card-compact-line:hover {
+  background: var(--bg3);
+}
+
+.btn-process-expand {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.btn-process-expand svg {
+  width: 9px;
+  height: 9px;
+}
+
+.compact-name {
+  font-weight: 600;
+  color: var(--txt);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.compact-sep {
+  color: var(--txt3);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.compact-pos {
+  color: #3b82f6;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100px;
+}
+
+.compact-loc {
+  color: var(--txt2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 80px;
+}
+
+.compact-obj {
+  color: #f59e0b;
+  font-weight: 600;
+  white-space: nowrap;
+  font-size: 10px;
+}
+
+.compact-obj.obj-reached {
+  color: #10b981;
+}
+
+.compact-obj-none {
+  color: var(--txt3);
+  font-size: 10px;
+  font-style: italic;
+}
+
+.compact-sel {
+  color: #10b981;
+  font-weight: 600;
+  white-space: nowrap;
+  font-size: 10px;
+}
+
+.compact-line-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.btn-process-del-mini {
+  width: 20px;
+  height: 20px;
+  font-size: 10px;
+}
+
+.process-finished-badge.mini {
+  font-size: 10px;
+  padding: 1px 6px;
+}
+
+/* ============================================
+   OFERTAS vs ERP BALANCE BAR
+   ============================================ */
+
+.processes-balance-bar {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: var(--bg2);
+  border: 1px solid var(--bor);
+  border-radius: var(--rad);
+}
+
+.balance-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+
+.balance-label-ofertas,
+.balance-label-erp {
+  font-size: 10px;
+  color: var(--txt2);
+}
+
+.balance-label-ofertas strong {
+  color: #3b82f6;
+}
+
+.balance-label-erp strong {
+  color: #10b981;
+}
+
+.balance-track {
+  display: flex;
+  height: 10px;
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--bg3);
+}
+
+.balance-fill-ofertas {
+  background: #3b82f6;
+  transition: width 0.4s ease;
+  border-radius: 5px 0 0 5px;
+}
+
+.balance-fill-erp {
+  background: #10b981;
+  transition: width 0.4s ease;
+  border-radius: 0 5px 5px 0;
+}
+
+.balance-text {
+  font-size: 9px;
+  color: var(--txt3);
+  text-align: center;
+  margin-top: 3px;
+  font-weight: 500;
+}
+
+/* ============================================
    CLICKABLE COUNTER VALUE
    ============================================ */
 
@@ -2829,73 +3031,6 @@ body {
 }
 .counter-input[type=number] {
   -moz-appearance: textfield;
-}
-
-/* ============================================
-   COMPACT VIEW STYLES
-   ============================================ */
-
-.process-card.compact .process-card-header {
-  padding: 8px 10px;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 4px;
-}
-
-.process-card.compact .process-card-name {
-  font-size: 12px;
-}
-
-.process-card.compact .process-card-date {
-  font-size: 9px;
-}
-
-.process-card.compact .process-card-meta {
-  padding: 0;
-  gap: 6px;
-}
-
-.process-card.compact .process-card-position,
-.process-card.compact .process-card-province,
-.process-card.compact .process-card-creator,
-.process-card.compact .process-card-objetivo {
-  font-size: 10px;
-  padding: 1px 6px;
-}
-
-.process-card-compact-summary {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 0;
-  font-size: 10px;
-  color: var(--txt2);
-  font-family: monospace;
-  border-top: 1px dashed var(--bor);
-  border-bottom: 1px dashed var(--bor);
-  margin-top: 2px;
-  padding-top: 4px;
-  padding-bottom: 4px;
-}
-
-.compact-track {
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.compact-divider-track {
-  color: var(--txt3);
-  font-size: 9px;
-}
-
-.compact-objetivo {
-  color: #f59e0b;
-  font-weight: 700;
-}
-
-.process-card.compact .process-card-actions-header {
-  margin-top: 2px;
 }
 
 /* ============================================
