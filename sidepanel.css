@@ -2018,38 +2018,105 @@ body {
   display: inline-block;
 }
 
-/* Signature Preview Area (upload) */
-.signature-preview-area {
-  position: relative;
-  padding: 12px;
-  background: var(--bg2);
-  border-radius: 8px;
+/* Letter separator for alphabetical list */
+.signature-letter-sep {
+  padding: 8px 14px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--txt3);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  border-bottom: 1px solid var(--bor);
+  margin-bottom: 6px;
+  background: var(--bg);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+/* Upload Section */
+.signatures-upload-section {
+  border-top: 1px solid var(--bor);
+  padding-top: 16px;
+}
+
+.signatures-upload-header {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--txt);
+  margin-bottom: 4px;
+}
+
+.signatures-upload-hint {
+  font-size: 11px;
+  color: var(--txt3);
   margin-bottom: 12px;
+}
+
+.signatures-dropzone {
+  border: 2px dashed var(--bor);
+  border-radius: 8px;
+  padding: 16px;
   text-align: center;
-}
-
-#signaturePreviewImg {
-  max-width: 100%;
-  max-height: 80px;
-  object-fit: contain;
-  background: repeating-conic-gradient(#f0f0f0 0% 25%, white 0% 50%) 50% / 8px 8px;
-  border-radius: 4px;
-}
-
-.btn-clear-signature {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  padding: 4px 8px;
-  border: none;
-  background: var(--danger);
-  color: white;
-  border-radius: 4px;
-  font-size: 10px;
   cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 12px;
 }
 
-/* Bulk Upload Section */
+.signatures-dropzone:hover,
+.signatures-dropzone.drag-over {
+  border-color: var(--pri);
+  background: rgba(59, 130, 246, 0.05);
+}
+
+.signatures-dropzone-icon { font-size: 24px; margin-bottom: 4px; }
+.signatures-dropzone-text { font-size: 12px; color: var(--txt); margin-bottom: 2px; }
+.signatures-dropzone-hint { font-size: 10px; color: var(--txt3); }
+
+.signature-name-input {
+  margin-bottom: 12px;
+}
+
+.signature-name-input label {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--txt2);
+  margin-bottom: 4px;
+}
+
+.signature-name-input input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--bor);
+  border-radius: 6px;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--txt);
+}
+
+.signature-name-input input:focus {
+  outline: none;
+  border-color: var(--pri);
+}
+
+.btn-upload-signature {
+  width: 100%;
+  padding: 10px;
+  background: var(--succ);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-uploa/* Bulk Upload Section */
 .signatures-bulk-section {
   border-top: 1px solid var(--bor);
   padding-top: 12px;
@@ -3262,547 +3329,97 @@ body {
 
 #processObjetivo::placeholder {
   color: var(--txt3);
-}
-/* ============================================
-   v6.0 - FULLSCREEN PDF MODAL
-   ============================================ */
-.pdf-modal.fullscreen {
-  position: fixed;
-  top: 0; left: 0;
-  transform: none;
-  width: 100%; height: 100%;
-  max-width: 100%; max-height: 100%;
-  border-radius: 0;
-  z-index: 200;
-}
-.pdf-modal.fullscreen .pdf-modal-content {
-  height: calc(100% - 50px);
-  overflow-y: auto;
-}
-
-/* ============================================
-   v6.0 - TOOLBAR WRAPPER (2-row layout)
-   ============================================ */
-.pdf-editor-toolbar-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.pdf-editor-btn-fullscreen {
-  width: 100%;
-  padding: 12px 16px;
-  background: #10b981;
-  color: white;
-  border: none;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  transition: all 0.2s;
-}
-.pdf-editor-btn-fullscreen:hover { background: #059669; }
-.pdf-editor-toolbar-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-}
-.pdf-editor-toolbar-grid .pdf-editor-btn {
-  justify-content: center;
-  padding: 10px 8px;
-  font-weight: 500;
-}
-
-/* ============================================
-   v6.0 - SIGNATURES MODAL FULLSCREEN
-   ============================================ */
-.signatures-modal.fullscreen {
-  position: fixed;
-  top: 0; left: 0;
-  transform: none;
-  width: 100%; height: 100%;
-  max-width: 100%; max-height: 100%;
-  border-radius: 0;
-  z-index: 200;
-}
-.signatures-modal.fullscreen .signatures-modal-content {
-  height: calc(100% - 50px);
-  overflow-y: auto;
-}
-
-/* ============================================
-   v6.0 - TEXT NAME LABEL (DNI/NIE)
-   ============================================ */
-.text-name-label {
-  position: absolute;
-  bottom: -18px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: #8b5cf6;
-  color: white;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 9px;
-  white-space: nowrap;
-  font-family: sans-serif;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-.pdf-element:hover .text-name-label,
-.pdf-element.selected .text-name-label { opacity: 1; }
-
-/* ============================================
-   v6.0 - DELETE BUTTON REPOSITIONED
-   ============================================ */
-.pdf-element-delete-btn {
-  top: -10px !important;
-  left: -10px !important;
-  width: 24px !important;
-  height: 24px !important;
-  font-size: 14px !important;
-  font-weight: bold !important;
-  z-index: 20 !important;
-  box-shadow: 0 2px 6px rgba(220, 38, 38, 0.4) !important;
-}
-
-/* ============================================
-   v6.0 - SIGNATURE FOUND/MISSING
-   ============================================ */
-.signature-found-header {
-  padding: 8px 14px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #10b981;
-  background: rgba(16, 185, 129, 0.1);
-  border-radius: 6px;
-  margin-bottom: 6px;
-}
-.signature-missing-header {
-  padding: 8px 14px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.1);
-  border-radius: 6px;
-  margin-bottom: 6px;
-  margin-top: 10px;
-}
-.signature-result-item.signature-found {
-  border-left: 3px solid #10b981;
-}
-.signature-result-item.signature-found:hover {
-  background: #10b981;
-  border-left-color: #059669;
-}
-.signature-result-item.signature-missing {
-  background: rgba(239, 68, 68, 0.1);
-  border-left: 3px solid #ef4444;
-}
-.signature-result-item.signature-missing:hover {
-  background: rgba(239, 68, 68, 0.15);
-  transform: translateX(4px);
-}
-.signature-missing-name {
+}n {
   font-size: 14px;
-  font-weight: 600;
-  color: #ef4444;
-  flex: 1;
-}
-.signature-upload-btn-sidepanel {
-  padding: 6px 12px;
-  background: #ef4444;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.signature-upload-btn-sidepanel:hover {
-  background: #dc2626;
-  transform: scale(1.05);
-}
-.signature-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.signature-delete-btn {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  font-size: 14px;
-  padding: 4px;
-  border-radius: 4px;
-  transition: all 0.2s;
-  opacity: 0.6;
-}
-.signature-delete-btn:hover {
-  background: rgba(239, 68, 68, 0.2);
-  opacity: 1;
+  font-weight: 700;
+  color: var(--pri);
+  line-height: 1;
+  padding-left: 2px;
 }
 
-/* ============================================
-   v6.0 - BULK UPLOAD SIGNATURES
-   ============================================ */
-.signatures-bulk-section {
-  background: var(--bg2);
-  border-radius: 8px;
-  margin-bottom: 12px;
-  overflow: hidden;
-}
-.signatures-bulk-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px;
-  background: var(--bg3);
-}
-.signatures-bulk-title {
+.counter-sum-input {
+  width: 42px;
+  padding: 1px 3px;
+  border: none;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
+  text-align: center;
+  outline: none;
   color: var(--txt);
-}
-.btn-toggle-bulk {
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: var(--pri);
-  color: white;
-  border-radius: 6px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-}
-.btn-toggle-bulk:hover {
-  filter: brightness(1.1);
-  transform: translateY(-1px);
-}
-.signatures-bulk-content {
-  padding: 12px;
-}
-.signatures-bulk-hint {
-  font-size: 12px;
-  color: var(--txt3);
-  margin-bottom: 10px;
-  text-align: center;
-}
-.signatures-bulk-dropzone {
-  border: 2px dashed var(--bor);
-  border-radius: 8px;
-  padding: 20px;
-  text-align: center;
-  cursor: pointer;
-  transition: all 0.2s;
-  background: var(--bg);
-}
-.signatures-bulk-dropzone:hover {
-  border-color: var(--pri);
-  background: rgba(59, 130, 246, 0.05);
-}
-.signatures-bulk-dropzone.drag-over {
-  border-color: var(--succ);
-  background: rgba(16, 185, 129, 0.1);
-}
-.signatures-bulk-icon {
-  font-size: 32px;
-  margin-bottom: 8px;
-}
-.signatures-bulk-text {
-  font-size: 13px;
-  color: var(--txt2);
-  margin-bottom: 4px;
-}
-.signatures-bulk-hint-detail {
-  font-size: 11px;
-  color: var(--txt3);
+  background: transparent;
+  line-height: 1.2;
 }
 
-/* Bulk Progress */
-.bulk-progress {
-  margin-top: 12px;
+.counter-sum-input::placeholder {
+  color: var(--txt3);
+  font-weight: 400;
+  font-size: 11px;
 }
-.bulk-progress-bar {
+
+.counter-sum-input::-webkit-inner-spin-button,
+.counter-sum-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.counter-sum-input[type=number] {
+  -moz-appearance: textfield;
+}
+
+/* ============================================
+   OBJETIVO SECTION (FOOTER BAR)
+   ============================================ */
+
+.objetivo-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 6px;
+}
+
+.objetivo-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #f59e0b;
+  white-space: nowrap;
+}
+
+.objetivo-bar {
+  flex: 1;
   height: 8px;
   background: var(--bg3);
   border-radius: 4px;
   overflow: hidden;
 }
-.bulk-progress-fill {
+
+.objetivo-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--pri), var(--succ));
+  background: linear-gradient(90deg, #f59e0b, #10b981);
   border-radius: 4px;
-  transition: width 0.3s ease;
-  width: 0%;
+  transition: width 0.3s;
 }
-.bulk-progress-text {
-  text-align: center;
-  font-size: 12px;
+
+.objetivo-progress {
+  font-size: 10px;
   color: var(--txt2);
-  margin-top: 6px;
-}
-
-/* Bulk Results */
-.bulk-results {
-  margin-top: 12px;
-  max-height: 200px;
-  overflow-y: auto;
-  background: var(--bg);
-  border-radius: 6px;
-  padding: 8px;
-}
-.bulk-result-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  font-size: 12px;
-  border-radius: 4px;
-  margin-bottom: 4px;
-}
-.bulk-result-item.success {
-  background: rgba(16, 185, 129, 0.1);
-  color: var(--succ);
-}
-.bulk-result-item.error {
-  background: rgba(239, 68, 68, 0.1);
-  color: var(--danger);
-}
-.bulk-result-icon { font-size: 14px; }
-.bulk-result-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-weight: 600;
   white-space: nowrap;
 }
-.bulk-result-item.skipped {
-  background: rgba(245, 158, 11, 0.1);
-  color: var(--warn);
-}
 
-/* ============================================
-   v6.0 - BULK DUPLICATE MODAL
-   ============================================ */
-.bulk-duplicate-modal {
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  animation: fadeIn 0.2s ease;
-}
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-.bulk-duplicate-content {
+#processObjetivo {
+  padding: 8px 10px;
+  border: 1px solid var(--bor);
+  border-radius: var(--rad);
   background: var(--bg);
-  border-radius: 12px;
-  width: 90%;
-  max-width: 360px;
-  max-height: 80vh;
-  overflow-y: auto;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-  animation: slideUp 0.3s ease;
-}
-@keyframes slideUp {
-  from { transform: translateY(20px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
-}
-.bulk-duplicate-header {
-  padding: 16px;
-  border-bottom: 1px solid var(--bor);
-  text-align: center;
-}
-.bulk-duplicate-header h3 { font-size: 15px; color: var(--warn); }
-.bulk-duplicate-body { padding: 16px; }
-.bulk-duplicate-body p { font-size: 13px; color: var(--txt); margin-bottom: 12px; }
-.bulk-duplicate-list {
-  max-height: 150px;
-  overflow-y: auto;
-  background: var(--bg2);
-  border-radius: 8px;
-  padding: 8px;
-  margin-bottom: 12px;
-}
-.bulk-duplicate-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 6px 8px;
+  color: var(--txt);
   font-size: 12px;
-  border-radius: 4px;
-  margin-bottom: 4px;
+  outline: none;
 }
-.bulk-duplicate-item:last-child { margin-bottom: 0; }
-.bulk-duplicate-name { font-weight: 500; color: var(--txt); }
-.bulk-duplicate-status {
-  font-size: 10px;
-  color: var(--warn);
-  background: rgba(245, 158, 11, 0.1);
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-.bulk-duplicate-more {
-  text-align: center;
-  font-size: 11px;
-  color: var(--txt3);
-  padding: 6px;
-}
-.bulk-duplicate-question { font-weight: 500; color: var(--txt); }
-.bulk-duplicate-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  padding: 16px;
-  border-top: 1px solid var(--bor);
-}
-.bulk-duplicate-btn {
-  padding: 10px 12px;
-  border: none;
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-.bulk-duplicate-btn.replace { background: var(--pri); color: white; }
-.bulk-duplicate-btn.replace:hover { filter: brightness(1.1); }
-.bulk-duplicate-btn.keep { background: var(--succ); color: white; }
-.bulk-duplicate-btn.keep:hover { background: #059669; }
-.bulk-duplicate-btn.skip { background: var(--bg3); color: var(--txt); }
-.bulk-duplicate-btn.skip:hover { background: var(--bor); }
-.bulk-duplicate-btn.cancel { background: transparent; border: 1px solid var(--danger); color: var(--danger); }
-.bulk-duplicate-btn.cancel:hover { background: var(--danger); color: white; }
 
-/* ============================================
-   v6.0 - SIGNATURES PREVIEW GRID
-   ============================================ */
-.btn-preview-signatures {
-  width: 36px;
-  height: 36px;
-  border: none;
-  background: var(--bg3);
-  color: var(--txt);
-  border-radius: 8px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-}
-.btn-preview-signatures:hover {
-  background: var(--pri);
-  color: white;
-}
-.signatures-preview-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px;
-  background: var(--bg3);
-  border-radius: 8px;
-  margin-bottom: 12px;
-}
-.signatures-preview-header span {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--txt);
-}
-.btn-close-preview {
-  width: 28px;
-  height: 28px;
-  border: none;
-  background: var(--danger);
-  color: white;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-}
-.btn-close-preview:hover { filter: brightness(1.1); }
-.signatures-preview-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
-  max-height: 400px;
-  overflow-y: auto;
-  padding: 2px;
-}
-.signature-preview-card {
-  position: relative;
-  background: var(--bg2);
-  border-radius: 8px;
-  padding: 10px;
-  text-align: center;
-  transition: all 0.2s;
-  border: 1px solid transparent;
-}
-.signature-preview-card:hover {
+#processObjetivo:focus {
   border-color: var(--pri);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
-.signature-preview-image-container {
-  width: 100%;
-  height: 60px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: repeating-conic-gradient(#f0f0f0 0% 25%, white 0% 50%) 50% / 8px 8px;
-  border-radius: 6px;
-  margin-bottom: 8px;
-  overflow: hidden;
-}
-.signature-preview-image {
-  max-width: 100%;
-  max-height: 60px;
-  object-fit: contain;
-}
-.signature-preview-name {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--txt);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.signature-preview-delete {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 22px;
-  height: 22px;
-  border: none;
-  background: rgba(239, 68, 68, 0.9);
-  color: white;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: all 0.2s;
-}
-.signature-preview-card:hover .signature-preview-delete { opacity: 1; }
-.signature-preview-delete:hover {
-  background: var(--danger);
-  transform: scale(1.1);
+
+#processObjetivo::placeholder {
+  color: var(--txt3);
 }
