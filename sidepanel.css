@@ -2459,18 +2459,30 @@ body {
 
 .process-card-header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
   background: var(--bg2);
   border-bottom: 1px solid var(--bor);
 }
 
-.process-card-meta {
+.process-card-line-top {
   display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding: 0 12px 6px;
+  align-items: center;
+  gap: 6px;
+}
+
+.process-card-line-bottom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 22px;
+}
+
+.process-card-actions-header {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
 }
 
 .process-card-position {
@@ -2510,14 +2522,8 @@ body {
   border-color: var(--pri);
 }
 
-.process-card-title-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .process-card-name {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--txt);
 }
@@ -2525,11 +2531,18 @@ body {
 .process-card-date {
   font-size: 10px;
   color: var(--txt3);
+  white-space: nowrap;
 }
 
-.process-card-actions-header {
-  display: flex;
-  gap: 4px;
+.process-card-creator {
+  font-size: 11px;
+  color: var(--txt3);
+}
+
+.process-card-objetivo-none {
+  font-size: 10px;
+  color: var(--txt3);
+  font-style: italic;
 }
 
 .btn-process-edit, .btn-process-del {
