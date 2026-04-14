@@ -1,6 +1,6 @@
 // ============================================
-// PDF EDITOR FULL SCREEN - AGENDA STAFF v5.23.17
-// Fixed: Sidebar PDF tools layout (two rows), sticky document tabs
+// PDF EDITOR FULL SCREEN - AGENDA STAFF v6.2.0
+// Fixed: Floating undo/redo, editable text, box selection
 // ============================================
 
 const SUPABASE_URL = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
@@ -124,6 +124,27 @@ function executeUndoAction(action, activeDoc) {
       activeDoc.elements[action.page] = JSON.parse(JSON.stringify(action.elements));
       return { type: 'clear', page: action.page, elements: [] };
     }
+    case 'edit': {
+      // Undo edit = restore previous text/size/color
+      const el = pageElements[action.index];
+      if (el) {
+        const prev = { text: el.text, size: el.size, color: el.color };
+        el.text = action.prevProps.text;
+        el.size = action.prevProps.size;
+        el.color = action.prevProps.color;
+        return { type: 'edit', page: action.page, index: action.index, prevProps: action.prevProps, currentProps: prev };
+      }
+      return action;
+    }
+    case 'multiMove': {
+      // Undo multi-move = restore all previous positions
+      const movedElements = action.elements;
+      movedElements.forEach(item => {
+        const el = pageElements[item.index];
+        if (el) { el.x -= item.dx; el.y -= item.dy; }
+      });
+      return { type: 'multiMove', page: action.page, elements: movedElements.map(m => ({ index: m.index, dx: -m.dx, dy: -m.dy })) };
+    }
     default:
       return action;
   }
@@ -152,10 +173,31 @@ function updateUndoRedoUI() {
 let selectedIndices = new Set();  // Set of element indices currently selected
 let isBoxSelecting = false;
 let boxSelectStart = { x: 0, y: 0 };
+let boxSelectRect = null;  // DOM element for the selection rectangle
+let isDraggingMulti = false;
+let multiDragStart = { x: 0, y: 0 };
+let multiDragOrigPositions = [];  // [{index, x, y}, ...]
 
 function clearSelection() {
   selectedIndices.clear();
   document.querySelectorAll('.pdf-element.multi-selected').forEach(el => el.classList.remove('multi-selected'));
+  if (boxSelectRect) { boxSelectRect.remove(); boxSelectRect = null; }
+}
+
+function selectElementIdx(idx) {
+  if (idx < 0) return;
+  selectedIndices.add(idx);
+  const div = document.querySelector(`.pdf-element[data-idx="${idx}"]`);
+  if (div) div.classList.add('multi-selected');
+  updateMultiSelectUI();
+}
+
+function deselectElementIdx(idx) {
+  if (idx < 0) return;
+  selectedIndices.delete(idx);
+  const div = document.querySelector(`.pdf-element[data-idx="${idx}"]`);
+  if (div) div.classList.remove('multi-selected');
+  updateMultiSelectUI();
 }
 
 function toggleMultiSelect(idx) {
@@ -211,6 +253,139 @@ function deleteSelectedElements() {
   updateTabModified(activeDoc.id, true);
   renderPage();
   autoSave();
+}
+
+// ============================================
+// BOX SELECTION SYSTEM
+// ============================================
+function startBoxSelection(e, overlay, scale, activeDoc) {
+  if (e.target.closest('.pdf-element') || e.target.closest('.resize-handle')) return;
+  if (e.shiftKey) return;
+  
+  isBoxSelecting = true;
+  clearSelection();
+  
+  const rect = overlay.getBoundingClientRect();
+  boxSelectStart.x = e.clientX;
+  boxSelectStart.y = e.clientY;
+  
+  boxSelectRect = document.createElement('div');
+  boxSelectRect.className = 'box-selection-rect';
+  boxSelectRect.style.left = '0px';
+  boxSelectRect.style.top = '0px';
+  boxSelectRect.style.width = '0px';
+  boxSelectRect.style.height = '0px';
+  overlay.appendChild(boxSelectRect);
+  
+  const onMove = (ev) => {
+    if (!isBoxSelecting || !boxSelectRect) return;
+    const x1 = Math.min(boxSelectStart.x, ev.clientX);
+    const y1 = Math.min(boxSelectStart.y, ev.clientY);
+    const x2 = Math.max(boxSelectStart.x, ev.clientX);
+    const y2 = Math.max(boxSelectStart.y, ev.clientY);
+    const left = Math.max(0, x1 - rect.left);
+    const top = Math.max(0, y1 - rect.top);
+    const width = Math.min(x2 - rect.left, rect.width) - left;
+    const height = Math.min(y2 - rect.top, rect.height) - top;
+    boxSelectRect.style.left = left + 'px';
+    boxSelectRect.style.top = top + 'px';
+    boxSelectRect.style.width = Math.max(0, width) + 'px';
+    boxSelectRect.style.height = Math.max(0, height) + 'px';
+  };
+  
+  const onUp = (ev) => {
+    if (!isBoxSelecting) return;
+    isBoxSelecting = false;
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    
+    if (boxSelectRect) {
+      const selRect = boxSelectRect.getBoundingClientRect();
+      const boxLeft = selRect.left;
+      const boxTop = selRect.top;
+      const boxRight = selRect.right;
+      const boxBottom = selRect.bottom;
+      
+      if (Math.abs(ev.clientX - boxSelectStart.x) < 5 && Math.abs(ev.clientY - boxSelectStart.y) < 5) {
+        boxSelectRect.remove();
+        boxSelectRect = null;
+        return;
+      }
+      
+      const pageElements = activeDoc.elements[activeDoc.currentPage] || [];
+      document.querySelectorAll('.pdf-element').forEach(div => {
+        const divIdx = parseInt(div.dataset.idx);
+        const elRect = div.getBoundingClientRect();
+        const overlaps = !(elRect.right < boxLeft || elRect.left > boxRight || elRect.bottom < boxTop || elRect.top > boxBottom);
+        if (overlaps && divIdx < pageElements.length) {
+          selectElementIdx(divIdx);
+        }
+      });
+      
+      boxSelectRect.remove();
+      boxSelectRect = null;
+    }
+  };
+  
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+// ============================================
+// MULTI-DRAG SYSTEM (move all selected elements together)
+// ============================================
+function startMultiDrag(e, scale, activeDoc) {
+  if (selectedIndices.size === 0) return;
+  
+  isDraggingMulti = true;
+  multiDragStart.x = e.clientX;
+  multiDragStart.y = e.clientY;
+  
+  const pageElements = activeDoc.elements[activeDoc.currentPage] || [];
+  multiDragOrigPositions = [];
+  selectedIndices.forEach(idx => {
+    const el = pageElements[idx];
+    if (el) multiDragOrigPositions.push({ index: idx, x: el.x, y: el.y });
+  });
+  
+  const onMove = (ev) => {
+    if (!isDraggingMulti) return;
+    const dx = (ev.clientX - multiDragStart.x) / scale;
+    const dy = (ev.clientY - multiDragStart.y) / scale;
+    multiDragOrigPositions.forEach(orig => {
+      const div = document.querySelector(`.pdf-element[data-idx="${orig.index}"]`);
+      if (div) {
+        div.style.left = ((orig.x + dx) * scale) + 'px';
+        div.style.top = ((orig.y + dy) * scale) + 'px';
+      }
+    });
+  };
+  
+  const onUp = (ev) => {
+    if (!isDraggingMulti) return;
+    isDraggingMulti = false;
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    
+    const dx = (ev.clientX - multiDragStart.x) / scale;
+    const dy = (ev.clientY - multiDragStart.y) / scale;
+    
+    if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+      const undoMoves = multiDragOrigPositions.map(orig => ({ index: orig.index, dx: dx, dy: dy }));
+      pushUndo(activeDoc.id, { type: 'multiMove', page: activeDoc.currentPage, elements: undoMoves });
+      
+      const pageElements = activeDoc.elements[activeDoc.currentPage] || [];
+      multiDragOrigPositions.forEach(orig => {
+        const el = pageElements[orig.index];
+        if (el) { el.x = orig.x + dx; el.y = orig.y + dy; }
+      });
+      updateTabModified(activeDoc.id, true);
+      scheduleAutoSave();
+    }
+  };
+  
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
 }
 
 // ============================================
@@ -535,12 +710,25 @@ function setupEventListeners() {
     }
   });
 
-  // Click on overlay (not on element) clears multi-selection
+  // Click on overlay clears multi-selection
   document.addEventListener('click', (e) => {
     if (e.target.classList.contains('elements-overlay')) {
       clearSelection();
     }
   });
+
+  // Close text modal: also reset editing state
+  const cancelTextBtn = $('cancelText');
+  if (cancelTextBtn) {
+    cancelTextBtn.addEventListener('click', () => {
+      $('textModal').classList.remove('show');
+      const editingIdx = $('editingElementIdx');
+      if (editingIdx) editingIdx.value = '';
+    });
+  }
+  // Re-assign confirmText to handle both add and edit
+  const confirmTextBtn2 = $('confirmText');
+  if (confirmTextBtn2) confirmTextBtn2.addEventListener('click', confirmTextWithPosition);
 }
 
 // ============================================
@@ -909,27 +1097,29 @@ async function renderPage() {
     canvasArea.appendChild(container);
     
     container.addEventListener('dblclick', (e) => {
-      if (e.target.classList.contains('pdf-element') || e.target.closest('.pdf-element')) return;
+      if (e.target.classList.contains('pdf-element') || e.target.closest('.pdf-element')) {
+        // Double click on an element: if text, open edit mode
+        const elDiv = e.target.closest('.pdf-element');
+        if (elDiv && elDiv.classList.contains('pdf-element-text')) {
+          const elIdx = parseInt(elDiv.dataset.idx);
+          openEditTextModal(elIdx, activeDoc, scale);
+        }
+        return;
+      }
       if (!activeDoc.pdfJsDoc) return;
       
       const rect = overlay.getBoundingClientRect();
       const x = (e.clientX - rect.left) / scale;
       const y = (e.clientY - rect.top) / scale;
       
-      const textInput = $('textInput');
-      const textSize = $('textSize');
-      const textColor = $('textColor');
-      const textModal = $('textModal');
-      
-      if (textInput) textInput.value = '';
-      if (textSize) textSize.value = 14;
-      if (textColor) textColor.value = '#000000';
-      if (textModal) {
-        textModal.classList.add('show');
-        textModal.dataset.posX = x;
-        textModal.dataset.posY = y;
+      openNewTextModal(x, y);
+    });
+    
+    // Mousedown on overlay starts box selection
+    overlay.addEventListener('mousedown', (e) => {
+      if (e.target === overlay || e.target.classList.contains('elements-overlay')) {
+        startBoxSelection(e, overlay, scale, activeDoc);
       }
-      if (textInput) textInput.focus();
     });
     
     const currentPageNum = $('currentPageNum');
@@ -998,6 +1188,14 @@ function createElementDiv(el, idx, scale, activeDoc) {
     }
   });
 
+  // Double click on text element: open edit modal
+  if (el.type === 'text') {
+    div.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      openEditTextModal(idx, activeDoc, scale);
+    });
+  }
+
   const deleteBtn = document.createElement('button');
   deleteBtn.className = 'pdf-element-delete';
   deleteBtn.textContent = '✕';
@@ -1019,10 +1217,70 @@ function createElementDiv(el, idx, scale, activeDoc) {
     div.appendChild(handle);
   });
   
-  makeDraggable(div, el, scale, activeDoc);
+  makeDraggable(div, el, scale, activeDoc, idx);
   makeResizable(div, el, scale, activeDoc);
   
   return div;
+}
+
+// ============================================
+// TEXT MODAL HELPERS
+// ============================================
+
+function openNewTextModal(x, y) {
+  const textInput = $('textInput');
+  const textSize = $('textSize');
+  const textColor = $('textColor');
+  const textModal = $('textModal');
+  const textModalTitle = $('textModalTitle');
+  const confirmBtn = $('confirmText');
+  const editingIdx = $('editingElementIdx');
+  
+  if (textInput) textInput.value = '';
+  if (textSize) textSize.value = 14;
+  if (textColor) textColor.value = '#000000';
+  if (textModalTitle) textModalTitle.textContent = '📝 Añadir texto';
+  if (confirmBtn) confirmBtn.textContent = 'Añadir';
+  if (editingIdx) editingIdx.value = '';
+  if (textModal) {
+    textModal.classList.add('show');
+    if (x !== undefined && y !== undefined) {
+      textModal.dataset.posX = x;
+      textModal.dataset.posY = y;
+    } else {
+      delete textModal.dataset.posX;
+      delete textModal.dataset.posY;
+    }
+  }
+  if (textInput) textInput.focus();
+}
+
+function openEditTextModal(idx, activeDoc, scale) {
+  const pageElements = activeDoc.elements[activeDoc.currentPage] || [];
+  if (idx < 0 || idx >= pageElements.length) return;
+  const el = pageElements[idx];
+  if (!el || el.type !== 'text') return;
+  
+  const textInput = $('textInput');
+  const textSize = $('textSize');
+  const textColor = $('textColor');
+  const textModal = $('textModal');
+  const textModalTitle = $('textModalTitle');
+  const confirmBtn = $('confirmText');
+  const editingIdx = $('editingElementIdx');
+  
+  if (textInput) textInput.value = el.text || '';
+  if (textSize) textSize.value = el.size || 14;
+  if (textColor) textColor.value = el.color || '#000000';
+  if (textModalTitle) textModalTitle.textContent = '✏️ Editar texto';
+  if (confirmBtn) confirmBtn.textContent = 'Guardar';
+  if (editingIdx) editingIdx.value = idx;
+  if (textModal) {
+    delete textModal.dataset.posX;
+    delete textModal.dataset.posY;
+    textModal.classList.add('show');
+  }
+  if (textInput) { textInput.focus(); textInput.select(); }
 }
 
 function confirmTextWithPosition() {
@@ -1033,16 +1291,38 @@ function confirmTextWithPosition() {
   const textSize = $('textSize');
   const textColor = $('textColor');
   const textModal = $('textModal');
+  const editingIdxEl = $('editingElementIdx');
   
   const text = textInput ? textInput.value.trim() : '';
   const size = textSize ? parseInt(textSize.value) || 14 : 14;
   const color = textColor ? textColor.value : '#000000';
+  const editingIdx = editingIdxEl ? editingIdxEl.value : '';
   
   if (!text) {
     showStatus('Escribe un texto', 'error');
     return;
   }
   
+  // --- EDIT MODE: update existing text element ---
+  if (editingIdx !== '' && editingIdx !== null && editingIdx !== undefined) {
+    const idx = parseInt(editingIdx);
+    const pageElements = activeDoc.elements[activeDoc.currentPage] || [];
+    if (idx >= 0 && idx < pageElements.length && pageElements[idx].type === 'text') {
+      const el = pageElements[idx];
+      pushUndo(activeDoc.id, { type: 'edit', page: activeDoc.currentPage, index: idx, prevProps: { text: el.text, size: el.size, color: el.color } });
+      el.text = text;
+      el.size = size;
+      el.color = color;
+      if (textModal) textModal.classList.remove('show');
+      editingIdxEl.value = '';
+      updateTabModified(activeDoc.id, true);
+      renderPage();
+      showStatus('Texto actualizado', 'success');
+      return;
+    }
+  }
+  
+  // --- ADD MODE: create new text element(s) ---
   const posX = textModal && textModal.dataset.posX ? parseFloat(textModal.dataset.posX) : activeDoc.pageWidth / 2 - 50;
   const posY = textModal && textModal.dataset.posY ? parseFloat(textModal.dataset.posY) : activeDoc.pageHeight / 2;
   
@@ -1170,6 +1450,7 @@ function confirmTextWithPosition() {
     delete textModal.dataset.posX;
     delete textModal.dataset.posY;
   }
+  if (editingIdxEl) editingIdxEl.value = '';
   
   updateTabModified(activeDoc.id, true);
   renderPage();
@@ -1199,13 +1480,22 @@ function addCurrentDate() {
   showStatus(`Fecha añadida: ${dateStr}`, 'success');
 }
 
-function makeDraggable(div, el, scale, activeDoc) {
+function makeDraggable(div, el, scale, activeDoc, idx) {
   let isDragging = false;
   let startX, startY, origX, origY;
   let hasMoved = false;
   
   div.addEventListener('mousedown', (e) => {
     if (e.target.classList.contains('pdf-element-delete') || e.target.classList.contains('resize-handle')) return;
+    
+    // If this element is already multi-selected, start multi-drag
+    if (selectedIndices.has(idx)) {
+      e.preventDefault();
+      e.stopPropagation();
+      startMultiDrag(e, scale, activeDoc);
+      return;
+    }
+    
     if (e.shiftKey) return; // Let multi-select handle it
     
     isDragging = true;

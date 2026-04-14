@@ -59,15 +59,17 @@
     </button>
   </header>
   
-  <!-- Undo/Redo Bar -->
-  <div style="display:flex;align-items:center;gap:6px;padding:4px 12px;background:#1e293b;border-bottom:1px solid #334155;">
-    <button class="sidebar-btn" id="btnUndo" disabled title="Deshacer (Ctrl+Z)" style="padding:4px 8px;font-size:11px;">
-      ↩ Deshacer
+  <!-- Undo/Redo Floating Bar -->
+  <div class="undo-redo-floating" id="undoRedoBar">
+    <button class="undo-redo-btn" id="btnUndo" disabled title="Deshacer (Ctrl+Z)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+      Deshacer
     </button>
-    <button class="sidebar-btn" id="btnRedo" disabled title="Rehacer (Ctrl+Y)" style="padding:4px 8px;font-size:11px;">
-      ↪ Rehacer
+    <button class="undo-redo-btn" id="btnRedo" disabled title="Rehacer (Ctrl+Y)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+      Rehacer
     </button>
-    <span id="autoSaveIndicator" style="margin-left:auto;font-size:10px;color:#64748b;"></span>
+    <span id="autoSaveIndicator" class="auto-save-indicator"></span>
   </div>
   
   <!-- Document Tabs -->
@@ -221,11 +223,13 @@
           <div class="sidebar-title">Instrucciones</div>
           <div class="sidebar-info">
             <p>• <strong>Shift+Click</strong> = seleccionar varios</p>
+            <p>• <strong>Arrastrar</strong> sobre el PDF = selección por zona</p>
             <p>• <strong>Ctrl+Z/Y</strong> = deshacer/rehacer</p>
             <p>• <strong>Supr</strong> = eliminar selección</p>
             <p>• Arrastra elementos para moverlos</p>
             <p>• Esquinas azules = cambiar tamaño</p>
-            <p>• Doble clic = añadir texto</p>
+            <p>• <strong>Doble clic vacío</strong> = añadir texto</p>
+            <p>• <strong>Doble clic texto</strong> = editar texto</p>
             <p>• Auto-guardado temporal activo</p>
           </div>
         </div>
@@ -373,7 +377,7 @@
   <!-- Text Modal -->
   <div class="modal-overlay" id="textModal">
     <div class="modal">
-      <h3>📝 Añadir texto</h3>
+      <h3 id="textModalTitle">📝 Añadir texto</h3>
       <textarea id="textInput" placeholder="Escribe el texto aquí..."></textarea>
       <div class="modal-row">
         <input type="number" id="textSize" placeholder="Tamaño" value="14" min="8" max="72">
@@ -383,6 +387,7 @@
         <button class="btn-cancel" id="cancelText">Cancelar</button>
         <button class="btn-add" id="confirmText">Añadir</button>
       </div>
+      <input type="hidden" id="editingElementIdx" value="">
     </div>
   </div>
   
