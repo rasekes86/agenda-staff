@@ -1162,3 +1162,67 @@ body {
 .status-msg.show { opacity: 1; }
 .status-msg.success { background: #10b981; }
 .status-msg.error { background: #dc2626; }
+
+/* ============================================
+   MULTI-SELECT STYLES
+   ============================================ */
+.pdf-element.multi-selected {
+  outline: 2px dashed #38bdf8;
+  outline-offset: 2px;
+}
+
+.pdf-element.multi-selected .pdf-element-delete {
+  display: flex;
+}
+
+/* ============================================
+   COPY SELECTOR MODAL
+   ============================================ */
+.copy-selector-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  border-bottom: 1px solid #334155;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.copy-selector-item:hover {
+  background: #334155;
+}
+
+.copy-selector-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  flex: 1;
+}
+
+.copy-selector-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #3b82f6;
+  cursor: pointer;
+}
+
+.copy-selector-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.copy-selector-text {
+  font-size: 12px;
+  color: #cbd5e1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ============================================
+   AUTO-SAVE INDICATOR
+   ============================================ */
+#autoSaveIndicator.auto-saved {
+  color: #10b981 !important;
+}

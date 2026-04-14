@@ -27,8 +27,291 @@ let currentUser = null;
 // Clipboard for copying elements between documents
 let clipboardElements = null;
 
+// ============================================
+// UNDO / REDO SYSTEM
+// ============================================
+let undoStacks = {};   // { [docId]: [ { action, page, element, index, prevProps }, ... ] }
+let redoStacks = {};   // { [docId]: [ { action, page, element, index, prevProps }, ... ] }
+const MAX_UNDO = 50;
+
+function pushUndo(docId, action) {
+  if (!undoStacks[docId]) undoStacks[docId] = [];
+  if (!redoStacks[docId]) redoStacks[docId] = [];
+  undoStacks[docId].push(action);
+  if (undoStacks[docId].length > MAX_UNDO) undoStacks[docId].shift();
+  // Clear redo on new action
+  redoStacks[docId] = [];
+  updateUndoRedoUI();
+}
+
+function undo() {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) return;
+  const stack = undoStacks[activeDoc.id];
+  if (!stack || stack.length === 0) { showStatus('Nada que deshacer', 'error'); return; }
+  const action = stack.pop();
+  const redoAction = executeUndoAction(action, activeDoc);
+  if (!redoStacks[activeDoc.id]) redoStacks[activeDoc.id] = [];
+  redoStacks[activeDoc.id].push(redoAction);
+  updateTabModified(activeDoc.id, true);
+  renderPage();
+  updateUndoRedoUI();
+  autoSave();
+  showStatus('Deshacer', 'success');
+}
+
+function redo() {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) return;
+  const stack = redoStacks[activeDoc.id];
+  if (!stack || stack.length === 0) { showStatus('Nada que rehacer', 'error'); return; }
+  const action = stack.pop();
+  const undoAction = executeUndoAction(action, activeDoc);
+  if (!undoStacks[activeDoc.id]) undoStacks[activeDoc.id] = [];
+  undoStacks[activeDoc.id].push(undoAction);
+  updateTabModified(activeDoc.id, true);
+  renderPage();
+  updateUndoRedoUI();
+  autoSave();
+  showStatus('Rehacer', 'success');
+}
+
+function executeUndoAction(action, activeDoc) {
+  // Returns the inverse action for redo
+  const pageElements = activeDoc.elements[action.page] || [];
+  switch (action.type) {
+    case 'add': {
+      // Undo add = remove the element
+      const el = pageElements[action.index];
+      const removed = pageElements.splice(action.index, 1);
+      return { type: 'add', page: action.page, index: action.index, element: removed[0] };
+    }
+    case 'delete': {
+      // Undo delete = re-insert the element
+      pageElements.splice(action.index, 0, action.element);
+      return { type: 'delete', page: action.page, index: action.index, element: action.element };
+    }
+    case 'move': {
+      // Undo move = restore previous position
+      const el = pageElements[action.index];
+      if (el) {
+        const prev = { x: el.x, y: el.y };
+        el.x = action.prevProps.x;
+        el.y = action.prevProps.y;
+        return { type: 'move', page: action.page, index: action.index, prevProps: prev };
+      }
+      return action;
+    }
+    case 'resize': {
+      // Undo resize = restore previous dimensions
+      const el = pageElements[action.index];
+      if (el) {
+        const prev = { ...action.currentProps };
+        if (el.type === 'text') {
+          el.size = action.prevProps.size;
+        } else {
+          el.x = action.prevProps.x;
+          el.y = action.prevProps.y;
+          el.width = action.prevProps.width;
+          el.height = action.prevProps.height;
+        }
+        return { type: 'resize', page: action.page, index: action.index, prevProps: action.prevProps, currentProps: prev };
+      }
+      return action;
+    }
+    case 'clear': {
+      // Undo clear = restore all elements
+      activeDoc.elements[action.page] = JSON.parse(JSON.stringify(action.elements));
+      return { type: 'clear', page: action.page, elements: [] };
+    }
+    default:
+      return action;
+  }
+}
+
+function updateUndoRedoUI() {
+  const activeDoc = getActiveDoc();
+  const undoBtn = $('btnUndo');
+  const redoBtn = $('btnRedo');
+  if (activeDoc) {
+    const undoCount = (undoStacks[activeDoc.id] || []).length;
+    const redoCount = (redoStacks[activeDoc.id] || []).length;
+    if (undoBtn) undoBtn.disabled = undoCount === 0;
+    if (redoBtn) redoBtn.disabled = redoCount === 0;
+    if (undoBtn) undoBtn.title = `Deshacer (${undoCount})`;
+    if (redoBtn) redoBtn.title = `Rehacer (${redoCount})`;
+  } else {
+    if (undoBtn) undoBtn.disabled = true;
+    if (redoBtn) redoBtn.disabled = true;
+  }
+}
+
+// ============================================
+// MULTI-SELECT SYSTEM
+// ============================================
+let selectedIndices = new Set();  // Set of element indices currently selected
+let isBoxSelecting = false;
+let boxSelectStart = { x: 0, y: 0 };
+
+function clearSelection() {
+  selectedIndices.clear();
+  document.querySelectorAll('.pdf-element.multi-selected').forEach(el => el.classList.remove('multi-selected'));
+}
+
+function toggleMultiSelect(idx) {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) return;
+  const pageElements = activeDoc.elements[activeDoc.currentPage] || [];
+  if (idx < 0 || idx >= pageElements.length) return;
+
+  if (selectedIndices.has(idx)) {
+    selectedIndices.delete(idx);
+  } else {
+    selectedIndices.add(idx);
+  }
+  // Update DOM
+  document.querySelectorAll('.pdf-element').forEach(div => {
+    const divIdx = parseInt(div.dataset.idx);
+    if (selectedIndices.has(divIdx)) {
+      div.classList.add('multi-selected');
+    } else {
+      div.classList.remove('multi-selected');
+    }
+  });
+  updateMultiSelectUI();
+}
+
+function updateMultiSelectUI() {
+  const count = selectedIndices.size;
+  const info = $('multiSelectInfo');
+  const deleteBtn = $('btnDeleteSelected');
+  const copyBtn = $('btnCopySelected');
+  if (info) info.textContent = count > 0 ? `${count} elemento(s) seleccionado(s)` : '';
+  if (info) info.style.display = count > 0 ? 'block' : 'none';
+  if (deleteBtn) deleteBtn.style.display = count > 0 ? 'flex' : 'none';
+  if (copyBtn) copyBtn.style.display = count > 0 ? 'flex' : 'none';
+}
+
+function deleteSelectedElements() {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) return;
+  const pageElements = activeDoc.elements[activeDoc.currentPage] || [];
+  if (selectedIndices.size === 0) return;
+
+  if (!confirm(`¿Eliminar ${selectedIndices.size} elemento(s) seleccionado(s)?`)) return;
+
+  // Sort indices descending so splicing doesn't shift indices
+  const sortedIndices = Array.from(selectedIndices).sort((a, b) => b - a);
+  sortedIndices.forEach(idx => {
+    const el = pageElements[idx];
+    if (el) pushUndo(activeDoc.id, { type: 'delete', page: activeDoc.currentPage, index: idx, element: JSON.parse(JSON.stringify(el)) });
+    pageElements.splice(idx, 1);
+  });
+  clearSelection();
+  updateTabModified(activeDoc.id, true);
+  renderPage();
+  autoSave();
+}
+
+// ============================================
+// AUTO-SAVE SYSTEM
+// ============================================
+let autoSaveTimer = null;
+let isAutoSaving = false;
+const AUTO_SAVE_DELAY = 3000; // 3 seconds after last change
+
+function scheduleAutoSave() {
+  if (autoSaveTimer) clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(autoSave, AUTO_SAVE_DELAY);
+}
+
+async function autoSave() {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc || isAutoSaving) return;
+
+  // Check if any document has elements
+  let hasElements = false;
+  const saveData = {};
+  documents.forEach(doc => {
+    const docElements = {};
+    let docHasElements = false;
+    for (const page in doc.elements) {
+      if (doc.elements[page].length > 0) {
+        docElements[page] = doc.elements[page];
+        docHasElements = true;
+        hasElements = true;
+      }
+    }
+    if (docHasElements) {
+      saveData[doc.id] = {
+        elements: docElements,
+        currentPage: doc.currentPage,
+        fileName: doc.fileName
+      };
+    }
+  });
+
+  if (!hasElements) return;
+
+  isAutoSaving = true;
+  try {
+    await chrome.storage.local.set({ pdfEditorAutoSave: saveData, pdfEditorAutoSaveTime: Date.now() });
+    const indicator = $('autoSaveIndicator');
+    if (indicator) {
+      indicator.textContent = '✓ Guardado';
+      indicator.classList.add('auto-saved');
+      setTimeout(() => { indicator.textContent = ''; indicator.classList.remove('auto-saved'); }, 2000);
+    }
+  } catch (err) {
+    console.error('Auto-save error:', err);
+  }
+  isAutoSaving = false;
+}
+
+async function restoreAutoSave() {
+  try {
+    const stored = await chrome.storage.local.get(['pdfEditorAutoSave', 'pdfEditorAutoSaveTime']);
+    if (!stored.pdfEditorAutoSave) return;
+    const saveTime = stored.pdfEditorAutoSaveTime ? new Date(stored.pdfEditorAutoSaveTime) : null;
+    const timeStr = saveTime ? ` (${saveTime.toLocaleTimeString()})` : '';
+
+    // Check if any saved data matches currently open documents
+    let restored = false;
+    for (const docId in stored.pdfEditorAutoSave) {
+      const doc = documents.find(d => d.id === docId);
+      if (doc) {
+        const saved = stored.pdfEditorAutoSave[docId];
+        for (const page in saved.elements) {
+          doc.elements[parseInt(page)] = saved.elements[page];
+        }
+        doc.currentPage = saved.currentPage || doc.currentPage;
+        restored = true;
+      }
+    }
+
+    if (restored) {
+      showStatus(`Estado anterior restaurado${timeStr}`, 'success');
+      updateTabModified(getActiveDoc().id, true);
+      renderPage();
+    }
+
+    // Clean old auto-save data
+    await chrome.storage.local.remove(['pdfEditorAutoSave', 'pdfEditorAutoSaveTime']);
+  } catch (err) {
+    console.error('Auto-restore error:', err);
+  }
+}
+
 // Helper function
 const $ = id => document.getElementById(id);
+
+// Helper: push element and record undo
+function pushElement(doc, page, element) {
+  if (!doc.elements[page]) doc.elements[page] = [];
+  const idx = doc.elements[page].push(element) - 1;
+  pushUndo(doc.id, { type: 'add', page: page, index: idx, element: JSON.parse(JSON.stringify(element)) });
+  return idx;
+}
 
 // Get active document
 function getActiveDoc() {
@@ -86,6 +369,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupMerge();
   setupSplit();
   setupMultiDocumentTabs();
+  
+  // Try to restore auto-saved state after a short delay (wait for PDFs to load)
+  setTimeout(restoreAutoSave, 1500);
   
   showStatus('Carga uno o más PDFs para comenzar');
 });
@@ -206,6 +492,55 @@ function setupEventListeners() {
   if (btnClearClipboard) {
     btnClearClipboard.addEventListener('click', clearClipboard);
   }
+
+  // Undo/Redo buttons
+  const btnUndo = $('btnUndo');
+  if (btnUndo) btnUndo.addEventListener('click', undo);
+  const btnRedo = $('btnRedo');
+  if (btnRedo) btnRedo.addEventListener('click', redo);
+
+  // Multi-select action buttons
+  const btnDeleteSelected = $('btnDeleteSelected');
+  if (btnDeleteSelected) btnDeleteSelected.addEventListener('click', deleteSelectedElements);
+  const btnCopySelected = $('btnCopySelected');
+  if (btnCopySelected) btnCopySelected.addEventListener('click', copySelectedElements);
+
+  // Copy selector modal
+  const btnCopySelector = $('btnCopySelector');
+  if (btnCopySelector) btnCopySelector.addEventListener('click', showCopySelector);
+  const confirmCopySelectorBtn = $('confirmCopySelectorBtn');
+  if (confirmCopySelectorBtn) confirmCopySelectorBtn.addEventListener('click', confirmCopySelector);
+  const closeCopySelectorBtn = $('closeCopySelectorBtn');
+  if (closeCopySelectorBtn) closeCopySelectorBtn.addEventListener('click', closeCopySelector);
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', (e) => {
+    // Ctrl+Z = Undo
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+      e.preventDefault(); undo();
+    }
+    // Ctrl+Y or Ctrl+Shift+Z = Redo
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+      e.preventDefault(); redo();
+    }
+    // Delete key = delete selected or auto-detect single element
+    if (e.key === 'Delete' && !e.target.closest('input, textarea, select')) {
+      if (selectedIndices.size > 0) {
+        deleteSelectedElements();
+      }
+    }
+    // Escape = clear multi-selection
+    if (e.key === 'Escape') {
+      clearSelection();
+    }
+  });
+
+  // Click on overlay (not on element) clears multi-selection
+  document.addEventListener('click', (e) => {
+    if (e.target.classList.contains('elements-overlay')) {
+      clearSelection();
+    }
+  });
 }
 
 // ============================================
@@ -533,6 +868,9 @@ async function renderPage() {
   if (!canvasArea) return;
   
   canvasArea.innerHTML = '';
+  clearSelection();
+  updateMultiSelectUI();
+  updateUndoRedoUI();
   
   try {
     const page = await activeDoc.pdfJsDoc.getPage(activeDoc.currentPage);
@@ -651,14 +989,25 @@ function createElementDiv(el, idx, scale, activeDoc) {
     }
   }
   
+  // Multi-select: Shift+click to toggle selection
+  div.addEventListener('click', (e) => {
+    if (e.shiftKey) {
+      e.stopPropagation();
+      toggleMultiSelect(idx);
+      return;
+    }
+  });
+
   const deleteBtn = document.createElement('button');
   deleteBtn.className = 'pdf-element-delete';
   deleteBtn.textContent = '✕';
   deleteBtn.onclick = (e) => {
     e.stopPropagation();
+    pushUndo(activeDoc.id, { type: 'delete', page: activeDoc.currentPage, index: idx, element: JSON.parse(JSON.stringify(el)) });
     activeDoc.elements[activeDoc.currentPage].splice(idx, 1);
     updateTabModified(activeDoc.id, true);
     renderPage();
+    scheduleAutoSave();
   };
   div.appendChild(deleteBtn);
   
@@ -729,7 +1078,7 @@ function confirmTextWithPosition() {
       
       if (foundDni && textWithoutDni) {
         // Create name text
-        activeDoc.elements[activeDoc.currentPage].push({
+        pushElement(activeDoc, activeDoc.currentPage, {
           type: 'text',
           text: textWithoutDni,
           x: posX,
@@ -739,7 +1088,7 @@ function confirmTextWithPosition() {
         });
         
         // Create DNI text with name reference
-        activeDoc.elements[activeDoc.currentPage].push({
+        pushElement(activeDoc, activeDoc.currentPage, {
           type: 'text',
           text: foundDni,
           x: posX,
@@ -753,7 +1102,7 @@ function confirmTextWithPosition() {
         totalCreated += 2;
       } else if (line) {
         // No DNI found, add as single text
-        activeDoc.elements[activeDoc.currentPage].push({
+        pushElement(activeDoc, activeDoc.currentPage, {
           type: 'text',
           text: line,
           x: posX,
@@ -783,7 +1132,7 @@ function confirmTextWithPosition() {
     
     if (foundDni && textWithoutDni) {
       // Create two separate text elements
-      activeDoc.elements[activeDoc.currentPage].push({
+      pushElement(activeDoc, activeDoc.currentPage, {
         type: 'text',
         text: textWithoutDni,
         x: posX,
@@ -792,7 +1141,7 @@ function confirmTextWithPosition() {
         color: color
       });
       
-      activeDoc.elements[activeDoc.currentPage].push({
+      pushElement(activeDoc, activeDoc.currentPage, {
         type: 'text',
         text: foundDni,
         x: posX,
@@ -805,7 +1154,7 @@ function confirmTextWithPosition() {
       showStatus('Texto separado: Nombre + DNI/NIE', 'success');
     } else {
       // Single text element
-      activeDoc.elements[activeDoc.currentPage].push({
+      pushElement(activeDoc, activeDoc.currentPage, {
         type: 'text',
         text: text,
         x: posX,
@@ -836,7 +1185,7 @@ function addCurrentDate() {
   const today = new Date();
   const dateStr = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
   
-  activeDoc.elements[activeDoc.currentPage].push({
+  pushElement(activeDoc, activeDoc.currentPage, {
     type: 'text',
     text: dateStr,
     x: activeDoc.pageWidth / 2 - 40,
@@ -853,22 +1202,32 @@ function addCurrentDate() {
 function makeDraggable(div, el, scale, activeDoc) {
   let isDragging = false;
   let startX, startY, origX, origY;
+  let hasMoved = false;
   
   div.addEventListener('mousedown', (e) => {
     if (e.target.classList.contains('pdf-element-delete') || e.target.classList.contains('resize-handle')) return;
+    if (e.shiftKey) return; // Let multi-select handle it
     
     isDragging = true;
+    hasMoved = false;
     startX = e.clientX;
     startY = e.clientY;
     origX = el.x * scale;
     origY = el.y * scale;
+    // Record undo state for move
+    div.dataset.undoOrigX = el.x;
+    div.dataset.undoOrigY = el.y;
+    div.dataset.undoIdx = div.dataset.idx;
     div.classList.add('selected');
+    // Clear multi-selection when clicking without shift
+    if (selectedIndices.size > 0 && !e.shiftKey) clearSelection();
     e.preventDefault();
     e.stopPropagation();
   });
   
   document.addEventListener('mousemove', (e) => {
     if (!isDragging) return;
+    hasMoved = true;
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
     div.style.left = (origX + dx) + 'px';
@@ -880,10 +1239,21 @@ function makeDraggable(div, el, scale, activeDoc) {
     isDragging = false;
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
-    el.x = Math.max(0, (origX + dx) / scale);
-    el.y = Math.max(0, (origY + dy) / scale);
+    const newX = Math.max(0, (origX + dx) / scale);
+    const newY = Math.max(0, (origY + dy) / scale);
     div.classList.remove('selected');
-    updateTabModified(activeDoc.id, true);
+    
+    // Record undo only if actually moved
+    if (hasMoved) {
+      const origElX = parseFloat(div.dataset.undoOrigX);
+      const origElY = parseFloat(div.dataset.undoOrigY);
+      const elIdx = parseInt(div.dataset.undoIdx);
+      pushUndo(activeDoc.id, { type: 'move', page: activeDoc.currentPage, index: elIdx, prevProps: { x: origElX, y: origElY } });
+      el.x = newX;
+      el.y = newY;
+      updateTabModified(activeDoc.id, true);
+      scheduleAutoSave();
+    }
   });
 }
 
@@ -892,6 +1262,7 @@ function makeResizable(div, el, scale, activeDoc) {
   let isResizing = false;
   let currentHandle = null;
   let startX, startY, startWidth, startHeight, startFontSize, startXPos, startYPos;
+  let elIdx = parseInt(div.dataset.idx);
   
   handles.forEach(handle => {
     handle.addEventListener('mousedown', (e) => {
@@ -900,6 +1271,7 @@ function makeResizable(div, el, scale, activeDoc) {
       currentHandle = handle.dataset.handle;
       startX = e.clientX;
       startY = e.clientY;
+      elIdx = parseInt(div.dataset.idx);
       
       if (el.type === 'text') {
         startFontSize = el.size || 14;
@@ -983,8 +1355,16 @@ function makeResizable(div, el, scale, activeDoc) {
     isResizing = false;
     div.classList.remove('resizing');
     div.classList.remove('selected');
+    
+    // Record undo for resize
+    if (el.type === 'text') {
+      pushUndo(activeDoc.id, { type: 'resize', page: activeDoc.currentPage, index: elIdx, prevProps: { size: startFontSize }, currentProps: { size: el.size } });
+    } else {
+      pushUndo(activeDoc.id, { type: 'resize', page: activeDoc.currentPage, index: elIdx, prevProps: { x: startXPos, y: startYPos, width: startWidth, height: startHeight }, currentProps: { x: el.x, y: el.y, width: el.width, height: el.height } });
+    }
     updateTabModified(activeDoc.id, true);
     showStatus('Tamaño actualizado', 'success');
+    scheduleAutoSave();
   });
 }
 
@@ -1060,7 +1440,7 @@ function addImage() {
           imgHeight = Math.round(imgHeight * ratio);
         }
         
-        activeDoc.elements[activeDoc.currentPage].push({
+        pushElement(activeDoc, activeDoc.currentPage, {
           type: 'image',
           src: ev.target.result,
           x: activeDoc.pageWidth / 2 - imgWidth / 2,
@@ -1458,7 +1838,7 @@ function selectSignature(url, name) {
     
     const offset = addedSignaturesCount * 15;
     
-    activeDoc.elements[activeDoc.currentPage].push({
+    pushElement(activeDoc, activeDoc.currentPage, {
       type: 'signature',
       src: url,
       x: activeDoc.pageWidth / 2 - imgWidth / 2 + offset,
@@ -2287,6 +2667,83 @@ async function mergePdfs() {
 // CLIPBOARD - Copy/Paste Elements Between Docs
 // ============================================
 
+// Copy only selected elements (from multi-select)
+function copySelectedElements() {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) return;
+  const pageElements = activeDoc.elements[activeDoc.currentPage] || [];
+  if (selectedIndices.size === 0) { showStatus('Selecciona elementos primero (Shift+Click)', 'error'); return; }
+  
+  const selected = Array.from(selectedIndices).sort((a, b) => a - b).map(idx => pageElements[idx]).filter(Boolean);
+  clipboardElements = JSON.parse(JSON.stringify(selected));
+  clearSelection();
+  updateClipboardUI();
+  showStatus(`${selected.length} elemento(s) copiado(s)`, 'success');
+}
+
+// Copy with selector modal - choose which elements to copy
+function showCopySelector() {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) { showStatus('Primero carga un PDF', 'error'); return; }
+  const pageElements = activeDoc.elements[activeDoc.currentPage] || [];
+  if (pageElements.length === 0) { showStatus('No hay elementos en esta página', 'error'); return; }
+  
+  clearSelection();
+  
+  const modal = $('copySelectorModal');
+  const list = $('copySelectorList');
+  if (!modal || !list) return;
+  
+  list.innerHTML = '';
+  pageElements.forEach((el, idx) => {
+    const label = el.type === 'text' ? (el.text.length > 30 ? el.text.substring(0, 30) + '...' : el.text) : `${el.type}${el.name ? ': ' + el.name : ''}`;
+    const div = document.createElement('div');
+    div.className = 'copy-selector-item';
+    div.innerHTML = `
+      <label class="copy-selector-label">
+        <input type="checkbox" class="copy-selector-check" data-idx="${idx}" checked>
+        <span class="copy-selector-icon">${el.type === 'text' ? '📝' : el.type === 'signature' ? '✍️' : '🖼️'}</span>
+        <span class="copy-selector-text">${escapeHtml(label)}</span>
+      </label>
+    `;
+    list.appendChild(div);
+  });
+  
+  const selectAllBtn = $('copySelectorSelectAll');
+  const deselectAllBtn = $('copySelectorDeselectAll');
+  if (selectAllBtn) selectAllBtn.onclick = () => list.querySelectorAll('.copy-selector-check').forEach(cb => cb.checked = true);
+  if (deselectAllBtn) deselectAllBtn.onclick = () => list.querySelectorAll('.copy-selector-check').forEach(cb => cb.checked = false);
+  
+  modal.classList.add('show');
+}
+
+function confirmCopySelector() {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) return;
+  const pageElements = activeDoc.elements[activeDoc.currentPage] || [];
+  
+  const checked = document.querySelectorAll('.copy-selector-check:checked');
+  if (checked.length === 0) { showStatus('Selecciona al menos un elemento', 'error'); return; }
+  
+  const selected = Array.from(checked).map(cb => pageElements[parseInt(cb.dataset.idx)]).filter(Boolean);
+  clipboardElements = JSON.parse(JSON.stringify(selected));
+  
+  $('copySelectorModal').classList.remove('show');
+  updateClipboardUI();
+  showStatus(`${selected.length} elemento(s) copiado(s)`, 'success');
+}
+
+function closeCopySelector() {
+  const modal = $('copySelectorModal');
+  if (modal) modal.classList.remove('show');
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
 function copyCurrentPageElements() {
   const activeDoc = getActiveDoc();
   if (!activeDoc) {
@@ -2329,11 +2786,8 @@ function pasteElementsToCurrentPage() {
     el.x = Math.min(el.x + (offset * (index % 5)), activeDoc.pageWidth - 100);
     el.y = Math.min(el.y + (offset * Math.floor(index / 5)), activeDoc.pageHeight - 50);
     
-    // Add to current page
-    if (!activeDoc.elements[activeDoc.currentPage]) {
-      activeDoc.elements[activeDoc.currentPage] = [];
-    }
-    activeDoc.elements[activeDoc.currentPage].push(el);
+    // Add to current page with undo
+    pushElement(activeDoc, activeDoc.currentPage, el);
   });
   
   updateTabModified(activeDoc.id, true);
