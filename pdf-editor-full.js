@@ -1,6 +1,6 @@
 // ============================================
-// PDF EDITOR FULL SCREEN - AGENDA STAFF v6.2.0
-// Fixed: Floating undo/redo, editable text, box selection
+// PDF EDITOR FULL SCREEN - AGENDA STAFF v6.3.0
+// Fixed: Box selection persistence, Add All signatures, Date quantity
 // ============================================
 
 const SUPABASE_URL = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
@@ -258,11 +258,14 @@ function deleteSelectedElements() {
 // ============================================
 // BOX SELECTION SYSTEM
 // ============================================
+let boxSelectJustFinished = false;  // Flag to prevent click from clearing box selection
+
 function startBoxSelection(e, overlay, scale, activeDoc) {
   if (e.target.closest('.pdf-element') || e.target.closest('.resize-handle')) return;
   if (e.shiftKey) return;
   
   isBoxSelecting = true;
+  boxSelectJustFinished = false;
   clearSelection();
   
   const rect = overlay.getBoundingClientRect();
@@ -277,8 +280,11 @@ function startBoxSelection(e, overlay, scale, activeDoc) {
   boxSelectRect.style.height = '0px';
   overlay.appendChild(boxSelectRect);
   
+  e.preventDefault(); // Prevent text selection during drag
+  
   const onMove = (ev) => {
     if (!isBoxSelecting || !boxSelectRect) return;
+    ev.preventDefault();
     const x1 = Math.min(boxSelectStart.x, ev.clientX);
     const y1 = Math.min(boxSelectStart.y, ev.clientY);
     const x2 = Math.max(boxSelectStart.x, ev.clientX);
@@ -313,14 +319,22 @@ function startBoxSelection(e, overlay, scale, activeDoc) {
       }
       
       const pageElements = activeDoc.elements[activeDoc.currentPage] || [];
+      let selectedCount = 0;
       document.querySelectorAll('.pdf-element').forEach(div => {
         const divIdx = parseInt(div.dataset.idx);
         const elRect = div.getBoundingClientRect();
         const overlaps = !(elRect.right < boxLeft || elRect.left > boxRight || elRect.bottom < boxTop || elRect.top > boxBottom);
         if (overlaps && divIdx < pageElements.length) {
           selectElementIdx(divIdx);
+          selectedCount++;
         }
       });
+      
+      // If elements were selected, prevent the next click from clearing them
+      if (selectedCount > 0) {
+        boxSelectJustFinished = true;
+        setTimeout(() => { boxSelectJustFinished = false; }, 300);
+      }
       
       boxSelectRect.remove();
       boxSelectRect = null;
@@ -688,6 +702,22 @@ function setupEventListeners() {
   const closeCopySelectorBtn = $('closeCopySelectorBtn');
   if (closeCopySelectorBtn) closeCopySelectorBtn.addEventListener('click', closeCopySelector);
 
+  // Date count modal
+  const btnConfirmDateCount = $('btnConfirmDateCount');
+  if (btnConfirmDateCount) btnConfirmDateCount.addEventListener('click', confirmAddDates);
+  const btnCancelDateCount = $('btnCancelDateCount');
+  if (btnCancelDateCount) btnCancelDateCount.addEventListener('click', () => {
+    const dateCountModal = $('dateCountModal');
+    if (dateCountModal) dateCountModal.classList.remove('show');
+  });
+  // Enter key in date count input
+  const dateCountInput = $('dateCountInput');
+  if (dateCountInput) {
+    dateCountInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') confirmAddDates();
+    });
+  }
+
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
     // Ctrl+Z = Undo
@@ -710,9 +740,9 @@ function setupEventListeners() {
     }
   });
 
-  // Click on overlay clears multi-selection
+  // Click on overlay clears multi-selection (but not right after a box selection)
   document.addEventListener('click', (e) => {
-    if (e.target.classList.contains('elements-overlay')) {
+    if (e.target.classList.contains('elements-overlay') && !boxSelectJustFinished) {
       clearSelection();
     }
   });
@@ -1118,6 +1148,11 @@ async function renderPage() {
     // Mousedown on overlay starts box selection
     overlay.addEventListener('mousedown', (e) => {
       if (e.target === overlay || e.target.classList.contains('elements-overlay')) {
+        // If clicking on empty area while elements are selected, clear selection
+        if (selectedIndices.size > 0 && !boxSelectJustFinished) {
+          clearSelection();
+          return;
+        }
         startBoxSelection(e, overlay, scale, activeDoc);
       }
     });
@@ -1463,21 +1498,54 @@ function addCurrentDate() {
     return;
   }
   
+  // Show quantity modal
+  const dateCountModal = $('dateCountModal');
+  if (dateCountModal) {
+    const dateCountInput = $('dateCountInput');
+    if (dateCountInput) dateCountInput.value = 1;
+    dateCountModal.classList.add('show');
+    if (dateCountInput) dateCountInput.focus();
+  }
+}
+
+function confirmAddDates() {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc || !activeDoc.pdfJsDoc) return;
+  
+  const dateCountInput = $('dateCountInput');
+  const dateCountModal = $('dateCountModal');
+  const count = dateCountInput ? parseInt(dateCountInput.value) || 1 : 1;
+  
+  if (count < 1 || count > 50) {
+    showStatus('Introduce un número entre 1 y 50', 'error');
+    return;
+  }
+  
+  if (dateCountModal) dateCountModal.classList.remove('show');
+  
   const today = new Date();
   const dateStr = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
   
-  pushElement(activeDoc, activeDoc.currentPage, {
-    type: 'text',
-    text: dateStr,
-    x: activeDoc.pageWidth / 2 - 40,
-    y: activeDoc.pageHeight / 2,
-    size: 14,
-    color: '#000000'
-  });
+  const pageElements = activeDoc.elements[activeDoc.currentPage] || [];
+  const baseX = activeDoc.pageWidth / 2 - 40;
+  const baseY = activeDoc.pageHeight / 2;
+  const spacing = 25; // vertical space between dates
+  
+  for (let i = 0; i < count; i++) {
+    pushElement(activeDoc, activeDoc.currentPage, {
+      type: 'text',
+      text: dateStr,
+      x: baseX,
+      y: baseY + (i * spacing),
+      size: 14,
+      color: '#000000'
+    });
+  }
   
   updateTabModified(activeDoc.id, true);
   renderPage();
-  showStatus(`Fecha añadida: ${dateStr}`, 'success');
+  showStatus(`${count} fecha(s) añadida(s): ${dateStr}`, 'success');
+  scheduleAutoSave();
 }
 
 function makeDraggable(div, el, scale, activeDoc, idx) {
@@ -1859,7 +1927,10 @@ function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames
   let html = '';
   
   if (signatures.length > 0) {
-    html += `<div class="signature-found-header">✓ Encontradas (${signatures.length})</div>`;
+    html += `<div class="signature-found-header">
+      <span>✓ Encontradas (${signatures.length})</span>
+      <button class="signature-add-all-btn" id="btnAddAllSignatures" title="Añadir todas las firmas al PDF">✓ Añadir todas</button>
+    </div>`;
     signatures.forEach(sig => {
       html += `<div class="signature-item signature-found" data-id="${sig.id}" data-url="${sig.image_url}" data-name="${escapeHtml(sig.name)}">
         <span class="signature-name">${escapeHtml(sig.name)}</span>
@@ -1905,6 +1976,19 @@ function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames
       uploadMissingSignature(btn.dataset.name);
     });
   });
+  
+  // Add All Signatures button
+  const btnAddAll = $('btnAddAllSignatures');
+  if (btnAddAll && signatures.length > 0) {
+    btnAddAll.addEventListener('click', (e) => {
+      e.stopPropagation();
+      signatures.forEach((sig, i) => {
+        setTimeout(() => {
+          selectSignature(sig.image_url, sig.name);
+        }, i * 100); // Stagger adds to see each one
+      });
+    });
+  }
 }
 
 async function deleteSignature(id, name) {

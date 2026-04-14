@@ -391,6 +391,21 @@
     </div>
   </div>
   
+  <!-- Date Count Modal -->
+  <div class="modal-overlay" id="dateCountModal">
+    <div class="modal" style="max-width:340px;">
+      <h3>📅 Añadir fecha</h3>
+      <p style="margin-bottom:12px;color:#94a3b8;font-size:13px;">¿Cuántas fechas quieres añadir?</p>
+      <div class="modal-row">
+        <input type="number" id="dateCountInput" placeholder="Cantidad" value="1" min="1" max="50" style="flex:1;padding:10px 12px;border:1px solid #334155;border-radius:8px;background:#0f172a;color:#f1f5f9;font-size:14px;">
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="btnCancelDateCount">Cancelar</button>
+        <button class="btn-add" id="btnConfirmDateCount" style="background:#8b5cf6;">Añadir</button>
+      </div>
+    </div>
+  </div>
+  
   <!-- Signature Modal -->
   <div class="modal-overlay" id="signatureModal">
     <div class="modal signature-modal">
