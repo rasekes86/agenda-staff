@@ -6,6 +6,10 @@
 (function() {
   'use strict';
   
+  // Constants
+  const MIN_SELECTION_SIZE_PX = 10;
+  const CAPTURE_DELAY_MS = 50;
+  
   // Evitar múltiples inyecciones
   if (window.__screenshotSelectorActive) {
     return;
@@ -89,6 +93,9 @@
     overlay.addEventListener('mousemove', handleMouseMove);
     overlay.addEventListener('mouseup', handleMouseUp);
     document.addEventListener('keydown', handleKeyDown);
+    
+    // Cleanup on page navigation to prevent orphaned overlay
+    window.addEventListener('beforeunload', cleanup);
   }
   
   function handleMouseDown(e) {
@@ -130,7 +137,7 @@
     const rect = selection.getBoundingClientRect();
     
     // Área mínima
-    if (rect.width < 10 || rect.height < 10) {
+    if (rect.width < MIN_SELECTION_SIZE_PX || rect.height < MIN_SELECTION_SIZE_PX) {
       cancelSelection();
       return;
     }
@@ -168,7 +175,7 @@
     if (mask) mask.style.display = 'none';
     
     // Forzar repintado del navegador
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await new Promise(resolve => setTimeout(resolve, CAPTURE_DELAY_MS));
     
     // Calcular ratio de dispositivo (para pantallas HiDPI)
     const dpr = window.devicePixelRatio || 1;

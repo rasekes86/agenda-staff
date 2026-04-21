@@ -5,6 +5,16 @@
 const SUPABASE_URL = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1Z3V0Y3N1a3hreGxncGttenh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzc5OTExMjksImV4cCI6MjA1MzU2NzEyOX0.PpolAzqqXNBOhRlUVzplqkKeGQxzfed4gH377CidVJE';
 
+// ============================================
+// CONSTANTS
+// ============================================
+const HIGHLIGHT_DURATION_MS = 2000;
+const SCROLL_DELAY_MS = 100;
+const SIDEPANEL_EDITOR_SCALE_MAX_WIDTH = 280;
+const SIDEPANEL_EDITOR_SCALE_MAX_HEIGHT = 400;
+const DEFAULT_FONT_SIZE = 14;
+const DEFAULT_MINUTES_BEFORE = 5;
+
 // State
 let currentUser = null;
 let session = null;
@@ -17,7 +27,6 @@ let dragId = null;
 let dragDate = null;
 let calDate = new Date();
 let viewStartDate = new Date();
-const VISIBLE_DAYS = 30;
 
 // Notification settings
 let notificationSettings = {
@@ -41,6 +50,7 @@ let wordFile = null;
 // PDF Editor state
 let editorPdfBytes = null;
 let editorPdfDoc = null;
+let editorPdfJsDoc = null;  // Cached pdf.js document (avoids re-parsing on page change)
 let editorCurrentPage = 1;
 let editorTotalPages = 0;
 let editorElements = {}; // Elements per page: { pageNum: [elements] }
@@ -439,18 +449,22 @@ async function api(method, body, query = '') {
     const errText = await res.text();
     console.error('API Error:', errText);
     if (res.status === 401 || res.status === 403) {
-      if (session.refresh_token) {
-        const refreshed = await refreshSession(session.refresh_token);
-        if (refreshed) {
-          const newStored = await chrome.storage.local.get(['session']);
-          session = newStored.session;
-          opts.headers.Authorization = `Bearer ${session.access_token}`;
-          const retryRes = await fetch(url, opts);
-          if (retryRes.ok) {
-            if (method === 'DELETE') return {};
-            return retryRes.json();
+      try {
+        if (session.refresh_token) {
+          const refreshed = await refreshSession(session.refresh_token);
+          if (refreshed) {
+            const newStored = await chrome.storage.local.get(['session']);
+            session = newStored.session;
+            opts.headers.Authorization = `Bearer ${session.access_token}`;
+            const retryRes = await fetch(url, opts);
+            if (retryRes.ok) {
+              if (method === 'DELETE') return {};
+              return retryRes.json();
+            }
           }
         }
+      } catch (refreshErr) {
+        console.error('Session refresh failed:', refreshErr);
       }
       await handleLogout();
       throw new Error('Sesión expirada. Por favor, inicia sesión de nuevo.');
@@ -2045,6 +2059,9 @@ async function loadPdfForEditor(file) {
     editorTotalPages = editorPdfDoc.getPageCount();
     editorCurrentPage = 1;
     
+    // Cache pdf.js document to avoid re-parsing on every page change (M8)
+    editorPdfJsDoc = null;
+    
     // Initialize elements for each page
     editorElements = {};
     for (let i = 1; i <= editorTotalPages; i++) {
@@ -2090,7 +2107,7 @@ async function renderEditorPage() {
     const { width, height } = page.getSize();
     
     // Calculate scale to fit container (max width ~280px)
-    editorScale = Math.min(280 / width, 400 / height, 1);
+    editorScale = Math.min(SIDEPANEL_EDITOR_SCALE_MAX_WIDTH / width, SIDEPANEL_EDITOR_SCALE_MAX_HEIGHT / height, 1);
     
     // Create canvas for rendering
     const canvasContainer = document.createElement('div');
@@ -2110,8 +2127,11 @@ async function renderEditorPage() {
     let renderSuccess = false;
     if (typeof pdfjsLib !== 'undefined') {
       try {
-        const pdfJsDoc = await pdfjsLib.getDocument(editorPdfBytes).promise;
-        const pdfJsPage = await pdfJsDoc.getPage(editorCurrentPage);
+        // Use cached pdf.js document (M8) — only parse once
+        if (!editorPdfJsDoc) {
+          editorPdfJsDoc = await pdfjsLib.getDocument(editorPdfBytes).promise;
+        }
+        const pdfJsPage = await editorPdfJsDoc.getPage(editorCurrentPage);
         const viewport = pdfJsPage.getViewport({ scale: editorScale });
         canvas.width = viewport.width;
         canvas.height = viewport.height;
@@ -2185,7 +2205,7 @@ function createEditorElement(el, idx) {
     const textSpan = document.createElement('span');
     textSpan.textContent = el.text;
     div.appendChild(textSpan);
-    div.style.fontSize = (el.size || 14) * editorScale + 'px';
+    div.style.fontSize = (el.size || DEFAULT_FONT_SIZE) * editorScale + 'px';
     div.style.color = el.color || '#000';
     
     // Show name label for DNI/NIE texts
@@ -2286,7 +2306,7 @@ function addTextToPdf() {
   modal.querySelector('#cancelTextBtn').onclick = closeModal;
   modal.querySelector('#addTextBtn').onclick = () => {
     const text = modal.querySelector('#textInputText').value.trim();
-    const size = parseInt(modal.querySelector('#textInputSize').value) || 14;
+    const size = parseInt(modal.querySelector('#textInputSize').value) || DEFAULT_FONT_SIZE;
     const color = modal.querySelector('#textInputColor').value;
     
     if (!text) {
@@ -2299,126 +2319,17 @@ function addTextToPdf() {
       editorElements[editorCurrentPage] = [];
     }
     
-    // DNI/NIE patterns
-    const dniPatterns = [
-      /\b\d{8}[A-Za-z]\b/g,           // DNI: 12345678A
-      /\b[XYZ]\d{7}[A-Za-z]\b/g,      // NIE: X1234567A
-      /\b\d{8}-[A-Za-z]\b/g,          // DNI con guión: 12345678-A
-      /\b[XYZ]\d{7}-[A-Za-z]\b/g      // NIE con guión: X1234567-A
-    ];
+    // Use shared DNI/NIE processing (from shared-utils.js)
+    const startX = 50;
+    const startY = 50;
+    const { elements, totalCreated } = processTextWithDni(text, startX, startY, size, color);
+    elements.forEach(el => editorElements[editorCurrentPage].push(el));
     
-    // Check if text has multiple lines
     const lines = text.split(/\n|\r\n|\r/).map(l => l.trim()).filter(l => l);
-    
-    let startX = 50;
-    let startY = 50;
-    
-    if (lines.length > 1) {
-      // Multi-line mode: process each line
-      let currentY = startY;
-      let totalCreated = 0;
-      
-      lines.forEach(line => {
-        let foundDni = null;
-        let textWithoutDni = line;
-        
-        // Search for DNI/NIE in line
-        for (const pattern of dniPatterns) {
-          const match = line.match(pattern);
-          if (match) {
-            foundDni = match[0];
-            textWithoutDni = line.replace(pattern, '').replace(/\s+/g, ' ').trim();
-            break;
-          }
-        }
-        
-        if (foundDni && textWithoutDni) {
-          // Create name text
-          editorElements[editorCurrentPage].push({
-            type: 'text',
-            text: textWithoutDni,
-            x: startX,
-            y: currentY,
-            size,
-            color
-          });
-          
-          // Create DNI text with name reference
-          editorElements[editorCurrentPage].push({
-            type: 'text',
-            text: foundDni,
-            x: startX,
-            y: currentY + size + 3,
-            size,
-            color,
-            name: textWithoutDni  // Store name for tooltip
-          });
-          
-          currentY += (size * 2) + 15; // Space between pairs
-          totalCreated += 2;
-        } else if (line) {
-          // No DNI found, add as single text
-          editorElements[editorCurrentPage].push({
-            type: 'text',
-            text: line,
-            x: startX,
-            y: currentY,
-            size,
-            color
-          });
-          currentY += size + 10;
-          totalCreated++;
-        }
-      });
-      
+    if (totalCreated > 1 && lines.length > 1) {
       showToast(`${totalCreated} textos creados (${lines.length} líneas)`);
-    } else {
-      // Single line mode
-      let foundDni = null;
-      let textWithoutDni = text;
-      
-      for (const pattern of dniPatterns) {
-        const match = text.match(pattern);
-        if (match) {
-          foundDni = match[0];
-          textWithoutDni = text.replace(pattern, '').replace(/\s+/g, ' ').trim();
-          break;
-        }
-      }
-      
-      if (foundDni && textWithoutDni) {
-        // Create two separate text elements
-        editorElements[editorCurrentPage].push({
-          type: 'text',
-          text: textWithoutDni,
-          x: startX,
-          y: startY,
-          size,
-          color
-        });
-        
-        editorElements[editorCurrentPage].push({
-          type: 'text',
-          text: foundDni,
-          x: startX,
-          y: startY + size + 3,
-          size,
-          color,
-          name: textWithoutDni  // Store name for tooltip
-        });
-        
-        showToast('Texto separado: Nombre + DNI/NIE');
-      } else {
-        // Single text element
-        editorElements[editorCurrentPage].push({
-          type: 'text',
-          text,
-          x: startX,
-          y: startY,
-          size,
-          color
-        });
-      }
+    } else if (totalCreated === 2) {
+      showToast('Texto separado: Nombre + DNI/NIE');
     }
     
     closeModal();
@@ -2643,14 +2554,7 @@ async function saveEditedPdf() {
   }
 }
 
-function hexToRgb(hex) {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  return result ? {
-    r: parseInt(result[1], 16),
-    g: parseInt(result[2], 16),
-    b: parseInt(result[3], 16)
-  } : { r: 0, g: 0, b: 0 };
-}
+// hexToRgb moved to shared-utils.js
 
 // ============================================
 // SIGNATURES MANAGER
@@ -2798,23 +2702,7 @@ function resetSignatureState() {
   $('newSignatureName').value = '';
 }
 
-// Helper function to remove DNI/NIE from a string
-// DNI format: 8 digits + 1 letter (e.g., 12345678A)
-// NIE format: X/Y/Z + 7 digits + 1 letter (e.g., X1234567A)
-function removeDniNie(text) {
-  // Remove DNI pattern: 8 digits followed by a letter
-  // Remove NIE pattern: X, Y, or Z followed by 7 digits and a letter
-  return text
-    .replace(/\s*\d{8}[A-Za-z]\s*/gi, ' ')  // DNI: 8 digits + letter
-    .replace(/\s*[XYZ]\d{7}[A-Za-z]\s*/gi, ' ')  // NIE: X/Y/Z + 7 digits + letter
-    .replace(/\s+/g, ' ')  // Normalize multiple spaces to single space
-    .trim();
-}
-
-function normalizeText(text) {
-  // Remove accents and normalize for comparison (e.g. García → Garcia)
-  return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-}
+// removeDniNie and normalizeText moved to shared-utils.js
 
 // Search signatures in Supabase (one name per line - commas are part of the name)
 async function searchSignatures() {

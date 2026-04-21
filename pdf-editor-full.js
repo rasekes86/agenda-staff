@@ -3,6 +3,22 @@
 // Fixed: Sidebar PDF tools layout (two rows), sticky document tabs
 // ============================================
 
+// ============================================
+// CONSTANTS
+// ============================================
+const DEFAULT_FONT_SIZE = 14;
+const MIN_FONT_SIZE = 8;
+const MAX_FONT_SIZE = 72;
+const MIN_ELEMENT_SIZE = 20;
+const RESIZE_SENSITIVITY = 200;
+const STATUS_MSG_DURATION_MS = 3000;
+const MULTI_FILE_LOAD_DELAY_MS = 150;
+const MAX_SIGNATURE_SIZE = 400;
+const ZOOM_MIN = 0.25;
+const ZOOM_MAX = 2.5;
+const MAX_UNDO_STATES = 30;
+const PASTE_OFFSET = 30;
+
 const SUPABASE_URL = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1Z3V0Y3N1a3hreGxncGttenh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzc5OTExMjksImV4cCI6MjA1MzU2NzEyOX0.PpolAzqqXNBOhRlUVzplqkKeGQxzfed4gH377CidVJE';
 
@@ -59,7 +75,7 @@ function showStatus(msg, type = '') {
   if (el) {
     el.textContent = msg;
     el.className = 'status-msg show ' + type;
-    setTimeout(() => el.classList.remove('show'), 3000);
+    setTimeout(() => el.classList.remove('show'), STATUS_MSG_DURATION_MS);
   }
 }
 
@@ -86,6 +102,39 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupMerge();
   setupSplit();
   setupMultiDocumentTabs();
+  
+  // Delegated dblclick handler on canvasArea (M9: avoids re-attaching on every render)
+  const canvasArea = $('canvasArea');
+  if (canvasArea) {
+    canvasArea.addEventListener('dblclick', (e) => {
+      const activeDoc = getActiveDoc();
+      if (!activeDoc || !activeDoc.pdfJsDoc) return;
+      if (e.target.classList.contains('pdf-element') || e.target.closest('.pdf-element')) return;
+      
+      const overlay = canvasArea.querySelector('.elements-overlay');
+      if (!overlay) return;
+      
+      const scale = activeDoc.zoom;
+      const rect = overlay.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / scale;
+      const y = (e.clientY - rect.top) / scale;
+      
+      const textInput = $('textInput');
+      const textSize = $('textSize');
+      const textColor = $('textColor');
+      const textModal = $('textModal');
+      
+      if (textInput) textInput.value = '';
+      if (textSize) textSize.value = DEFAULT_FONT_SIZE;
+      if (textColor) textColor.value = '#000000';
+      if (textModal) {
+        textModal.classList.add('show');
+        textModal.dataset.posX = x;
+        textModal.dataset.posY = y;
+      }
+      if (textInput) textInput.focus();
+    });
+  }
   
   showStatus('Carga uno o más PDFs para comenzar');
 });
@@ -246,7 +295,7 @@ function handleMultipleFiles(files) {
   pdfFiles.forEach((file, index) => {
     setTimeout(() => {
       loadPdfAsNewTab(file, index === 0);
-    }, index * 150);
+    }, index * MULTI_FILE_LOAD_DELAY_MS);
   });
 }
 
@@ -479,10 +528,11 @@ function updateTabModified(docId, hasChanges) {
   const nameEl = tab.querySelector('.doc-tab-name');
   if (!nameEl) return;
   
-  if (hasChanges && !nameEl.textContent.endsWith(' *')) {
-    nameEl.textContent += ' *';
-  } else if (!hasChanges && nameEl.textContent.endsWith(' *')) {
-    nameEl.textContent = nameEl.textContent.slice(0, -2);
+  // Use data attribute instead of fragile string manipulation
+  if (hasChanges) {
+    tab.dataset.modified = 'true';
+  } else {
+    delete tab.dataset.modified;
   }
 }
 
@@ -570,29 +620,7 @@ async function renderPage() {
     container.appendChild(overlay);
     canvasArea.appendChild(container);
     
-    container.addEventListener('dblclick', (e) => {
-      if (e.target.classList.contains('pdf-element') || e.target.closest('.pdf-element')) return;
-      if (!activeDoc.pdfJsDoc) return;
-      
-      const rect = overlay.getBoundingClientRect();
-      const x = (e.clientX - rect.left) / scale;
-      const y = (e.clientY - rect.top) / scale;
-      
-      const textInput = $('textInput');
-      const textSize = $('textSize');
-      const textColor = $('textColor');
-      const textModal = $('textModal');
-      
-      if (textInput) textInput.value = '';
-      if (textSize) textSize.value = 14;
-      if (textColor) textColor.value = '#000000';
-      if (textModal) {
-        textModal.classList.add('show');
-        textModal.dataset.posX = x;
-        textModal.dataset.posY = y;
-      }
-      if (textInput) textInput.focus();
-    });
+    // dblclick handler is now delegated on canvasArea (M9) — no inline listener here
     
     const currentPageNum = $('currentPageNum');
     const totalPagesNum = $('totalPagesNum');
@@ -623,8 +651,8 @@ function createElementDiv(el, idx, scale, activeDoc) {
     div.appendChild(textSpan);
     div.style.fontSize = ((el.size || 14) * scale) + 'px';
     div.style.color = el.color || '#000';
-    div.style.minWidth = '20px';
-    div.style.minHeight = '20px';
+    div.style.minWidth = MIN_ELEMENT_SIZE + 'px';
+    div.style.minHeight = MIN_ELEMENT_SIZE + 'px';
     
     // Show name label for DNI/NIE texts (like signatures)
     if (el.name) {
@@ -686,7 +714,7 @@ function confirmTextWithPosition() {
   const textModal = $('textModal');
   
   const text = textInput ? textInput.value.trim() : '';
-  const size = textSize ? parseInt(textSize.value) || 14 : 14;
+  const size = textSize ? parseInt(textSize.value) || DEFAULT_FONT_SIZE : DEFAULT_FONT_SIZE;
   const color = textColor ? textColor.value : '#000000';
   
   if (!text) {
@@ -697,123 +725,15 @@ function confirmTextWithPosition() {
   const posX = textModal && textModal.dataset.posX ? parseFloat(textModal.dataset.posX) : activeDoc.pageWidth / 2 - 50;
   const posY = textModal && textModal.dataset.posY ? parseFloat(textModal.dataset.posY) : activeDoc.pageHeight / 2;
   
-  // DNI/NIE patterns
-  const dniPatterns = [
-    /\b\d{8}[A-Za-z]\b/g,           // DNI: 12345678A
-    /\b[XYZ]\d{7}[A-Za-z]\b/g,      // NIE: X1234567A
-    /\b\d{8}-[A-Za-z]\b/g,          // DNI con guión: 12345678-A
-    /\b[XYZ]\d{7}-[A-Za-z]\b/g      // NIE con guión: X1234567-A
-  ];
+  // Use shared DNI/NIE processing (from shared-utils.js)
+  const { elements, totalCreated } = processTextWithDni(text, posX, posY, size, color);
+  elements.forEach(el => activeDoc.elements[activeDoc.currentPage].push(el));
   
-  // Check if text has multiple lines
   const lines = text.split(/\n|\r\n|\r/).map(l => l.trim()).filter(l => l);
-  
-  if (lines.length > 1) {
-    // Multi-line mode: process each line
-    let currentY = posY;
-    let totalCreated = 0;
-    
-    lines.forEach(line => {
-      let foundDni = null;
-      let textWithoutDni = line;
-      
-      // Search for DNI/NIE in line
-      for (const pattern of dniPatterns) {
-        const match = line.match(pattern);
-        if (match) {
-          foundDni = match[0];
-          textWithoutDni = line.replace(pattern, '').replace(/\s+/g, ' ').trim();
-          break;
-        }
-      }
-      
-      if (foundDni && textWithoutDni) {
-        // Create name text
-        activeDoc.elements[activeDoc.currentPage].push({
-          type: 'text',
-          text: textWithoutDni,
-          x: posX,
-          y: currentY,
-          size: size,
-          color: color
-        });
-        
-        // Create DNI text with name reference
-        activeDoc.elements[activeDoc.currentPage].push({
-          type: 'text',
-          text: foundDni,
-          x: posX,
-          y: currentY + size + 3,
-          size: size,
-          color: color,
-          name: textWithoutDni  // Store name for tooltip
-        });
-        
-        currentY += (size * 2) + 15; // Space between pairs
-        totalCreated += 2;
-      } else if (line) {
-        // No DNI found, add as single text
-        activeDoc.elements[activeDoc.currentPage].push({
-          type: 'text',
-          text: line,
-          x: posX,
-          y: currentY,
-          size: size,
-          color: color
-        });
-        currentY += size + 10;
-        totalCreated++;
-      }
-    });
-    
+  if (totalCreated > 1 && lines.length > 1) {
     showStatus(`${totalCreated} textos creados (${lines.length} líneas)`, 'success');
-  } else {
-    // Single line mode
-    let foundDni = null;
-    let textWithoutDni = text;
-    
-    for (const pattern of dniPatterns) {
-      const match = text.match(pattern);
-      if (match) {
-        foundDni = match[0];
-        textWithoutDni = text.replace(pattern, '').replace(/\s+/g, ' ').trim();
-        break;
-      }
-    }
-    
-    if (foundDni && textWithoutDni) {
-      // Create two separate text elements
-      activeDoc.elements[activeDoc.currentPage].push({
-        type: 'text',
-        text: textWithoutDni,
-        x: posX,
-        y: posY,
-        size: size,
-        color: color
-      });
-      
-      activeDoc.elements[activeDoc.currentPage].push({
-        type: 'text',
-        text: foundDni,
-        x: posX,
-        y: posY + size + 3,
-        size: size,
-        color: color,
-        name: textWithoutDni  // Store name for tooltip
-      });
-      
-      showStatus('Texto separado: Nombre + DNI/NIE', 'success');
-    } else {
-      // Single text element
-      activeDoc.elements[activeDoc.currentPage].push({
-        type: 'text',
-        text: text,
-        x: posX,
-        y: posY,
-        size: size,
-        color: color
-      });
-    }
+  } else if (totalCreated === 2) {
+    showStatus('Texto separado: Nombre + DNI/NIE', 'success');
   }
   
   if (textModal) {
@@ -923,8 +843,8 @@ function makeResizable(div, el, scale, activeDoc) {
     
     if (el.type === 'text') {
       const delta = Math.max(Math.abs(dx), Math.abs(dy));
-      const scaleFactor = 1 + (dx > 0 ? delta / 200 : -delta / 200);
-      let newFontSize = Math.max(8, Math.min(72, startFontSize * scaleFactor));
+      const scaleFactor = 1 + (dx > 0 ? delta / RESIZE_SENSITIVITY : -delta / RESIZE_SENSITIVITY);
+      let newFontSize = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, startFontSize * scaleFactor));
       el.size = newFontSize;
       div.style.fontSize = (newFontSize * scale) + 'px';
     } else {
@@ -1003,7 +923,7 @@ function changeZoom(delta) {
   const activeDoc = getActiveDoc();
   if (!activeDoc) return;
   
-  activeDoc.zoom = Math.max(0.25, Math.min(2.5, activeDoc.zoom + delta));
+  activeDoc.zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, activeDoc.zoom + delta));
   const zoomLevel = $('zoomLevel');
   if (zoomLevel) zoomLevel.textContent = Math.round(activeDoc.zoom * 100) + '%';
   renderPage();
@@ -1022,7 +942,7 @@ function showTextModal() {
   const textModal = $('textModal');
   
   if (textInput) textInput.value = '';
-  if (textSize) textSize.value = 14;
+  if (textSize) textSize.value = DEFAULT_FONT_SIZE;
   if (textColor) textColor.value = '#000000';
   if (textModal) {
     delete textModal.dataset.posX;
@@ -1101,21 +1021,7 @@ function showSignatureModal() {
   if (signatureCount) signatureCount.style.display = 'none';
 }
 
-// Helper function to remove DNI/NIE from a string
-// DNI format: 8 digits + 1 letter (e.g., 12345678A)
-// NIE format: X/Y/Z + 7 digits + 1 letter (e.g., X1234567A)
-function removeDniNie(text) {
-  return text
-    .replace(/\s*\d{8}[A-Za-z]\s*/gi, ' ')  // DNI: 8 digits + letter
-    .replace(/\s*[XYZ]\d{7}[A-Za-z]\s*/gi, ' ')  // NIE: X/Y/Z + 7 digits + letter
-    .replace(/\s+/g, ' ')  // Normalize multiple spaces to single space
-    .trim();
-}
-
-function normalizeText(text) {
-  // Remove accents and normalize for comparison (e.g. García → Garcia)
-  return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-}
+// removeDniNie and normalizeText moved to shared-utils.js
 
 async function searchSignatures() {
   const signatureSearchInput = $('signatureSearchInput');
@@ -1484,11 +1390,7 @@ function selectSignature(url, name) {
   img.src = url;
 }
 
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
+// escapeHtml moved to shared-utils.js
 
 async function savePdf() {
   const activeDoc = getActiveDoc();
@@ -1619,14 +1521,7 @@ function clearEditor() {
   closeTab(activeDoc.id);
 }
 
-function hexToRgb(hex) {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  return result ? {
-    r: parseInt(result[1], 16),
-    g: parseInt(result[2], 16),
-    b: parseInt(result[3], 16)
-  } : { r: 0, g: 0, b: 0 };
-}
+// hexToRgb moved to shared-utils.js
 
 // ============================================
 // SPLIT PDF
@@ -2326,8 +2221,8 @@ function pasteElementsToCurrentPage() {
   
   pastedElements.forEach((el, index) => {
     // Add offset to position
-    el.x = Math.min(el.x + (offset * (index % 5)), activeDoc.pageWidth - 100);
-    el.y = Math.min(el.y + (offset * Math.floor(index / 5)), activeDoc.pageHeight - 50);
+    el.x = Math.min(el.x + (offset * (index % 5)), activeDoc.pageWidth - PASTE_OFFSET * 3);
+    el.y = Math.min(el.y + (offset * Math.floor(index / 5)), activeDoc.pageHeight - PASTE_OFFSET * 2);
     
     // Add to current page
     if (!activeDoc.elements[activeDoc.currentPage]) {

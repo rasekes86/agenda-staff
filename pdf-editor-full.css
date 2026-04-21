@@ -148,6 +148,12 @@ body {
   white-space: nowrap;
 }
 
+/* Modified tab indicator via data attribute (instead of string manipulation) */
+.doc-tab[data-modified="true"] .doc-tab-name::after {
+  content: ' *';
+  color: #f59e0b;
+}
+
 .doc-tab-pages {
   background: rgba(255,255,255,0.2);
   padding: 2px 6px;

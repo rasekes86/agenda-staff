@@ -10,6 +10,15 @@ chrome.action.onClicked.addListener((tab) => {
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
 // ============================================
+// CONSTANTS
+// ============================================
+const NOTIFICATION_CHECK_INTERVAL_MS = 30000;  // Check notifications every 30s
+const MIDNIGHT_CLEANUP_INTERVAL_MS = 60000;    // Check for midnight every 60s
+const BADGE_DISPLAY_DURATION_MS = 3000;        // Show badge icon for 3s
+const NOTIFICATION_WINDOW_MINUTES = 1;         // Only notify within 1-minute window
+const WHITE_TOLERANCE = 25;                    // Screenshot white removal tolerance
+
+// ============================================
 // NOTIFICATION SYSTEM
 // ============================================
 
@@ -72,7 +81,7 @@ function startNotificationCheck() {
   }
   
   // Check every 30 seconds
-  notificationCheckInterval = setInterval(checkNotifications, 30000);
+  notificationCheckInterval = setInterval(checkNotifications, NOTIFICATION_CHECK_INTERVAL_MS);
   
   // Also check immediately
   checkNotifications();
@@ -105,7 +114,7 @@ async function checkNotifications() {
     const notifyTime = eventTime - settings.minutesBefore;
     
     // Check if it's time to notify (within 1 minute window)
-    if (currentTime >= notifyTime && currentTime <= notifyTime + 1) {
+    if (currentTime >= notifyTime && currentTime <= notifyTime + NOTIFICATION_WINDOW_MINUTES) {
       await showEventNotification(event, settings);
       notifiedEvents.add(event.id);
     }
@@ -118,6 +127,18 @@ async function checkNotifications() {
 }
 
 async function showEventNotification(event, settings) {
+  // Check notification permission before creating
+  try {
+    const hasPermission = await chrome.permissions.contains({ permissions: ['notifications'] });
+    if (!hasPermission) {
+      console.log('Notification permission not granted, skipping notification');
+      return;
+    }
+  } catch (err) {
+    console.log('Could not check notification permission:', err);
+    return;
+  }
+  
   // Create Chrome notification
   chrome.notifications.create({
     type: 'basic',
@@ -145,15 +166,22 @@ async function showEventNotification(event, settings) {
 }
 
 function showTestNotification(title) {
-  chrome.notifications.create({
-    type: 'basic',
-    iconUrl: 'icons/icon128.png',
-    title: title || '🔔 Prueba de notificación',
-    message: 'Las notificaciones están funcionando correctamente',
-    priority: 2
+  // Check notification permission before creating
+  chrome.permissions.contains({ permissions: ['notifications'] }, (granted) => {
+    if (!granted) {
+      console.log('Notification permission not granted');
+      return;
+    }
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'icons/icon128.png',
+      title: title || '🔔 Prueba de notificación',
+      message: 'Las notificaciones están funcionando correctamente',
+      priority: 2
+    });
+
+    playNotificationSound('bell');
   });
-  
-  playNotificationSound('bell');
 }
 
 async function playNotificationSound(soundType) {
@@ -230,7 +258,7 @@ async function captureAndProcessArea(rect) {
     const imageData = ctx.getImageData(0, 0, rect.width, rect.height);
     const data = imageData.data;
     
-    const tolerance = 25;
+    const tolerance = WHITE_TOLERANCE;
     for (let i = 0; i < data.length; i += 4) {
       const r = data[i];
       const g = data[i + 1];
@@ -291,7 +319,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     if (!stored.session || !stored.user) {
       chrome.action.setBadgeText({ text: '!' });
       chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
-      setTimeout(() => chrome.action.setBadgeText({ text: '' }), 3000);
+      setTimeout(() => chrome.action.setBadgeText({ text: '' }), BADGE_DISPLAY_DURATION_MS);
       return;
     }
     
@@ -397,7 +425,7 @@ async function sendToSupabase(content, accessToken, userId, userName) {
     if (res.ok) {
       chrome.action.setBadgeText({ text: '✓' });
       chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
-      setTimeout(() => chrome.action.setBadgeText({ text: '' }), 2000);
+      setTimeout(() => chrome.action.setBadgeText({ text: '' }), BADGE_DISPLAY_DURATION_MS);
     } else {
       throw new Error('Error saving');
     }
@@ -405,7 +433,7 @@ async function sendToSupabase(content, accessToken, userId, userName) {
     console.error('Error sending to Supabase:', err);
     chrome.action.setBadgeText({ text: '!' });
     chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
-    setTimeout(() => chrome.action.setBadgeText({ text: '' }), 2000);
+    setTimeout(() => chrome.action.setBadgeText({ text: '' }), BADGE_DISPLAY_DURATION_MS);
   }
 }
 
@@ -416,4 +444,4 @@ setInterval(() => {
     notifiedEvents.clear();
     console.log('Cleared notified events for new day');
   }
-}, 60000);
+}, MIDNIGHT_CLEANUP_INTERVAL_MS);

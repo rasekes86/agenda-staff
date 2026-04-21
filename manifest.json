@@ -43,6 +43,7 @@
         "pdf-editor-full.html",
         "pdf-editor-full.js",
         "pdf-editor-full.css",
+        "shared-utils.js",
         "jspdf.umd.min.js",
         "pdf-lib.min.js",
         "pdf.min.js",
