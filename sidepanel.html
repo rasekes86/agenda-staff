@@ -587,6 +587,55 @@
             </form>
           </div>
 
+          <!-- Import CSV Button -->
+          <div class="processes-import-bar">
+            <button class="btn-import-csv" id="btnImportCsv">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              Importar CSV
+            </button>
+            <button class="btn-download-template" id="btnDownloadTemplate" title="Descargar plantilla CSV de ejemplo">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Plantilla
+            </button>
+          </div>
+
+          <!-- Import CSV Modal -->
+          <div class="import-modal" id="importModal">
+            <div class="import-modal-header">
+              <h3>📥 Importar Procesos desde CSV</h3>
+              <button class="import-modal-close" id="closeImportModal">&times;</button>
+            </div>
+            <div class="import-modal-content">
+              <div class="import-info">
+                <p>Importa procesos históricos desde un archivo CSV. Los procesos se crearán con la fecha que indiques en la columna <strong>fecha</strong> para que aparezcan en el mes correcto del filtro.</p>
+              </div>
+              <div class="import-dropzone" id="importDropzone">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <span>Arrastra tu archivo CSV aquí</span>
+                <span class="import-dropzone-hint">o haz clic para seleccionar</span>
+                <input type="file" id="importFileInput" accept=".csv" style="display:none">
+              </div>
+              <div class="import-preview" id="importPreview" style="display:none">
+                <div class="import-preview-header">
+                  <span class="import-preview-title">Vista previa (<span id="importRowCount">0</span> procesos)</span>
+                  <label class="import-finalize-toggle">
+                    <input type="checkbox" id="importAsFinalized">
+                    <span>Marcar como finalizados</span>
+                  </label>
+                </div>
+                <div class="import-preview-table-wrap" id="importPreviewTable"></div>
+                <div class="import-preview-errors" id="importPreviewErrors" style="display:none"></div>
+                <div class="import-preview-actions">
+                  <button class="btn-import-cancel" id="btnImportCancel">Cancelar</button>
+                  <button class="btn-import-confirm" id="btnImportConfirm">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                    Importar <span id="importValidCount">0</span> procesos
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Processes List -->
           <div class="processes-list" id="processesList">
             <div class="processes-empty">

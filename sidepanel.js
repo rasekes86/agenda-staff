@@ -3747,6 +3747,9 @@ function setupProcessesListeners() {
       renderGlobalStats();
     });
   });
+
+  // CSV Import listeners
+  setupImportListeners();
 }
 
 function openProcessesModal() {
@@ -4328,5 +4331,455 @@ async function finalizeProcess(id) {
   } catch (err) {
     console.error('Error finalizing:', err);
     showToast('Error al finalizar');
+  }
+}
+
+// ============================================
+// CSV IMPORT MODULE
+// ============================================
+
+let importParsedRows = []; // Stores parsed rows pending import
+
+const VALID_POSITIONS = [
+  'Auxiliar de Seguridad', 'Azafat@s', 'Conductor', 'Camarero', 'Cocinero',
+  'Carga y Descarga', 'Aux. Audiovisual', 'Limpieza', 'Oficina', 'Runner'
+];
+
+const VALID_PROVINCES = [
+  'A Coruña','Álava','Albacete','Alicante','Almería','Asturias','Ávila','Badajoz',
+  'Barcelona','Burgos','Cáceres','Cádiz','Cantabria','Castellón','Ceuta',
+  'Ciudad Real','Córdoba','Cuenca','Girona','Granada','Guadalajara','Gipuzkoa',
+  'Huelva','Huesca','Illes Balears','Jaén','La Rioja','Las Palmas','León','Lleida',
+  'Lugo','Madrid','Málaga','Melilla','Murcia','Navarra','Ourense','Palencia',
+  'Pontevedra','Salamanca','Santa Cruz de Tenerife','Segovia','Sevilla','Soria',
+  'Tarragona','Teruel','Toledo','Valencia','Valladolid','Bizkaia','Zamora','Zaragoza'
+];
+
+// Expected CSV columns (all lowercase, stripped)
+const CSV_COLUMNS = [
+  'nombre', 'puesto', 'provincia', 'fecha',
+  'objetivo', 'bd_ofertas', 'citados_ofertas', 'entrevistados_ofertas', 'seleccionados_ofertas',
+  'bd_erp', 'citados_erp', 'entrevistados_erp', 'seleccionados_erp'
+];
+
+const CSV_TEMPLATE = `nombre,puesto,provincia,fecha,objetivo,bd_ofertas,citados_ofertas,entrevistados_ofertas,seleccionados_ofertas,bd_erp,citados_erp,entrevistados_erp,seleccionados_erp
+Selección Operarios Madrid,Auxiliar de Seguridad,Madrid,2026-01-15,10,50,30,20,8,5,3,2,1
+Azafatas Evento Valencia,Azafat@s,Valencia,2026-01-20,5,40,25,15,5,0,0,0,0
+Conductores Sevilla,Conductor,Sevilla,2026-02-10,8,30,20,10,6,10,8,5,3
+Camareros Evento BCN,Camarero,Barcelona,2026-02-18,0,60,40,25,12,0,0,0,0
+Limpizas Nacional,Limpieza,Madrid,2026-03-05,15,80,50,30,20,20,15,10,8`;
+
+function setupImportListeners() {
+  $('btnImportCsv').addEventListener('click', openImportModal);
+  $('closeImportModal').addEventListener('click', closeImportModal);
+  $('btnDownloadTemplate').addEventListener('click', downloadCsvTemplate);
+  $('btnImportCancel').addEventListener('click', resetImportModal);
+
+  const dropzone = $('importDropzone');
+  const fileInput = $('importFileInput');
+
+  dropzone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) handleImportFile(e.target.files[0]);
+  });
+
+  dropzone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dropzone.classList.add('drag-over');
+  });
+  dropzone.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dropzone.classList.remove('drag-over');
+  });
+  dropzone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dropzone.classList.remove('drag-over');
+    if (e.dataTransfer.files.length > 0) handleImportFile(e.dataTransfer.files[0]);
+  });
+
+  $('btnImportConfirm').addEventListener('click', executeImport);
+}
+
+function openImportModal() {
+  $('importModal').classList.add('show');
+  resetImportModal();
+}
+
+function closeImportModal() {
+  $('importModal').classList.remove('show');
+  importParsedRows = [];
+}
+
+function resetImportModal() {
+  importParsedRows = [];
+  $('importPreview').style.display = 'none';
+  $('importPreviewErrors').style.display = 'none';
+  $('importDropzone').style.display = 'flex';
+  $('importFileInput').value = '';
+  $('importAsFinalized').checked = false;
+}
+
+function downloadCsvTemplate() {
+  const blob = new Blob([CSV_TEMPLATE], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'plantilla_procesos.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Plantilla descargada');
+}
+
+// Robust CSV parser — handles quoted fields with commas/newlines inside
+function parseCsvLine(line) {
+  const fields = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (i + 1 < line.length && line[i + 1] === '"') {
+          current += '"';
+          i++; // skip escaped quote
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        current += ch;
+      }
+    } else {
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ',') {
+        fields.push(current.trim());
+        current = '';
+      } else {
+        current += ch;
+      }
+    }
+  }
+  fields.push(current.trim());
+  return fields;
+}
+
+function parseCsvText(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
+  if (lines.length < 2) return { rows: [], errors: ['El CSV debe tener al menos una fila de datos (además de la cabecera).'] };
+
+  // Parse header
+  const header = parseCsvLine(lines[0]).map(h => h.toLowerCase().trim().replace(/\s+/g, '_'));
+
+  // Validate required columns
+  const missingCols = [];
+  const requiredCols = ['nombre', 'puesto', 'provincia', 'fecha'];
+  requiredCols.forEach(col => {
+    if (!header.includes(col)) missingCols.push(col);
+  });
+  if (missingCols.length > 0) {
+    return { rows: [], errors: [`Columnas obligatorias faltantes: ${missingCols.join(', ')}. Usa el botón "Plantilla" para ver el formato correcto.`] };
+  }
+
+  // Column index mapping
+  const colIdx = {};
+  CSV_COLUMNS.forEach(col => {
+    const idx = header.indexOf(col);
+    if (idx !== -1) colIdx[col] = idx;
+  });
+
+  const rows = [];
+  const errors = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const fields = parseCsvLine(lines[i]);
+    const rowNum = i + 1;
+    const row = { _rowNum: rowNum, _valid: true, _errors: [] };
+
+    // nombre
+    const nombre = (colIdx.nombre !== undefined) ? fields[colIdx.nombre] || '' : '';
+    if (!nombre) {
+      row._valid = false;
+      row._errors.push('Nombre vacío');
+    }
+
+    // puesto
+    const puesto = (colIdx.puesto !== undefined) ? fields[colIdx.puesto] || '' : '';
+    const puestoMatch = VALID_POSITIONS.find(p => p.toLowerCase() === puesto.toLowerCase());
+    if (!puesto) {
+      row._valid = false;
+      row._errors.push('Puesto vacío');
+    } else if (!puestoMatch) {
+      row._valid = false;
+      row._errors.push(`Puesto no reconocido: "${puesto}"`);
+    }
+
+    // provincia
+    const provincia = (colIdx.provincia !== undefined) ? fields[colIdx.provincia] || '' : '';
+    const provMatch = VALID_PROVINCES.find(p => p.toLowerCase() === provincia.toLowerCase());
+    if (!provincia) {
+      row._valid = false;
+      row._errors.push('Provincia vacía');
+    } else if (!provMatch) {
+      row._valid = false;
+      row._errors.push(`Provincia no reconocida: "${provincia}"`);
+    }
+
+    // fecha
+    const fechaRaw = (colIdx.fecha !== undefined) ? fields[colIdx.fecha] || '' : '';
+    let fechaParsed = null;
+    if (!fechaRaw) {
+      row._valid = false;
+      row._errors.push('Fecha vacía');
+    } else {
+      // Accept formats: 2026-01-15, 15/01/2026, 15-01-2026, 2026/01/15
+      const d1 = fechaRaw.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/);
+      const d2 = fechaRaw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+      if (d1) {
+        fechaParsed = new Date(parseInt(d1[1]), parseInt(d1[2]) - 1, parseInt(d1[3]));
+      } else if (d2) {
+        fechaParsed = new Date(parseInt(d2[3]), parseInt(d2[2]) - 1, parseInt(d2[1]));
+      }
+      if (!fechaParsed || isNaN(fechaParsed.getTime())) {
+        row._valid = false;
+        row._errors.push(`Fecha no válida: "${fechaRaw}" (usa DD/MM/AAAA o AAAA-MM-DD)`);
+      }
+    }
+
+    // Numeric fields with defaults
+    const numField = (col) => {
+      if (colIdx[col] === undefined) return 0;
+      const raw = fields[colIdx[col]] || '0';
+      const val = parseInt(raw) || 0;
+      if (val < 0) return 0;
+      return val;
+    };
+
+    row.data = {
+      name: nombre,
+      position: puestoMatch || puesto,
+      province: provMatch || provincia,
+      fecha: fechaParsed,
+      objetivo: numField('objetivo'),
+      added: numField('bd_ofertas'),
+      called: numField('citados_ofertas'),
+      interviewed: numField('entrevistados_ofertas'),
+      selected: numField('seleccionados_ofertas'),
+      added_erp: numField('bd_erp'),
+      called_erp: numField('citados_erp'),
+      interviewed_erp: numField('entrevistados_erp'),
+      selected_erp: numField('seleccionados_erp')
+    };
+
+    if (row._errors.length > 0) {
+      errors.push(`Fila ${rowNum}: ${row._errors.join('; ')}`);
+    }
+
+    rows.push(row);
+  }
+
+  return { rows, errors };
+}
+
+function handleImportFile(file) {
+  if (!file.name.toLowerCase().endsWith('.csv')) {
+    showToast('Por favor selecciona un archivo .csv');
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const text = e.target.result;
+    const result = parseCsvText(text);
+
+    importParsedRows = result.rows;
+
+    // Show preview
+    $('importDropzone').style.display = 'none';
+    $('importPreview').style.display = 'block';
+
+    const validRows = importParsedRows.filter(r => r._valid);
+    $('importRowCount').textContent = importParsedRows.length;
+    $('importValidCount').textContent = validRows.length;
+
+    // Render preview table
+    renderImportPreview(importParsedRows);
+
+    // Show errors if any
+    if (result.errors.length > 0) {
+      $('importPreviewErrors').style.display = 'block';
+      $('importPreviewErrors').innerHTML = result.errors.map(e => `<div class="import-error-line">${esc(e)}</div>`).join('');
+    } else {
+      $('importPreviewErrors').style.display = 'none';
+    }
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+function renderImportPreview(rows) {
+  const wrap = $('importPreviewTable');
+  if (rows.length === 0) {
+    wrap.innerHTML = '<div class="import-no-data">No se encontraron filas válidas</div>';
+    return;
+  }
+
+  let html = `<table class="import-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Nombre</th>
+        <th>Puesto</th>
+        <th>Provincia</th>
+        <th>Fecha</th>
+        <th>Obj.</th>
+        <th>🌐 BD</th>
+        <th>🌐 Sel.</th>
+        <th>🏢 BD</th>
+        <th>🏢 Sel.</th>
+        <th>Estado</th>
+      </tr>
+    </thead>
+    <tbody>`;
+
+  rows.forEach((row, i) => {
+    const d = row.data;
+    const fechaStr = d.fecha ? d.fecha.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '?';
+    const statusIcon = row._valid ? '<span class="import-status-ok">OK</span>' : '<span class="import-status-err">ERROR</span>';
+    const rowClass = row._valid ? '' : ' import-row-error';
+
+    html += `<tr class="${rowClass}">
+      <td>${i + 1}</td>
+      <td title="${esc(d.name)}">${esc(d.name.length > 25 ? d.name.slice(0, 25) + '...' : d.name)}</td>
+      <td>${esc(d.position)}</td>
+      <td>${esc(d.province)}</td>
+      <td>${fechaStr}</td>
+      <td>${d.objetivo || '—'}</td>
+      <td>${d.added}</td>
+      <td>${d.selected}</td>
+      <td>${d.added_erp}</td>
+      <td>${d.selected_erp}</td>
+      <td>${statusIcon}</td>
+    </tr>`;
+  });
+
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+async function executeImport() {
+  const validRows = importParsedRows.filter(r => r._valid);
+  if (validRows.length === 0) {
+    showToast('No hay filas válidas para importar');
+    return;
+  }
+
+  const markFinalized = $('importAsFinalized').checked;
+  const confirmBtn = $('btnImportConfirm');
+  confirmBtn.disabled = true;
+  confirmBtn.innerHTML = '<span class="import-spinner"></span> Importando...';
+
+  let imported = 0;
+  let failed = 0;
+
+  for (const row of validRows) {
+    try {
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+      const proc = {
+        id,
+        user_id: currentUser.id,
+        user_name: currentUser.name,
+        name: row.data.name,
+        position: row.data.position,
+        province: row.data.province,
+        objetivo: row.data.objetivo,
+        added: row.data.added,
+        called: row.data.called,
+        interviewed: row.data.interviewed,
+        selected: row.data.selected,
+        added_erp: row.data.added_erp,
+        called_erp: row.data.called_erp,
+        interviewed_erp: row.data.interviewed_erp,
+        selected_erp: row.data.selected_erp,
+        is_active: markFinalized ? false : true
+      };
+
+      // Supabase supports created_at override via header
+      const url = `${SUPABASE_URL}/rest/v1/recruitment_processes`;
+      const opts = {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        }
+      };
+
+      // Format fecha as ISO for created_at override
+      const fechaISO = row.data.fecha.toISOString();
+      // We send created_at to set the historical date
+      proc.created_at = fechaISO;
+
+      opts.body = JSON.stringify(proc);
+
+      // Check auth
+      if (!session || !session.access_token) {
+        const stored = await chrome.storage.local.get(['session']);
+        if (stored.session && stored.session.access_token) {
+          session = stored.session;
+          opts.headers.Authorization = `Bearer ${session.access_token}`;
+        }
+      }
+
+      const res = await fetch(url, opts);
+      if (res.ok) {
+        const returned = await res.json();
+        if (returned && returned.length > 0) {
+          processes.unshift(returned[0]);
+        } else {
+          // Fallback: use local object
+          processes.unshift(proc);
+        }
+        imported++;
+      } else {
+        // Try token refresh
+        if (session.refresh_token) {
+          const refreshed = await refreshSession(session.refresh_token);
+          if (refreshed) {
+            const newStored = await chrome.storage.local.get(['session']);
+            session = newStored.session;
+            opts.headers.Authorization = `Bearer ${session.access_token}`;
+            const retryRes = await fetch(url, opts);
+            if (retryRes.ok) {
+              const returned = await retryRes.json();
+              processes.unshift(returned && returned.length > 0 ? returned[0] : proc);
+              imported++;
+            } else {
+              failed++;
+            }
+          } else {
+            failed++;
+          }
+        } else {
+          failed++;
+        }
+      }
+    } catch (err) {
+      failed++;
+    }
+  }
+
+  // Update UI
+  populateMonthFilter();
+  renderProcesses();
+  renderGlobalStats();
+  closeImportModal();
+
+  if (failed > 0) {
+    showToast(`${imported} importados, ${failed} con error`);
+  } else {
+    showToast(`${imported} procesos importados correctamente`);
   }
 }

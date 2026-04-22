@@ -3909,3 +3909,316 @@ body {
   background: var(--danger);
   transform: scale(1.1);
 }
+
+/* ============================================
+   CSV IMPORT MODULE
+   ============================================ */
+
+/* Import bar (button + template download) */
+.processes-import-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.btn-import-csv {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 1px dashed var(--bor);
+  background: var(--bg2);
+  color: var(--pri);
+  border-radius: var(--rad);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-import-csv:hover {
+  background: var(--pri);
+  color: white;
+  border-color: var(--pri);
+}
+
+.btn-download-template {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 10px;
+  border: 1px solid var(--bor);
+  background: var(--bg);
+  color: var(--txt2);
+  border-radius: var(--rad);
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-download-template:hover {
+  border-color: var(--pri);
+  color: var(--pri);
+}
+
+/* Import Modal */
+.import-modal {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 1100;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.import-modal.show { display: flex; }
+
+.import-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--bor);
+  border-radius: 12px 12px 0 0;
+}
+.import-modal-header h3 { font-size: 14px; font-weight: 600; color: var(--txt); }
+
+.import-modal-close {
+  width: 28px; height: 28px;
+  border: none; background: transparent;
+  color: var(--txt2); font-size: 20px;
+  cursor: pointer; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+}
+.import-modal-close:hover { background: var(--bg3); color: var(--danger); }
+
+.import-modal-content {
+  background: var(--bg);
+  border: 1px solid var(--bor);
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  padding: 16px;
+  max-height: 70vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.import-info p {
+  font-size: 12px;
+  color: var(--txt2);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Dropzone */
+.import-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 30px 20px;
+  border: 2px dashed var(--bor);
+  border-radius: 12px;
+  background: var(--bg2);
+  color: var(--txt3);
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 13px;
+}
+.import-dropzone:hover {
+  border-color: var(--pri);
+  background: rgba(59, 130, 246, 0.05);
+}
+.import-dropzone.drag-over {
+  border-color: var(--pri);
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--pri);
+}
+.import-dropzone-hint {
+  font-size: 11px;
+  color: var(--txt3);
+}
+
+/* Preview */
+.import-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.import-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.import-preview-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--txt);
+}
+
+.import-finalize-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--txt2);
+  cursor: pointer;
+}
+.import-finalize-toggle input[type="checkbox"] {
+  accent-color: var(--pri);
+}
+
+/* Preview table */
+.import-preview-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--bor);
+  border-radius: var(--rad);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.import-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.import-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.import-table th {
+  background: var(--bg2);
+  color: var(--txt2);
+  font-weight: 600;
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 2px solid var(--bor);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.import-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--bor);
+  color: var(--txt);
+}
+
+.import-table tr:last-child td {
+  border-bottom: none;
+}
+
+.import-row-error {
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.import-status-ok {
+  display: inline-block;
+  padding: 1px 8px;
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.import-status-err {
+  display: inline-block;
+  padding: 1px 8px;
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.import-no-data {
+  padding: 20px;
+  text-align: center;
+  color: var(--txt3);
+  font-size: 12px;
+}
+
+/* Errors */
+.import-preview-errors {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: rgba(239, 68, 68, 0.06);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: var(--rad);
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+.import-error-line {
+  font-size: 11px;
+  color: #ef4444;
+  line-height: 1.4;
+}
+
+/* Actions */
+.import-preview-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.btn-import-cancel {
+  padding: 8px 16px;
+  border: 1px solid var(--bor);
+  background: var(--bg);
+  color: var(--txt2);
+  border-radius: var(--rad);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.btn-import-cancel:hover { background: var(--bg3); color: var(--txt); }
+
+.btn-import-confirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  border: none;
+  background: var(--succ);
+  color: white;
+  border-radius: var(--rad);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-import-confirm:hover { background: #059669; }
+.btn-import-confirm:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Spinner */
+.import-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: import-spin 0.6s linear infinite;
+}
+@keyframes import-spin {
+  to { transform: rotate(360deg); }
+}
