@@ -32,7 +32,7 @@ let viewStartDate = new Date();
 // Notification settings
 let notificationSettings = {
   enabled: true,
-  minutesBefore: 5,
+  minutesBefore: DEFAULT_MINUTES_BEFORE,
   sound: 'bell'
 };
 
@@ -374,7 +374,7 @@ async function handleRegister(e) {
       setTimeout(() => {
         document.querySelector('[data-tab="login"]').click();
         $('loginEmail').value = email;
-      }, 2000);
+      }, HIGHLIGHT_DURATION_MS);
     } else {
       throw new Error('Respuesta inesperada del servidor');
     }
@@ -723,9 +723,9 @@ function navigateToDate(targetDate) {
       
       setTimeout(() => {
         dayRow.classList.remove('highlighted');
-      }, 2000);
+      }, HIGHLIGHT_DURATION_MS);
     }
-  }, 100);
+  }, SCROLL_DELAY_MS);
 }
 
 function handleDaysClick(e) {
