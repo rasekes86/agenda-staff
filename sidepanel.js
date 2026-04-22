@@ -4435,7 +4435,7 @@ function downloadCsvTemplate() {
 }
 
 // Robust CSV parser — handles quoted fields with commas/newlines inside
-function parseCsvLine(line) {
+function parseCsvLine(line, separator = ',') {
   const fields = [];
   let current = '';
   let inQuotes = false;
@@ -4455,7 +4455,7 @@ function parseCsvLine(line) {
     } else {
       if (ch === '"') {
         inQuotes = true;
-      } else if (ch === ',') {
+      } else if (ch === separator) {
         fields.push(current.trim());
         current = '';
       } else {
@@ -4467,12 +4467,32 @@ function parseCsvLine(line) {
   return fields;
 }
 
+function detectSeparator(firstLine) {
+  const semicolons = (firstLine.match(/;/g) || []).length;
+  const commas = (firstLine.match(/,/g) || []).length;
+  const tabs = (firstLine.match(/\t/g) || []).length;
+  if (semicolons > commas && semicolons > tabs) return ';';
+  if (tabs > commas && tabs > semicolons) return '\t';
+  return ',';
+}
+
+// Remove diacritics for accent-insensitive matching (e.g. "Alava" matches "Álava")
+function normalizeAccents(str) {
+  return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 function parseCsvText(text) {
+  // Strip BOM if still present
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+
   const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
-  if (lines.length < 2) return { rows: [], errors: ['El CSV debe tener al menos una fila de datos (además de la cabecera).'] };
+  if (lines.length < 2) return { rows: [], errors: ['El archivo debe tener al menos una fila de datos (además de la cabecera).'] };
+
+  // Autodetect separator from first line
+  const csvSeparator = detectSeparator(lines[0]);
 
   // Parse header
-  const header = parseCsvLine(lines[0]).map(h => h.toLowerCase().trim().replace(/\s+/g, '_'));
+  const header = parseCsvLine(lines[0], csvSeparator).map(h => h.toLowerCase().trim().replace(/\s+/g, '_'));
 
   // Validate required columns
   const missingCols = [];
@@ -4495,7 +4515,7 @@ function parseCsvText(text) {
   const errors = [];
 
   for (let i = 1; i < lines.length; i++) {
-    const fields = parseCsvLine(lines[i]);
+    const fields = parseCsvLine(lines[i], csvSeparator);
     const rowNum = i + 1;
     const row = { _rowNum: rowNum, _valid: true, _errors: [] };
 
@@ -4508,7 +4528,7 @@ function parseCsvText(text) {
 
     // puesto
     const puesto = (colIdx.puesto !== undefined) ? fields[colIdx.puesto] || '' : '';
-    const puestoMatch = VALID_POSITIONS.find(p => p.toLowerCase() === puesto.toLowerCase());
+    const puestoMatch = VALID_POSITIONS.find(p => normalizeAccents(p.toLowerCase()) === normalizeAccents(puesto.toLowerCase()));
     if (!puesto) {
       row._valid = false;
       row._errors.push('Puesto vacío');
@@ -4519,7 +4539,7 @@ function parseCsvText(text) {
 
     // provincia
     const provincia = (colIdx.provincia !== undefined) ? fields[colIdx.provincia] || '' : '';
-    const provMatch = VALID_PROVINCES.find(p => p.toLowerCase() === provincia.toLowerCase());
+    const provMatch = VALID_PROVINCES.find(p => normalizeAccents(p.toLowerCase()) === normalizeAccents(provincia.toLowerCase()));
     if (!provincia) {
       row._valid = false;
       row._errors.push('Provincia vacía');
@@ -4529,19 +4549,28 @@ function parseCsvText(text) {
     }
 
     // fecha
-    const fechaRaw = (colIdx.fecha !== undefined) ? fields[colIdx.fecha] || '' : '';
+    const fechaRaw = (colIdx.fecha !== undefined) ? (fields[colIdx.fecha] || '').trim() : '';
     let fechaParsed = null;
     if (!fechaRaw) {
       row._valid = false;
       row._errors.push('Fecha vacía');
     } else {
-      // Accept formats: 2026-01-15, 15/01/2026, 15-01-2026, 2026/01/15
+      // Accept formats: 2026-01-15, 15/01/2026, 15-01-2026, 2026/01/15, DD/MM/AAAA, Excel serial number
       const d1 = fechaRaw.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/);
       const d2 = fechaRaw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+      const dExcel = fechaRaw.match(/^(\d{4,5})$/);
       if (d1) {
         fechaParsed = new Date(parseInt(d1[1]), parseInt(d1[2]) - 1, parseInt(d1[3]));
       } else if (d2) {
         fechaParsed = new Date(parseInt(d2[3]), parseInt(d2[2]) - 1, parseInt(d2[1]));
+      } else if (dExcel) {
+        // Excel serial date: days since 1900-01-01 (with the 1900 leap year bug)
+        const serial = parseInt(dExcel[1]);
+        if (serial > 30000 && serial < 60000) {
+          // Excel epoch is 1899-12-30 (due to the Lotus 1-2-3 leap year bug)
+          const epoch = new Date(1899, 11, 30);
+          fechaParsed = new Date(epoch.getTime() + serial * 86400000);
+        }
       }
       if (!fechaParsed || isNaN(fechaParsed.getTime())) {
         row._valid = false;
@@ -4552,7 +4581,7 @@ function parseCsvText(text) {
     // Numeric fields with defaults
     const numField = (col) => {
       if (colIdx[col] === undefined) return 0;
-      const raw = fields[colIdx[col]] || '0';
+      const raw = (fields[colIdx[col]] || '0').replace(/[.,\s]/g, '').trim();
       const val = parseInt(raw) || 0;
       if (val < 0) return 0;
       return val;
@@ -4585,38 +4614,83 @@ function parseCsvText(text) {
 }
 
 function handleImportFile(file) {
-  if (!file.name.toLowerCase().endsWith('.csv')) {
-    showToast('Por favor selecciona un archivo .csv');
+  const ext = file.name.toLowerCase();
+  if (!ext.endsWith('.csv') && !ext.endsWith('.xls') && !ext.endsWith('.xlsx')) {
+    showToast('Por favor selecciona un archivo .csv, .xls o .xlsx');
     return;
   }
 
+  // XLS/XLSX → read as ArrayBuffer and convert via TextDecoder (fallback for simple text-based spreadsheets)
+  if (ext.endsWith('.xls') || ext.endsWith('.xlsx')) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      let text;
+      try {
+        // Try UTF-8 first
+        text = new TextDecoder('utf-8', { fatal: false }).decode(e.target.result);
+      } catch (_) {
+        try {
+          text = new TextDecoder('windows-1252', { fatal: false }).decode(e.target.result);
+        } catch (_2) {
+          text = '';
+        }
+      }
+      if (!text || text.trim().length === 0) {
+        showToast('No se pudo leer el archivo. Guarda como .csv desde Excel (CSV UTF-8).');
+        return;
+      }
+      const result = parseCsvText(text);
+      showImportResult(result);
+    };
+    reader.readAsArrayBuffer(file);
+    return;
+  }
+
+  // CSV — try UTF-8 first, fall back to windows-1252
   const reader = new FileReader();
   reader.onload = (e) => {
-    const text = e.target.result;
+    let text = e.target.result;
+    // Remove BOM if present
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
     const result = parseCsvText(text);
-
-    importParsedRows = result.rows;
-
-    // Show preview
-    $('importDropzone').style.display = 'none';
-    $('importPreview').style.display = 'block';
-
-    const validRows = importParsedRows.filter(r => r._valid);
-    $('importRowCount').textContent = importParsedRows.length;
-    $('importValidCount').textContent = validRows.length;
-
-    // Render preview table
-    renderImportPreview(importParsedRows);
-
-    // Show errors if any
-    if (result.errors.length > 0) {
-      $('importPreviewErrors').style.display = 'block';
-      $('importPreviewErrors').innerHTML = result.errors.map(e => `<div class="import-error-line">${esc(e)}</div>`).join('');
-    } else {
-      $('importPreviewErrors').style.display = 'none';
-    }
+    showImportResult(result);
   };
   reader.readAsText(file, 'UTF-8');
+
+  // If UTF-8 fails (mojibake check), retry with windows-1252
+  reader.onerror = () => {
+    const reader2 = new FileReader();
+    reader2.onload = (e2) => {
+      let text = e2.target.result;
+      if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+      const result = parseCsvText(text);
+      showImportResult(result);
+    };
+    reader2.readAsText(file, 'windows-1252');
+  };
+}
+
+function showImportResult(result) {
+  importParsedRows = result.rows;
+
+  // Show preview
+  $('importDropzone').style.display = 'none';
+  $('importPreview').style.display = 'block';
+
+  const validRows = importParsedRows.filter(r => r._valid);
+  $('importRowCount').textContent = importParsedRows.length;
+  $('importValidCount').textContent = validRows.length;
+
+  // Render preview table
+  renderImportPreview(importParsedRows);
+
+  // Show errors if any
+  if (result.errors.length > 0) {
+    $('importPreviewErrors').style.display = 'block';
+    $('importPreviewErrors').innerHTML = result.errors.map(e => `<div class="import-error-line">${esc(e)}</div>`).join('');
+  } else {
+    $('importPreviewErrors').style.display = 'none';
+  }
 }
 
 function renderImportPreview(rows) {
