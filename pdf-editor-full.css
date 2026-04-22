@@ -818,6 +818,25 @@ body {
   color: white;
   font-size: 13px;
   font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.signature-add-all-btn {
+  background: rgba(255,255,255,0.25);
+  color: white;
+  border: 1px solid rgba(255,255,255,0.4);
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.signature-add-all-btn:hover {
+  background: rgba(255,255,255,0.4);
 }
 
 .signature-missing-header {
@@ -1168,3 +1187,146 @@ body {
 .status-msg.show { opacity: 1; }
 .status-msg.success { background: #10b981; }
 .status-msg.error { background: #dc2626; }
+
+/* ============================================
+   MULTI-SELECT STYLES
+   ============================================ */
+.pdf-element.multi-selected {
+  outline: 2px dashed #38bdf8;
+  outline-offset: 2px;
+}
+
+.pdf-element.multi-selected .pdf-element-delete {
+  display: flex;
+}
+
+/* ============================================
+   COPY SELECTOR MODAL
+   ============================================ */
+.copy-selector-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  border-bottom: 1px solid #334155;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.copy-selector-item:hover {
+  background: #334155;
+}
+
+.copy-selector-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  flex: 1;
+}
+
+.copy-selector-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #3b82f6;
+  cursor: pointer;
+}
+
+.copy-selector-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.copy-selector-text {
+  font-size: 12px;
+  color: #cbd5e1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ============================================
+   AUTO-SAVE INDICATOR
+   ============================================ */
+#autoSaveIndicator.auto-saved {
+  color: #10b981 !important;
+}
+
+/* ============================================
+   UNDO/REDO FLOATING BAR
+   ============================================ */
+.undo-redo-floating {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(8px);
+  border: 1px solid #334155;
+  border-radius: 12px;
+  z-index: 500;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+}
+
+.undo-redo-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 8px;
+  background: #334155;
+  color: #f1f5f9;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.undo-redo-btn:hover:not(:disabled) {
+  background: #3b82f6;
+  color: white;
+}
+
+.undo-redo-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.auto-save-indicator {
+  margin-left: 8px;
+  font-size: 10px;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.auto-save-indicator.auto-saved {
+  color: #10b981 !important;
+}
+
+/* ============================================
+   BOX SELECTION
+   ============================================ */
+.box-selection-rect {
+  position: absolute;
+  border: 2px dashed #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+  pointer-events: none;
+  z-index: 50;
+  border-radius: 2px;
+}
+
+/* ============================================
+   EDITABLE TEXT ELEMENT
+   ============================================ */
+.pdf-element.pdf-element-text {
+  cursor: move;
+}
+
+.pdf-element.pdf-element-text.editing-text {
+  outline: 2px solid #f59e0b;
+  outline-offset: 2px;
+}

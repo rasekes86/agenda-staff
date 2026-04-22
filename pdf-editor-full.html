@@ -59,6 +59,19 @@
     </button>
   </header>
   
+  <!-- Undo/Redo Floating Bar -->
+  <div class="undo-redo-floating" id="undoRedoBar">
+    <button class="undo-redo-btn" id="btnUndo" disabled title="Deshacer (Ctrl+Z)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+      Deshacer
+    </button>
+    <button class="undo-redo-btn" id="btnRedo" disabled title="Rehacer (Ctrl+Y)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+      Rehacer
+    </button>
+    <span id="autoSaveIndicator" class="auto-save-indicator"></span>
+  </div>
+  
   <!-- Document Tabs -->
   <div class="document-tabs" id="documentTabs">
     <div class="document-tabs-list" id="documentTabsList">
@@ -163,39 +176,61 @@
           <div class="clipboard-info" id="clipboardInfo" style="display:none;">
             <span class="clipboard-count" id="clipboardCount">0 elementos copiados</span>
           </div>
+          <!-- Multi-select info bar -->
+          <div id="multiSelectInfo" style="display:none;color:#38bdf8;font-size:11px;padding:4px 0;font-weight:500;"></div>
+          <button class="sidebar-btn copy-btn" id="btnCopySelector" title="Elegir qué elementos copiar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="7" height="7"></rect>
+              <rect x="14" y="3" width="7" height="7"></rect>
+              <rect x="3" y="14" width="7" height="7"></rect>
+              <rect x="14" y="14" width="7" height="7"></rect>
+            </svg>
+            Elegir elementos...
+          </button>
           <button class="sidebar-btn copy-btn" id="btnCopyElements" title="Copiar todos los elementos de esta página">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
             </svg>
-            Copiar elementos
+            Copiar todo
+          </button>
+          <button class="sidebar-btn copy-btn" id="btnCopySelected" style="display:none;" title="Copiar elementos seleccionados">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            Copiar selección
           </button>
           <button class="sidebar-btn paste-btn" id="btnPasteElements" disabled title="Pegar elementos en esta página">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
               <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
             </svg>
-            Pegar elementos
+            Pegar
           </button>
           <button class="sidebar-btn clear-clipboard-btn" id="btnClearClipboard" style="display:none;" title="Limpiar portapapeles">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="3 6 5 6 21 6"></polyline>
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
             </svg>
-            Limpiar portapapeles
+            Limpiar
+          </button>
+          <button class="sidebar-btn" id="btnDeleteSelected" style="display:none;background:#7f1d1d;color:#fca5a5;" title="Eliminar seleccionados">
+            🗑️ Eliminar selección
           </button>
         </div>
         
         <div class="sidebar-section">
           <div class="sidebar-title">Instrucciones</div>
           <div class="sidebar-info">
-            <p>• Carga un PDF con el botón superior</p>
+            <p>• <strong>Shift+Click</strong> = seleccionar varios</p>
+            <p>• <strong>Arrastrar</strong> sobre el PDF = selección por zona</p>
+            <p>• <strong>Ctrl+Z/Y</strong> = deshacer/rehacer</p>
+            <p>• <strong>Supr</strong> = eliminar selección</p>
             <p>• Arrastra elementos para moverlos</p>
             <p>• Esquinas azules = cambiar tamaño</p>
-            <p>• Click en ✕ para eliminar</p>
-            <p>• +/- para zoom</p>
-            <p>• <strong>Doble clic</strong> para añadir texto</p>
-            <p>• <strong>Copiar/Pegar</strong> entre documentos</p>
+            <p>• <strong>Doble clic vacío</strong> = añadir texto</p>
+            <p>• <strong>Doble clic texto</strong> = editar texto</p>
+            <p>• Auto-guardado temporal activo</p>
           </div>
         </div>
       </div>
@@ -323,10 +358,26 @@
     </div>
   </main>
   
+  <!-- Copy Selector Modal -->
+  <div class="modal-overlay" id="copySelectorModal">
+    <div class="modal" style="max-width:340px;">
+      <h3>📋 Seleccionar elementos a copiar</h3>
+      <div style="display:flex;gap:6px;margin-bottom:10px;">
+        <button class="sidebar-btn" id="copySelectorSelectAll" style="flex:1;padding:4px 8px;font-size:11px;">✅ Seleccionar todo</button>
+        <button class="sidebar-btn" id="copySelectorDeselectAll" style="flex:1;padding:4px 8px;font-size:11px;">❌ Deseleccionar</button>
+      </div>
+      <div id="copySelectorList" style="max-height:250px;overflow-y:auto;"></div>
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <button class="sidebar-btn" id="confirmCopySelectorBtn" style="flex:1;background:var(--pri);color:white;">Copiar seleccionados</button>
+        <button class="sidebar-btn" id="closeCopySelectorBtn" style="flex:1;">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Text Modal -->
   <div class="modal-overlay" id="textModal">
     <div class="modal">
-      <h3>📝 Añadir texto</h3>
+      <h3 id="textModalTitle">📝 Añadir texto</h3>
       <textarea id="textInput" placeholder="Escribe el texto aquí..."></textarea>
       <div class="modal-row">
         <input type="number" id="textSize" placeholder="Tamaño" value="14" min="8" max="72">
@@ -335,6 +386,22 @@
       <div class="modal-actions">
         <button class="btn-cancel" id="cancelText">Cancelar</button>
         <button class="btn-add" id="confirmText">Añadir</button>
+      </div>
+      <input type="hidden" id="editingElementIdx" value="">
+    </div>
+  </div>
+  
+  <!-- Date Count Modal -->
+  <div class="modal-overlay" id="dateCountModal">
+    <div class="modal" style="max-width:340px;">
+      <h3>📅 Añadir fecha</h3>
+      <p style="margin-bottom:12px;color:#94a3b8;font-size:13px;">¿Cuántas fechas quieres añadir?</p>
+      <div class="modal-row">
+        <input type="number" id="dateCountInput" placeholder="Cantidad" value="1" min="1" max="50" style="flex:1;padding:10px 12px;border:1px solid #334155;border-radius:8px;background:#0f172a;color:#f1f5f9;font-size:14px;">
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="btnCancelDateCount">Cancelar</button>
+        <button class="btn-add" id="btnConfirmDateCount" style="background:#8b5cf6;">Añadir</button>
       </div>
     </div>
   </div>
