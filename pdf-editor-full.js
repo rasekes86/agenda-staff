@@ -1012,10 +1012,10 @@ function closeTab(docId) {
 }
 
 function showUploadArea() {
-  const canvasArea = $('canvasArea');
-  if (!canvasArea) return;
+  const workspace = $('workspaceEditor');
+  if (!workspace) return;
   
-  canvasArea.innerHTML = `
+  workspace.innerHTML = `
     <div class="upload-wrapper" id="uploadWrapper">
       <input type="file" class="file-input-overlay" id="fileInput" accept=".pdf" multiple>
       <div class="upload-area" id="uploadArea">
@@ -1118,6 +1118,23 @@ function setupToolTabs() {
       if (pageNav) pageNav.style.display = isEditor && activeDoc ? 'flex' : 'none';
       if (zoomControls) zoomControls.style.display = isEditor && activeDoc ? 'flex' : 'none';
       if (btnSave) btnSave.style.display = isEditor ? 'flex' : 'none';
+      
+      // Switch workspace visibility in canvas area
+      const workspaceMap = {
+        editor: 'workspaceEditor',
+        imgToPdf: 'workspaceImgToPdf',
+        wordToPdf: 'workspaceWordToPdf',
+        merge: 'workspaceMerge',
+        split: 'workspaceEditor'
+      };
+      document.querySelectorAll('.tool-workspace').forEach(ws => ws.style.display = 'none');
+      const ws = $(workspaceMap[tool]);
+      if (ws) ws.style.display = 'flex';
+      
+      // If switching to editor with a loaded PDF, re-render the page
+      if (isEditor && activeDoc && activeDoc.pdfJsDoc) {
+        renderPage();
+      }
       
       if (tool === 'split') updateSplitTool();
     });
@@ -2474,30 +2491,50 @@ async function splitPdf() {
 // IMAGE TO PDF
 // ============================================
 
+// Shared: drag-to-reorder for workspace file cards
+function setupCardReorder(container, itemsArray, rerenderFn) {
+  let dragIdx = null;
+  container.querySelectorAll('.workspace-file-card').forEach(card => {
+    card.addEventListener('dragstart', (e) => {
+      dragIdx = parseInt(card.dataset.idx);
+      card.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    card.addEventListener('dragend', () => {
+      card.classList.remove('dragging');
+      container.querySelectorAll('.workspace-file-card').forEach(c => c.classList.remove('drag-over-card'));
+      dragIdx = null;
+    });
+    card.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      card.classList.add('drag-over-card');
+    });
+    card.addEventListener('dragleave', () => card.classList.remove('drag-over-card'));
+    card.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      card.classList.remove('drag-over-card');
+      const targetIdx = parseInt(card.dataset.idx);
+      if (dragIdx !== null && dragIdx !== targetIdx) {
+        const [moved] = itemsArray.splice(dragIdx, 1);
+        itemsArray.splice(targetIdx, 0, moved);
+        rerenderFn();
+      }
+    });
+  });
+}
+
 function setupImgToPdf() {
-  const dropzone = $('imgDropzone');
-  const fileInput = $('imgFileInput');
+  const dropzone = $('imgMainDropzone');
+  const fileInput = $('imgMainFileInput');
   
   if (dropzone && fileInput) {
     dropzone.addEventListener('click', () => fileInput.click());
-    
-    dropzone.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      dropzone.classList.add('drag-over');
-    });
-    
-    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
-    
-    dropzone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      dropzone.classList.remove('drag-over');
-      handleImgFiles(e.dataTransfer.files);
-    });
-    
-    fileInput.addEventListener('change', (e) => {
-      handleImgFiles(e.target.files);
-      fileInput.value = '';
-    });
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.add('drag-over'); });
+    dropzone.addEventListener('dragleave', (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('drag-over'); });
+    dropzone.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('drag-over'); handleImgFiles(e.dataTransfer.files); });
+    fileInput.addEventListener('change', (e) => { handleImgFiles(e.target.files); fileInput.value = ''; });
   }
   
   document.querySelectorAll('[data-orientation]').forEach(btn => {
@@ -2524,23 +2561,40 @@ function handleImgFiles(files) {
 }
 
 function renderImgPreview() {
-  const list = $('imgPreviewList');
-  if (!list) return;
-  list.innerHTML = '';
+  const container = $('imgMainPreview');
+  const countEl = $('imgFileCount');
+  const btn = $('btnConvertImg');
+  if (!container) return;
+  container.innerHTML = '';
+  
+  if (countEl) countEl.textContent = `${imgFiles.length} imagen${imgFiles.length !== 1 ? 'es' : ''}`;
+  if (btn) btn.disabled = imgFiles.length === 0;
+  
+  // Hide dropzone if files exist
+  const dropzone = $('imgMainDropzone');
+  if (dropzone) dropzone.style.display = imgFiles.length > 0 ? 'none' : 'flex';
   
   imgFiles.forEach((img, idx) => {
-    const item = document.createElement('div');
-    item.className = 'preview-item';
-    item.innerHTML = `<img src="${img.src}" alt=""><span class="name">${img.name}</span><button class="remove-btn" data-idx="${idx}">×</button>`;
-    list.appendChild(item);
+    const card = document.createElement('div');
+    card.className = 'workspace-file-card';
+    card.draggable = true;
+    card.dataset.idx = idx;
+    card.innerHTML = `
+      <span class="card-order">${idx + 1}</span>
+      <button class="card-remove" data-idx="${idx}">×</button>
+      <img src="${img.src}" alt="${img.name}" class="card-preview">
+      <span class="card-name">${img.name}</span>
+    `;
+    container.appendChild(card);
   });
   
-  list.querySelectorAll('.remove-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      imgFiles.splice(parseInt(btn.dataset.idx), 1);
-      renderImgPreview();
-    });
+  // Remove buttons
+  container.querySelectorAll('.card-remove').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.stopPropagation(); imgFiles.splice(parseInt(btn.dataset.idx), 1); renderImgPreview(); });
   });
+  
+  // Drag to reorder
+  setupCardReorder(container, imgFiles, renderImgPreview);
 }
 
 async function convertImgToPdf() {
@@ -2616,14 +2670,14 @@ async function convertImgToPdf() {
 // ============================================
 
 function setupWordToPdf() {
-  const dropzone = $('wordDropzone');
-  const fileInput = $('wordFileInput');
+  const dropzone = $('wordMainDropzone');
+  const fileInput = $('wordMainFileInput');
   
   if (dropzone && fileInput) {
     dropzone.addEventListener('click', () => fileInput.click());
-    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('drag-over'); });
-    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
-    dropzone.addEventListener('drop', (e) => { e.preventDefault(); dropzone.classList.remove('drag-over'); handleWordFiles(e.dataTransfer.files); });
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.add('drag-over'); });
+    dropzone.addEventListener('dragleave', (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('drag-over'); });
+    dropzone.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('drag-over'); handleWordFiles(e.dataTransfer.files); });
     fileInput.addEventListener('change', (e) => { handleWordFiles(e.target.files); fileInput.value = ''; });
   }
   
@@ -2640,20 +2694,37 @@ function handleWordFiles(files) {
 }
 
 function renderWordPreview() {
-  const list = $('wordPreviewList');
-  if (!list) return;
-  list.innerHTML = '';
+  const container = $('wordMainPreview');
+  const countEl = $('wordFileCount');
+  const btn = $('btnConvertWord');
+  if (!container) return;
+  container.innerHTML = '';
+  
+  if (countEl) countEl.textContent = `${wordFiles.length} documento${wordFiles.length !== 1 ? 's' : ''}`;
+  if (btn) btn.disabled = wordFiles.length === 0;
+  
+  const dropzone = $('wordMainDropzone');
+  if (dropzone) dropzone.style.display = wordFiles.length > 0 ? 'none' : 'flex';
   
   wordFiles.forEach((doc, idx) => {
-    const item = document.createElement('div');
-    item.className = 'preview-item';
-    item.innerHTML = `<span class="name">📝 ${doc.name}</span><button class="remove-btn" data-idx="${idx}">×</button>`;
-    list.appendChild(item);
+    const card = document.createElement('div');
+    card.className = 'workspace-file-card';
+    card.draggable = true;
+    card.dataset.idx = idx;
+    card.innerHTML = `
+      <span class="card-order">${idx + 1}</span>
+      <button class="card-remove" data-idx="${idx}">×</button>
+      <div class="card-icon">📝</div>
+      <span class="card-name">${doc.name}</span>
+    `;
+    container.appendChild(card);
   });
   
-  list.querySelectorAll('.remove-btn').forEach(btn => {
-    btn.addEventListener('click', () => { wordFiles.splice(parseInt(btn.dataset.idx), 1); renderWordPreview(); });
+  container.querySelectorAll('.card-remove').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.stopPropagation(); wordFiles.splice(parseInt(btn.dataset.idx), 1); renderWordPreview(); });
   });
+  
+  setupCardReorder(container, wordFiles, renderWordPreview);
 }
 
 async function convertWordToPdf() {
@@ -2853,14 +2924,14 @@ async function convertWordToPdf() {
 // ============================================
 
 function setupMerge() {
-  const dropzone = $('mergeDropzone');
-  const fileInput = $('mergeFileInput');
+  const dropzone = $('mergeMainDropzone');
+  const fileInput = $('mergeMainFileInput');
   
   if (dropzone && fileInput) {
     dropzone.addEventListener('click', () => fileInput.click());
-    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('drag-over'); });
-    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
-    dropzone.addEventListener('drop', (e) => { e.preventDefault(); dropzone.classList.remove('drag-over'); handleMergeFiles(e.dataTransfer.files); });
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.add('drag-over'); });
+    dropzone.addEventListener('dragleave', (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('drag-over'); });
+    dropzone.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('drag-over'); handleMergeFiles(e.dataTransfer.files); });
     fileInput.addEventListener('change', (e) => { handleMergeFiles(e.target.files); fileInput.value = ''; });
   }
   
@@ -2877,22 +2948,37 @@ function handleMergeFiles(files) {
 }
 
 function renderMergePreview() {
-  const list = $('mergePreviewList');
-  if (!list) return;
-  list.innerHTML = '';
+  const container = $('mergeMainPreview');
+  const countEl = $('mergeFileCount');
+  const btn = $('btnMergePdfs');
+  if (!container) return;
+  container.innerHTML = '';
+  
+  if (countEl) countEl.textContent = `${mergeFiles.length} PDF${mergeFiles.length !== 1 ? 's' : ''}`;
+  if (btn) btn.disabled = mergeFiles.length < 2;
+  
+  const dropzone = $('mergeMainDropzone');
+  if (dropzone) dropzone.style.display = mergeFiles.length > 0 ? 'none' : 'flex';
   
   mergeFiles.forEach((pdf, idx) => {
-    const item = document.createElement('div');
-    item.className = 'preview-item';
-    item.draggable = true;
-    item.dataset.idx = idx;
-    item.innerHTML = `<span class="name">📄 ${pdf.name}</span><button class="remove-btn" data-idx="${idx}">×</button>`;
-    list.appendChild(item);
+    const card = document.createElement('div');
+    card.className = 'workspace-file-card';
+    card.draggable = true;
+    card.dataset.idx = idx;
+    card.innerHTML = `
+      <span class="card-order">${idx + 1}</span>
+      <button class="card-remove" data-idx="${idx}">×</button>
+      <div class="card-icon">📄</div>
+      <span class="card-name">${pdf.name}</span>
+    `;
+    container.appendChild(card);
   });
   
-  list.querySelectorAll('.remove-btn').forEach(btn => {
-    btn.addEventListener('click', () => { mergeFiles.splice(parseInt(btn.dataset.idx), 1); renderMergePreview(); });
+  container.querySelectorAll('.card-remove').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.stopPropagation(); mergeFiles.splice(parseInt(btn.dataset.idx), 1); renderMergePreview(); });
   });
+  
+  setupCardReorder(container, mergeFiles, renderMergePreview);
 }
 
 async function mergePdfs() {

@@ -1330,3 +1330,178 @@ body {
   outline: 2px solid #f59e0b;
   outline-offset: 2px;
 }
+
+/* ============================================
+   Tool Workspaces (main canvas area for non-editor tools)
+   ============================================ */
+
+.tool-workspace {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  padding: 20px;
+}
+
+.workspace-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 600px;
+  min-height: 280px;
+  border: 2px dashed #334155;
+  border-radius: 12px;
+  background: #0f172a;
+  cursor: pointer;
+  transition: all 0.2s;
+  padding: 30px;
+}
+
+.workspace-dropzone:hover {
+  border-color: #38bdf8;
+  background: #0c1929;
+}
+
+.workspace-dropzone.drag-over {
+  border-color: #38bdf8;
+  background: #0c1929;
+  transform: scale(1.01);
+}
+
+.workspace-dropzone svg {
+  color: #475569;
+}
+
+.workspace-dropzone.drag-over svg {
+  color: #38bdf8;
+}
+
+.workspace-dropzone-text {
+  font-size: 16px;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.workspace-dropzone-hint {
+  font-size: 13px;
+  color: #64748b;
+}
+
+/* File cards grid in workspace */
+.workspace-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 20px 0;
+  width: 100%;
+  justify-content: center;
+}
+
+.workspace-file-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 140px;
+  background: #0f172a;
+  border-radius: 10px;
+  padding: 12px;
+  border: 1px solid #1e293b;
+  position: relative;
+  transition: all 0.2s;
+  cursor: grab;
+}
+
+.workspace-file-card:hover {
+  border-color: #334155;
+  background: #162033;
+}
+
+.workspace-file-card.dragging {
+  opacity: 0.4;
+}
+
+.workspace-file-card.drag-over-card {
+  border-color: #38bdf8;
+  transform: scale(1.05);
+}
+
+.workspace-file-card .card-preview {
+  width: 116px;
+  height: 90px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #1e293b;
+}
+
+.workspace-file-card .card-icon {
+  width: 116px;
+  height: 90px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1e293b;
+  border-radius: 6px;
+  font-size: 36px;
+}
+
+.workspace-file-card .card-name {
+  font-size: 11px;
+  color: #94a3b8;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.workspace-file-card .card-order {
+  position: absolute;
+  top: -6px;
+  left: -6px;
+  width: 22px;
+  height: 22px;
+  background: #3b82f6;
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.workspace-file-card .card-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 22px;
+  height: 22px;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.workspace-file-card:hover .card-remove {
+  opacity: 1;
+}
+
+.sidebar-info {
+  font-size: 13px;
+  color: #64748b;
+  padding: 8px 0;
+  border-bottom: 1px solid #1e293b;
+  margin-bottom: 12px;
+}
