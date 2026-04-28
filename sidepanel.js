@@ -1323,13 +1323,10 @@ function setupPdfListeners() {
 }
 
 function openPdfModal() {
-  // Show the modal in fullscreen mode (occupy entire sidepanel)
-  $('pdfModal').classList.add('show', 'fullscreen');
-  
-  // Hide header, calendar and days list when modal is open
-  document.querySelector('.header').style.display = 'none';
-  document.querySelector('.days-section').style.display = 'none';
-  document.querySelector('.mini-calendar').style.display = 'none';
+  // Open full-screen editor directly in a new tab
+  chrome.tabs.create({
+    url: chrome.runtime.getURL('pdf-editor-full.html')
+  });
 }
 
 function closePdfModal() {
@@ -3185,7 +3182,7 @@ async function previewAllSignatures() {
       html += `
         <div class="signature-preview-card" data-id="${sig.id}" data-name="${esc(displayName)}">
           <div class="signature-preview-image-container">
-            <img src="${sig.image_url}" alt="${esc(displayName)}" class="signature-preview-image"image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 50%22><text x=%2250%%22 y=%2250%%22 text-anchor=%22middle%22 fill=%22%23999%22>Sin imagen</text></svg>'">
+            <img src="${sig.image_url}" alt="${esc(displayName)}" class="signature-preview-image" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 50%22><text x=%2250%%22 y=%2250%%22 text-anchor=%22middle%22 fill=%22%23999%22>Sin imagen</text></svg>'">
           </div>
           <div class="signature-preview-name">${esc(displayName)}</div>
           <button class="signature-preview-delete" data-id="${sig.id}" data-name="${esc(displayName)}" title="Eliminar firma">🗑️</button>
