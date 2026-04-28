@@ -283,78 +283,7 @@
         </div>
       </div>
 
-      <!-- PDF Tools Modal -->
-      <div class="pdf-modal" id="pdfModal">
-        <div class="pdf-modal-header">
-          <h3>📄 Herramientas PDF</h3>
-          <button class="pdf-modal-close" id="closePdfModal">&times;</button>
-        </div>
-        <div class="pdf-modal-content">
-          <!-- Tab 1: PDF Editor -->
-          <div class="pdf-tab-content active" id="editPdfTab">
-            <div class="pdf-editor-container">
-              <!-- Toolbar in two rows: Full Screen on top, other 4 in 2x2 grid -->
-              <div class="pdf-editor-toolbar-wrapper">
-                <!-- Row 1: Full Screen Editor - Big button -->
-                <button class="pdf-editor-btn-fullscreen" id="btnOpenFullEditor" title="Abrir editor en pantalla completa">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
-                  </svg>
-                  Pantalla Completa
-                </button>
-                <!-- Row 2: Other tools in 2x2 grid -->
-                <div class="pdf-editor-toolbar-grid">
-                  <button class="pdf-editor-btn" id="btnAddText" title="Añadir texto">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M4 7V4h16v3"></path>
-                      <path d="M9 20h6"></path>
-                      <path d="M12 4v16"></path>
-                    </svg>
-                    Texto
-                  </button>
-                  <button class="pdf-editor-btn" id="btnAddImage" title="Añadir imagen">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                      <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                      <polyline points="21 15 16 10 5 21"></polyline>
-                    </svg>
-                    Imagen
-                  </button>
-                  <button class="pdf-editor-btn" id="btnAddSignature" title="Añadir firma">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
-                    </svg>
-                    Firma
-                  </button>
-                  <button class="pdf-editor-btn danger" id="btnClearEditor" title="Limpiar todo">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <polyline points="3 6 5 6 21 6"></polyline>
-                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                    </svg>
-                    Papelera
-                  </button>
-                </div>
-              </div>
-              <div class="pdf-editor-pages" id="pdfEditorPages">
-                <div class="pdf-editor-upload" id="pdfEditorUpload">
-                  <div class="pdf-editor-upload-icon">📄</div>
-                  <div class="pdf-editor-upload-text">Arrastra un PDF o haz clic para seleccionar</div>
-                  <input type="file" id="editorFileInput" accept=".pdf" hidden>
-                </div>
-              </div>
-              <div class="pdf-editor-nav" id="pdfEditorNav" style="display: none;">
-                <button class="pdf-nav-btn" id="btnPrevPage">◀</button>
-                <span class="pdf-page-info">Página <span id="currentPageNum">1</span> de <span id="totalPages">1</span></span>
-                <button class="pdf-nav-btn" id="btnNextPage">▶</button>
-              </div>
-            </div>
-            <button class="pdf-convert-btn" id="btnSavePdf" style="display: none;">
-              <span class="btn-text">Guardar PDF →</span>
-              <span class="btn-loader" style="display:none"></span>
-            </button>
-          </div>
-        </div>
-      </div>
+      <!-- PDF Tools: sidepanel editor removed — btnPdf opens pdf-editor-full.html directly -->
 
       <!-- Signatures Modal -->
       <div class="signatures-modal" id="signaturesModal">
