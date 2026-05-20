@@ -1713,6 +1713,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 async function startScreenshot() {
   const btn = $('btnScreenshot');
   btn.classList.add('capturing');
+  _lastScreenshotDataUrl = null; // Reset duplicate guard for new capture
   
   try {
     await chrome.runtime.sendMessage({ type: 'START_SCREENSHOT' });
@@ -1723,6 +1724,9 @@ async function startScreenshot() {
   }
 }
 
+let _lastScreenshotTime = 0;
+let _lastScreenshotDataUrl = null;
+
 async function handleScreenshotResult(dataUrl) {
   const btn = $('btnScreenshot');
   btn.classList.remove('capturing');
@@ -1731,6 +1735,15 @@ async function handleScreenshotResult(dataUrl) {
     showToast('Error: No se recibió la imagen');
     return;
   }
+  
+  // Prevent duplicate processing (same result arriving twice)
+  const now = Date.now();
+  if (dataUrl === _lastScreenshotDataUrl && now - _lastScreenshotTime < 2000) {
+    console.log('Screenshot result ignored (duplicate within 2s)');
+    return;
+  }
+  _lastScreenshotDataUrl = dataUrl;
+  _lastScreenshotTime = now;
   
   try {
     const response = await fetch(dataUrl);

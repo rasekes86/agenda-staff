@@ -244,10 +244,37 @@ function updateMultiSelectUI() {
   const info = $('multiSelectInfo');
   const deleteBtn = $('btnDeleteSelected');
   const copyBtn = $('btnCopySelected');
+  const multiTextResize = $('multiTextResize');
+  
   if (info) info.textContent = count > 0 ? `${count} elemento(s) seleccionado(s)` : '';
   if (info) info.style.display = count > 0 ? 'block' : 'none';
   if (deleteBtn) deleteBtn.style.display = count > 0 ? 'flex' : 'none';
   if (copyBtn) copyBtn.style.display = count > 0 ? 'flex' : 'none';
+  
+  // Show text resize control if any selected elements are text type
+  const activeDoc = getActiveDoc();
+  let hasTextElements = false;
+  if (activeDoc && count > 0) {
+    const pageElements = activeDoc.elements[activeDoc.currentPage] || [];
+    hasTextElements = Array.from(selectedIndices).some(idx => {
+      const el = pageElements[idx];
+      return el && el.type === 'text';
+    });
+  }
+  if (multiTextResize) {
+    if (hasTextElements) {
+      multiTextResize.style.display = 'block';
+      // Set the input to the first selected text element's size
+      const pageElements = activeDoc.elements[activeDoc.currentPage] || [];
+      const firstTextIdx = Array.from(selectedIndices).find(idx => pageElements[idx] && pageElements[idx].type === 'text');
+      if (firstTextIdx !== undefined && pageElements[firstTextIdx]) {
+        const sizeInput = $('multiFontSize');
+        if (sizeInput) sizeInput.value = pageElements[firstTextIdx].size || 14;
+      }
+    } else {
+      multiTextResize.style.display = 'none';
+    }
+  }
 }
 
 function deleteSelectedElements() {
@@ -742,6 +769,40 @@ function setupEventListeners() {
   if (btnDeleteSelected) btnDeleteSelected.addEventListener('click', deleteSelectedElements);
   const btnCopySelected = $('btnCopySelected');
   if (btnCopySelected) btnCopySelected.addEventListener('click', copySelectedElements);
+  
+  // Multi-select text resize
+  const btnApplyMultiFontSize = $('btnApplyMultiFontSize');
+  if (btnApplyMultiFontSize) {
+    btnApplyMultiFontSize.addEventListener('click', () => {
+      const sizeInput = $('multiFontSize');
+      const newSize = parseInt(sizeInput ? sizeInput.value : 14);
+      if (isNaN(newSize) || newSize < MIN_FONT_SIZE || newSize > MAX_FONT_SIZE) {
+        showStatus(`El tamaño debe estar entre ${MIN_FONT_SIZE} y ${MAX_FONT_SIZE}`, 'error');
+        return;
+      }
+      const activeDoc = getActiveDoc();
+      if (!activeDoc) return;
+      const pageElements = activeDoc.elements[activeDoc.currentPage] || [];
+      let changedCount = 0;
+      selectedIndices.forEach(idx => {
+        const el = pageElements[idx];
+        if (el && el.type === 'text') {
+          const prevSize = el.size || 14;
+          el.size = newSize;
+          pushUndo(activeDoc.id, { type: 'resize', page: activeDoc.currentPage, index: idx, prevProps: { size: prevSize }, currentProps: { size: newSize } });
+          changedCount++;
+        }
+      });
+      if (changedCount > 0) {
+        updateTabModified(activeDoc.id, true);
+        renderPage();
+        // Re-apply multi-selection visual state after render
+        selectedIndices.forEach(idx => selectElementIdx(idx));
+        scheduleAutoSave();
+        showStatus(`Tamaño cambiado a ${newSize}px en ${changedCount} texto(s)`, 'success');
+      }
+    });
+  }
 
   // Copy selector modal
   const btnCopySelector = $('btnCopySelector');
@@ -1800,13 +1861,34 @@ async function searchSignatures() {
   
   if (signatureResults) signatureResults.innerHTML = '<div class="signature-loading">Buscando...</div>';
   
+  // Helper to reload session from storage if missing
+  async function ensureSession() {
+    if (!session || !session.access_token) {
+      try {
+        const stored = await chrome.storage.local.get(['session', 'user']);
+        if (stored.session) {
+          session = stored.session;
+          currentUser = stored.user || null;
+          console.log('Session reloaded from storage for signature search');
+        }
+      } catch (err) {
+        console.warn('Could not reload session:', err);
+      }
+    }
+  }
+  
   try {
+    await ensureSession();
+    
     let allSignatures = [];
     const foundNames = [];
     
     const headers = { 'apikey': SUPABASE_KEY };
+    // Always use Authorization: if session exists, use it; otherwise use anon key as fallback
     if (session && session.access_token) {
       headers['Authorization'] = `Bearer ${session.access_token}`;
+    } else {
+      headers['Authorization'] = `Bearer ${SUPABASE_KEY}`;
     }
     
     for (const term of searchTerms) {
@@ -1817,7 +1899,13 @@ async function searchSignatures() {
       
       for (const searchTerm of searchValues) {
         const query = `?select=*&name=ilike.*${encodeURIComponent(searchTerm)}*&order=name.asc`;
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/signatures${query}`, { headers });
+        let res;
+        try {
+          res = await fetch(`${SUPABASE_URL}/rest/v1/signatures${query}`, { headers });
+        } catch (fetchErr) {
+          console.error('Network error searching signatures:', fetchErr);
+          continue;
+        }
         
         if (res.ok) {
           const signatures = await res.json();
@@ -1828,6 +1916,26 @@ async function searchSignatures() {
                 foundNames.push(normalizeText(sig.name).toLowerCase());
               }
             });
+          }
+        } else if (res.status === 401) {
+          // Auth expired: reload session and retry once
+          console.warn('Signature search got 401, reloading session...');
+          session = null;
+          await ensureSession();
+          if (session && session.access_token) {
+            headers['Authorization'] = `Bearer ${session.access_token}`;
+            const retryRes = await fetch(`${SUPABASE_URL}/rest/v1/signatures${query}`, { headers });
+            if (retryRes.ok) {
+              const signatures = await retryRes.json();
+              if (signatures && signatures.length > 0) {
+                signatures.forEach(sig => {
+                  if (!allSignatures.find(s => s.id === sig.id)) {
+                    allSignatures.push(sig);
+                    foundNames.push(normalizeText(sig.name).toLowerCase());
+                  }
+                });
+              }
+            }
           }
         }
       }
@@ -2268,8 +2376,24 @@ async function savePdf() {
     
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     
-    for (let i = 1; i <= activeDoc.totalPages; i++) {
-      activeDoc.elements[i] = [];
+    // Ask user if they want to keep any elements from the saved document
+    const hasElementsToKeep = Object.values(activeDoc.elements).some(arr => arr.length > 0);
+    if (hasElementsToKeep) {
+      const keepChoice = confirm('PDF guardado correctamente.\n\n¿Quieres conservar los elementos añadidos para el siguiente documento?\n(ACEPTAR = mantener elementos, CANCELAR = limpiar todo)');
+      if (!keepChoice) {
+        // User chose to clear all elements
+        for (let i = 1; i <= activeDoc.totalPages; i++) {
+          activeDoc.elements[i] = [];
+        }
+        delete undoStacks[activeDoc.id];
+        delete redoStacks[activeDoc.id];
+        clearSelection();
+        updateMultiSelectUI();
+      }
+    } else {
+      for (let i = 1; i <= activeDoc.totalPages; i++) {
+        activeDoc.elements[i] = [];
+      }
     }
     updateTabModified(activeDoc.id, false);
     renderPage();
@@ -2289,12 +2413,46 @@ async function savePdf() {
 
 function clearEditor() {
   const activeDoc = getActiveDoc();
-  if (!activeDoc) return;
   
-  const hasElements = Object.values(activeDoc.elements).some(arr => arr.length > 0);
-  if (hasElements && !confirm('¿Limpiar los cambios del documento actual?')) return;
-  
-  closeTab(activeDoc.id);
+  if (activeDoc) {
+    // Check if there are elements to clear
+    const hasElements = Object.values(activeDoc.elements).some(arr => arr.length > 0);
+    
+    if (hasElements) {
+      if (!confirm('¿Limpiar todos los elementos añadidos del documento actual?')) return;
+      // Clear all elements from all pages
+      for (let i = 1; i <= activeDoc.totalPages; i++) {
+        activeDoc.elements[i] = [];
+      }
+      // Clear undo/redo stacks for this document
+      delete undoStacks[activeDoc.id];
+      delete redoStacks[activeDoc.id];
+      clearSelection();
+      updateMultiSelectUI();
+      updateTabModified(activeDoc.id, false);
+      renderPage();
+      showStatus('Documento limpiado', 'success');
+    } else {
+      // No elements: close this tab
+      closeTab(activeDoc.id);
+    }
+  } else {
+    // No active document at all: reset everything
+    if (documents.length > 0) {
+      if (!confirm('¿Cerrar todos los documentos abiertos?')) return;
+    }
+    documents = [];
+    activeDocIndex = -1;
+    tabCounter = 0;
+    undoStacks = {};
+    redoStacks = {};
+    clipboardElements = null;
+    const tabsList = $('documentTabsList');
+    if (tabsList) tabsList.innerHTML = '';
+    showUploadArea();
+    updateClipboardUI();
+    showStatus('Todo limpio', 'success');
+  }
 }
 
 // hexToRgb moved to shared-utils.js
