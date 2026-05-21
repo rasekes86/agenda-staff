@@ -1,6 +1,6 @@
 // ============================================
-// PDF EDITOR FULL SCREEN - AGENDA STAFF v6.3.0
-// Fixed: Box selection persistence, Add All signatures, Date quantity
+// PDF EDITOR FULL SCREEN - AGENDA STAFF v7.1.0
+// Added: Position-only templates (placeholders), Keep elements selector
 // ============================================
 
 // ============================================
@@ -1330,11 +1330,40 @@ async function renderPage() {
 function createElementDiv(el, idx, scale, activeDoc) {
   const div = document.createElement('div');
   div.className = 'pdf-element pdf-element-' + el.type;
+  if (el.isPlaceholder) div.classList.add('pdf-element-placeholder');
   div.dataset.idx = idx;
   div.style.left = (el.x * scale) + 'px';
   div.style.top = (el.y * scale) + 'px';
   
-  if (el.type === 'text') {
+  if (el.isPlaceholder) {
+    // Placeholder rendering: dashed frame with label
+    if (el.type === 'text') {
+      div.style.width = '150px';
+      div.style.height = ((el.size || 14) * scale + 10) + 'px';
+      div.style.minWidth = MIN_ELEMENT_SIZE + 'px';
+      div.style.minHeight = MIN_ELEMENT_SIZE + 'px';
+      const placeholder = document.createElement('div');
+      placeholder.className = 'placeholder-label';
+      placeholder.textContent = el.placeholderLabel || 'Texto';
+      placeholder.style.fontSize = ((el.size || 14) * scale) + 'px';
+      placeholder.style.color = el.color || '#94a3b8';
+      div.appendChild(placeholder);
+    } else if (el.type === 'signature') {
+      div.style.width = ((el.width || 200) * scale) + 'px';
+      div.style.height = ((el.height || 80) * scale) + 'px';
+      const placeholder = document.createElement('div');
+      placeholder.className = 'placeholder-label';
+      placeholder.textContent = el.placeholderLabel || 'Firma';
+      div.appendChild(placeholder);
+    } else if (el.type === 'image') {
+      div.style.width = ((el.width || 100) * scale) + 'px';
+      div.style.height = ((el.height || 100) * scale) + 'px';
+      const placeholder = document.createElement('div');
+      placeholder.className = 'placeholder-label';
+      placeholder.textContent = el.placeholderLabel || 'Imagen';
+      div.appendChild(placeholder);
+    }
+  } else if (el.type === 'text') {
     // Create text span (not using textContent to allow child elements)
     const textSpan = document.createElement('span');
     textSpan.textContent = el.text;
@@ -1378,10 +1407,30 @@ function createElementDiv(el, idx, scale, activeDoc) {
     }
   });
 
-  // Double click on text element: open edit modal
+  // Double click on text element (or text placeholder): open edit modal
   if (el.type === 'text') {
     div.addEventListener('dblclick', (e) => {
       e.stopPropagation();
+      // For placeholders, open the text modal to fill in content
+      if (el.isPlaceholder) {
+        const textInput = $('textInput');
+        const textSize = $('textSize');
+        const textColor = $('textColor');
+        const textModal = $('textModal');
+        const editingIdx = $('editingElementIdx');
+        if (textInput) textInput.value = '';
+        if (textSize) textSize.value = el.size || 14;
+        if (textColor) textColor.value = el.color || '#000000';
+        if (editingIdx) editingIdx.value = idx;
+        if ($('textModalTitle')) $('textModalTitle').textContent = '\u{1F4DD} Rellenar texto';
+        if (textModal) {
+          textModal.classList.add('show');
+          textModal.dataset.posX = el.x;
+          textModal.dataset.posY = el.y;
+        }
+        if (textInput) textInput.focus();
+        return;
+      }
       openEditTextModal(idx, activeDoc, scale);
     });
   }
@@ -1493,7 +1542,7 @@ function confirmTextWithPosition() {
     return;
   }
   
-  // --- EDIT MODE: update existing text element ---
+  // --- EDIT MODE: update existing text element (or fill placeholder) ---
   if (editingIdx !== '' && editingIdx !== null && editingIdx !== undefined) {
     const idx = parseInt(editingIdx);
     const pageElements = activeDoc.elements[activeDoc.currentPage] || [];
@@ -1503,10 +1552,17 @@ function confirmTextWithPosition() {
       el.text = text;
       el.size = size;
       el.color = color;
+      // Remove placeholder flag when user fills in content
+      if (el.isPlaceholder) {
+        delete el.isPlaceholder;
+        delete el.placeholderLabel;
+      }
       if (textModal) textModal.classList.remove('show');
+      if ($('textModalTitle')) $('textModalTitle').textContent = '\u{1F4DD} A\u00f1adir texto';
       editingIdxEl.value = '';
       updateTabModified(activeDoc.id, true);
       renderPage();
+      scheduleAutoSave();
       showStatus('Texto actualizado', 'success');
       return;
     }
@@ -2365,6 +2421,9 @@ async function savePdf() {
       const pageElements = activeDoc.elements[pageNum] || [];
       
       for (const el of pageElements) {
+        // Skip placeholders (they are just position guides, not real content)
+        if (el.isPlaceholder) continue;
+        
         if (el.type === 'text') {
           const fontSize = el.size || 14;
           const pdfY = height - el.y - fontSize;
@@ -3385,7 +3444,9 @@ function showKeepElementsModal(activeDoc) {
     const pageEls = activeDoc.elements[page] || [];
     pageEls.forEach((el, idx) => {
       let label = '';
-      if (el.type === 'text') label = `T: "${el.text.substring(0, 40)}${el.text.length > 40 ? '...' : ''}"`;
+      if (el.isPlaceholder) {
+        label = `📍 ${el.placeholderLabel || el.type} [plantilla]`;
+      } else if (el.type === 'text') label = `T: "${el.text.substring(0, 40)}${el.text.length > 40 ? '...' : ''}"`;
       else if (el.type === 'signature') label = `F: ${el.name || 'Sin nombre'}`;
       else if (el.type === 'image') label = `I: Imagen (${Math.round(el.width)}x${Math.round(el.height)})`;
       else label = el.type;
@@ -3479,7 +3540,7 @@ function showKeepElementsModal(activeDoc) {
 }
 
 // ============================================
-// TEMPLATES SYSTEM
+// TEMPLATES SYSTEM (Position-only templates)
 // ============================================
 const TEMPLATES_STORAGE_KEY = 'pdfEditorTemplates';
 
@@ -3490,11 +3551,11 @@ function getElementTypeLabel(el) {
   return '❓';
 }
 
-function getElementLabel(el) {
-  if (el.type === 'text') return `"${el.text.substring(0, 25)}${el.text.length > 25 ? '...' : ''}"`;
-  if (el.type === 'signature') return el.name || 'Firma';
-  if (el.type === 'image') return 'Imagen';
-  return el.type;
+function getSlotLabel(slot) {
+  if (slot.type === 'text') return `Texto (${slot.size || 14}px)`;
+  if (slot.type === 'signature') return `Firma (${Math.round(slot.width || 200)}x${Math.round(slot.height || 80)})`;
+  if (slot.type === 'image') return `Imagen (${Math.round(slot.width || 100)}x${Math.round(slot.height || 100)})`;
+  return slot.type;
 }
 
 async function loadTemplates() {
@@ -3532,17 +3593,17 @@ async function renderTemplatesList() {
   const templates = await loadTemplates();
 
   if (templates.length === 0) {
-    list.innerHTML = '<div style="color:#64748b;font-size:12px;text-align:center;padding:20px;">No hay plantillas guardadas.<br>Guarda los elementos de la página actual.</div>';
+    list.innerHTML = '<div style="color:#64748b;font-size:12px;text-align:center;padding:20px;">No hay plantillas guardadas.<br>Guarda las posiciones de los elementos de la página actual.</div>';
     return;
   }
 
   list.innerHTML = templates.map((tmpl, i) => {
-    const elCount = tmpl.elements.length;
-    const typeSummary = tmpl.elements.map(el => getElementTypeLabel(el)).join(' ');
+    const slotCount = tmpl.slots ? tmpl.slots.length : 0;
+    const typeSummary = tmpl.slots ? tmpl.slots.map(s => getElementTypeLabel(s)).join(' ') : '';
     return `<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#1e293b;border-radius:6px;margin-bottom:6px;">
       <span style="flex:1;font-size:12px;color:#e2e8f0;">
         <strong>${escapeHtml(tmpl.name)}</strong><br>
-        <span style="color:#94a3b8;font-size:11px;">${typeSummary} ${elCount} elemento(s)</span>
+        <span style="color:#94a3b8;font-size:11px;">${typeSummary} ${slotCount} posición(es)</span>
       </span>
       <button class="sidebar-btn" data-tmpl-action="load" data-tmpl-idx="${i}" style="padding:4px 8px;font-size:10px;background:#2563eb;color:white;">Usar</button>
       <button class="sidebar-btn" data-tmpl-action="delete" data-tmpl-idx="${i}" style="padding:4px 8px;font-size:10px;background:#7f1d1d;color:#fca5a5;">🗑️</button>
@@ -3586,31 +3647,51 @@ async function saveCurrentAsTemplate() {
     return;
   }
 
-  // Collect all elements from all pages
-  let allElements = [];
+  // Collect position/config data from all pages (NOT actual content)
+  let slots = [];
   for (let page = 1; page <= activeDoc.totalPages; page++) {
     const pageEls = activeDoc.elements[page] || [];
     pageEls.forEach(el => {
-      allElements.push({ ...el });
+      // Skip existing placeholders
+      if (el.isPlaceholder) return;
+      
+      const slot = { type: el.type, x: el.x, y: el.y };
+      
+      if (el.type === 'text') {
+        slot.size = el.size || 14;
+        slot.color = el.color || '#000000';
+        // Generate a descriptive label based on the text content (for reference only)
+        slot.placeholderLabel = el.text ? `Texto: "${el.text.substring(0, 30)}${el.text.length > 30 ? '...' : ''}"` : 'Texto';
+      } else if (el.type === 'signature') {
+        slot.width = el.width || 200;
+        slot.height = el.height || 80;
+        slot.placeholderLabel = el.name ? `Firma: ${el.name}` : 'Firma';
+      } else if (el.type === 'image') {
+        slot.width = el.width || 100;
+        slot.height = el.height || 100;
+        slot.placeholderLabel = 'Imagen';
+      }
+      
+      slots.push(slot);
     });
   }
 
-  if (allElements.length === 0) {
-    showStatus('No hay elementos para guardar', 'error');
+  if (slots.length === 0) {
+    showStatus('No hay elementos para guardar como plantilla', 'error');
     return;
   }
 
   const templates = await loadTemplates();
   templates.push({
     name: name,
-    elements: allElements,
+    slots: slots,
     createdAt: Date.now()
   });
 
   await saveTemplates(templates);
   if (nameInput) nameInput.value = '';
   renderTemplatesList();
-  showStatus(`Plantilla "${name}" guardada (${allElements.length} elementos)`, 'success');
+  showStatus(`Plantilla "${name}" guardada (${slots.length} posición(es))`, 'success');
 }
 
 async function applyTemplate(template) {
@@ -3620,18 +3701,40 @@ async function applyTemplate(template) {
     return;
   }
 
-  if (!template || !template.elements || template.elements.length === 0) {
+  if (!template || !template.slots || template.slots.length === 0) {
     showStatus('Plantilla vacía', 'error');
     return;
   }
 
-  // Deep clone elements and add to current page
-  const cloned = JSON.parse(JSON.stringify(template.elements));
-  cloned.forEach(el => {
-    pushElement(activeDoc, activeDoc.currentPage, el);
+  // Create placeholder elements from template slots
+  template.slots.forEach(slot => {
+    const placeholder = {
+      type: slot.type,
+      x: slot.x,
+      y: slot.y,
+      isPlaceholder: true,
+      placeholderLabel: slot.placeholderLabel || (slot.type === 'text' ? 'Texto' : slot.type === 'signature' ? 'Firma' : 'Imagen')
+    };
+    
+    if (slot.type === 'text') {
+      placeholder.text = '';
+      placeholder.size = slot.size || 14;
+      placeholder.color = slot.color || '#000000';
+    } else if (slot.type === 'signature') {
+      placeholder.width = slot.width || 200;
+      placeholder.height = slot.height || 80;
+      placeholder.src = '';
+      placeholder.name = '';
+    } else if (slot.type === 'image') {
+      placeholder.width = slot.width || 100;
+      placeholder.height = slot.height || 100;
+      placeholder.src = '';
+    }
+    
+    pushElement(activeDoc, activeDoc.currentPage, placeholder);
   });
 
   updateTabModified(activeDoc.id, true);
   renderPage();
-  showStatus(`Plantilla aplicada: ${cloned.length} elemento(s)`, 'success');
+  showStatus(`Plantilla aplicada: ${template.slots.length} posición(es) creadas`, 'success');
 }
