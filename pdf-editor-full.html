@@ -228,6 +228,19 @@
         </div>
         
         <div class="sidebar-section">
+          <div class="sidebar-title">Plantillas</div>
+          <button class="sidebar-btn" id="btnOpenTemplates" style="background:#4338ca;color:#e0e7ff;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="7" height="7"></rect>
+              <rect x="14" y="3" width="7" height="7"></rect>
+              <rect x="3" y="14" width="7" height="7"></rect>
+              <rect x="14" y="14" width="7" height="7"></rect>
+            </svg>
+            Plantillas
+          </button>
+        </div>
+
+        <div class="sidebar-section">
           <div class="sidebar-title">Instrucciones</div>
           <div class="sidebar-info">
             <p>• <strong>Shift+Click</strong> = seleccionar varios</p>
@@ -450,6 +463,39 @@
     </div>
   </div>
   
+  <!-- Keep Elements Modal (shown after save) -->
+  <div class="modal-overlay" id="keepElementsModal">
+    <div class="modal" style="max-width:380px;">
+      <h3>💾 Elementos del documento</h3>
+      <p style="margin-bottom:10px;color:#94a3b8;font-size:13px;">Selecciona los elementos que quieres conservar para el siguiente documento:</p>
+      <div style="display:flex;gap:6px;margin-bottom:10px;">
+        <button class="sidebar-btn" id="keepSelectAll" style="flex:1;padding:4px 8px;font-size:11px;">✅ Seleccionar todo</button>
+        <button class="sidebar-btn" id="keepDeselectAll" style="flex:1;padding:4px 8px;font-size:11px;">❌ Deseleccionar</button>
+      </div>
+      <div id="keepElementsList" style="max-height:300px;overflow-y:auto;"></div>
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <button class="sidebar-btn" id="confirmKeepElements" style="flex:1;background:#2563eb;color:white;">Conservar</button>
+        <button class="sidebar-btn" id="cancelKeepElements" style="flex:1;background:#7f1d1d;color:#fca5a5;">Limpiar todo</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Templates Modal -->
+  <div class="modal-overlay" id="templatesModal">
+    <div class="modal" style="max-width:400px;">
+      <h3>📐 Plantillas de elementos</h3>
+      <div style="display:flex;gap:6px;margin-bottom:10px;">
+        <input type="text" id="templateNameInput" placeholder="Nombre de la plantilla" style="flex:1;padding:8px 10px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#f1f5f9;font-size:12px;">
+        <button class="sidebar-btn" id="btnSaveTemplate" style="background:#2563eb;color:white;padding:8px 12px;">💾 Guardar</button>
+      </div>
+      <p style="margin-bottom:8px;color:#64748b;font-size:11px;">Guarda los elementos de la página actual como plantilla para reutilizarlos en otros documentos.</p>
+      <div id="templatesList" style="max-height:250px;overflow-y:auto;"></div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="closeTemplatesModal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Status message -->
   <div class="status-msg" id="statusMsg"></div>
   

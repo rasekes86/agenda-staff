@@ -869,6 +869,50 @@ function setupEventListeners() {
   // Re-assign confirmText to handle both add and edit
   const confirmTextBtn2 = $('confirmText');
   if (confirmTextBtn2) confirmTextBtn2.addEventListener('click', confirmTextWithPosition);
+
+  // Templates button
+  const btnOpenTemplates = $('btnOpenTemplates');
+  if (btnOpenTemplates) btnOpenTemplates.addEventListener('click', showTemplatesModal);
+
+  // Templates modal buttons
+  const btnSaveTemplate = $('btnSaveTemplate');
+  if (btnSaveTemplate) btnSaveTemplate.addEventListener('click', saveCurrentAsTemplate);
+  const closeTemplatesModal = $('closeTemplatesModal');
+  if (closeTemplatesModal) closeTemplatesModal.addEventListener('click', () => {
+    const modal = $('templatesModal');
+    if (modal) modal.classList.remove('show');
+  });
+
+  // Keep Elements modal - Escape to close
+  const keepElementsModal = $('keepElementsModal');
+  if (keepElementsModal) {
+    keepElementsModal.addEventListener('click', (e) => {
+      if (e.target === keepElementsModal) {
+        // Click outside modal = clear all (cancel behavior)
+        const activeDoc = getActiveDoc();
+        if (activeDoc) {
+          for (let i = 1; i <= activeDoc.totalPages; i++) {
+            activeDoc.elements[i] = [];
+          }
+          delete undoStacks[activeDoc.id];
+          delete redoStacks[activeDoc.id];
+          clearSelection();
+          updateMultiSelectUI();
+          updateTabModified(activeDoc.id, false);
+          renderPage();
+        }
+        keepElementsModal.classList.remove('show');
+      }
+    });
+  }
+
+  // Templates modal - Escape to close
+  const templatesModal = $('templatesModal');
+  if (templatesModal) {
+    templatesModal.addEventListener('click', (e) => {
+      if (e.target === templatesModal) templatesModal.classList.remove('show');
+    });
+  }
 }
 
 // ============================================
@@ -2376,27 +2420,17 @@ async function savePdf() {
     
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     
-    // Ask user if they want to keep any elements from the saved document
+    // Ask user which elements to keep via visual selector
     const hasElementsToKeep = Object.values(activeDoc.elements).some(arr => arr.length > 0);
     if (hasElementsToKeep) {
-      const keepChoice = confirm('PDF guardado correctamente.\n\n¿Quieres conservar los elementos añadidos para el siguiente documento?\n(ACEPTAR = mantener elementos, CANCELAR = limpiar todo)');
-      if (!keepChoice) {
-        // User chose to clear all elements
-        for (let i = 1; i <= activeDoc.totalPages; i++) {
-          activeDoc.elements[i] = [];
-        }
-        delete undoStacks[activeDoc.id];
-        delete redoStacks[activeDoc.id];
-        clearSelection();
-        updateMultiSelectUI();
-      }
+      showKeepElementsModal(activeDoc);
     } else {
       for (let i = 1; i <= activeDoc.totalPages; i++) {
         activeDoc.elements[i] = [];
       }
+      updateTabModified(activeDoc.id, false);
+      renderPage();
     }
-    updateTabModified(activeDoc.id, false);
-    renderPage();
     
     showStatus('PDF guardado correctamente', 'success');
     
@@ -3335,4 +3369,269 @@ function updateClipboardUI() {
     if (btnPasteElements) btnPasteElements.disabled = true;
     if (btnClearClipboard) btnClearClipboard.style.display = 'none';
   }
+}
+
+// ============================================
+// KEEP ELEMENTS MODAL (after save)
+// ============================================
+function showKeepElementsModal(activeDoc) {
+  const modal = $('keepElementsModal');
+  const list = $('keepElementsList');
+  if (!modal || !list) return;
+
+  // Collect all elements across all pages
+  let allElements = [];
+  for (let page = 1; page <= activeDoc.totalPages; page++) {
+    const pageEls = activeDoc.elements[page] || [];
+    pageEls.forEach((el, idx) => {
+      let label = '';
+      if (el.type === 'text') label = `T: "${el.text.substring(0, 40)}${el.text.length > 40 ? '...' : ''}"`;
+      else if (el.type === 'signature') label = `F: ${el.name || 'Sin nombre'}`;
+      else if (el.type === 'image') label = `I: Imagen (${Math.round(el.width)}x${Math.round(el.height)})`;
+      else label = el.type;
+      allElements.push({ page, idx, el, label, checked: true });
+    });
+  }
+
+  if (allElements.length === 0) {
+    for (let i = 1; i <= activeDoc.totalPages; i++) {
+      activeDoc.elements[i] = [];
+    }
+    updateTabModified(activeDoc.id, false);
+    renderPage();
+    return;
+  }
+
+  list.innerHTML = allElements.map((item, i) => {
+    const typeIcon = item.el.type === 'text' ? '📝' : item.el.type === 'signature' ? '✍️' : '🖼️';
+    const pageLabel = item.page > 1 ? ` [Pág.${item.page}]` : '';
+    return `<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;background:#1e293b;margin-bottom:4px;cursor:pointer;font-size:12px;color:#e2e8f0;">
+      <input type="checkbox" class="keep-el-cb" data-idx="${i}" checked style="width:16px;height:16px;accent-color:#2563eb;">
+      <span>${typeIcon}${item.label}${pageLabel}</span>
+    </label>`;
+  }).join('');
+
+  modal.classList.add('show');
+
+  // Handlers
+  const selectAllBtn = $('keepSelectAll');
+  const deselectAllBtn = $('keepDeselectAll');
+  const confirmBtn = $('confirmKeepElements');
+  const cancelBtn = $('cancelKeepElements');
+
+  const newSelectAll = selectAllBtn.cloneNode(true);
+  selectAllBtn.parentNode.replaceChild(newSelectAll, selectAllBtn);
+  newSelectAll.addEventListener('click', () => {
+    list.querySelectorAll('.keep-el-cb').forEach(cb => cb.checked = true);
+  });
+
+  const newDeselectAll = deselectAllBtn.cloneNode(true);
+  deselectAllBtn.parentNode.replaceChild(newDeselectAll, deselectAllBtn);
+  newDeselectAll.addEventListener('click', () => {
+    list.querySelectorAll('.keep-el-cb').forEach(cb => cb.checked = false);
+  });
+
+  const newConfirm = confirmBtn.cloneNode(true);
+  confirmBtn.parentNode.replaceChild(newConfirm, confirmBtn);
+  newConfirm.addEventListener('click', () => {
+    const checkboxes = list.querySelectorAll('.keep-el-cb');
+    const toKeep = [];
+    checkboxes.forEach((cb, i) => {
+      if (cb.checked && allElements[i]) {
+        toKeep.push({ page: allElements[i].page, el: allElements[i].el });
+      }
+    });
+
+    // Rebuild elements keeping only selected ones
+    for (let i = 1; i <= activeDoc.totalPages; i++) {
+      activeDoc.elements[i] = [];
+    }
+    toKeep.forEach(item => {
+      if (!activeDoc.elements[item.page]) activeDoc.elements[item.page] = [];
+      activeDoc.elements[item.page].push(item.el);
+    });
+
+    delete undoStacks[activeDoc.id];
+    delete redoStacks[activeDoc.id];
+    clearSelection();
+    updateMultiSelectUI();
+    updateTabModified(activeDoc.id, toKeep.length > 0);
+    modal.classList.remove('show');
+    renderPage();
+    showStatus(`Conservados ${toKeep.length} elemento(s)`, 'success');
+  });
+
+  const newCancel = cancelBtn.cloneNode(true);
+  cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
+  newCancel.addEventListener('click', () => {
+    for (let i = 1; i <= activeDoc.totalPages; i++) {
+      activeDoc.elements[i] = [];
+    }
+    delete undoStacks[activeDoc.id];
+    delete redoStacks[activeDoc.id];
+    clearSelection();
+    updateMultiSelectUI();
+    updateTabModified(activeDoc.id, false);
+    modal.classList.remove('show');
+    renderPage();
+    showStatus('Todos los elementos eliminados', 'success');
+  });
+}
+
+// ============================================
+// TEMPLATES SYSTEM
+// ============================================
+const TEMPLATES_STORAGE_KEY = 'pdfEditorTemplates';
+
+function getElementTypeLabel(el) {
+  if (el.type === 'text') return '📝';
+  if (el.type === 'signature') return '✍️';
+  if (el.type === 'image') return '🖼️';
+  return '❓';
+}
+
+function getElementLabel(el) {
+  if (el.type === 'text') return `"${el.text.substring(0, 25)}${el.text.length > 25 ? '...' : ''}"`;
+  if (el.type === 'signature') return el.name || 'Firma';
+  if (el.type === 'image') return 'Imagen';
+  return el.type;
+}
+
+async function loadTemplates() {
+  try {
+    const stored = await chrome.storage.local.get(TEMPLATES_STORAGE_KEY);
+    return stored[TEMPLATES_STORAGE_KEY] || [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveTemplates(templates) {
+  try {
+    await chrome.storage.local.set({ [TEMPLATES_STORAGE_KEY]: templates });
+  } catch (err) {
+    console.error('Error saving templates:', err);
+  }
+}
+
+function showTemplatesModal() {
+  const modal = $('templatesModal');
+  const list = $('templatesList');
+  const nameInput = $('templateNameInput');
+  if (!modal || !list) return;
+
+  if (nameInput) nameInput.value = '';
+  modal.classList.add('show');
+  renderTemplatesList();
+}
+
+async function renderTemplatesList() {
+  const list = $('templatesList');
+  if (!list) return;
+
+  const templates = await loadTemplates();
+
+  if (templates.length === 0) {
+    list.innerHTML = '<div style="color:#64748b;font-size:12px;text-align:center;padding:20px;">No hay plantillas guardadas.<br>Guarda los elementos de la página actual.</div>';
+    return;
+  }
+
+  list.innerHTML = templates.map((tmpl, i) => {
+    const elCount = tmpl.elements.length;
+    const typeSummary = tmpl.elements.map(el => getElementTypeLabel(el)).join(' ');
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#1e293b;border-radius:6px;margin-bottom:6px;">
+      <span style="flex:1;font-size:12px;color:#e2e8f0;">
+        <strong>${escapeHtml(tmpl.name)}</strong><br>
+        <span style="color:#94a3b8;font-size:11px;">${typeSummary} ${elCount} elemento(s)</span>
+      </span>
+      <button class="sidebar-btn" data-tmpl-action="load" data-tmpl-idx="${i}" style="padding:4px 8px;font-size:10px;background:#2563eb;color:white;">Usar</button>
+      <button class="sidebar-btn" data-tmpl-action="delete" data-tmpl-idx="${i}" style="padding:4px 8px;font-size:10px;background:#7f1d1d;color:#fca5a5;">🗑️</button>
+    </div>`;
+  }).join('');
+
+  // Event listeners for load/delete buttons
+  list.querySelectorAll('[data-tmpl-action="load"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.tmplIdx);
+      applyTemplate(templates[idx]);
+    });
+  });
+
+  list.querySelectorAll('[data-tmpl-action="delete"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.tmplIdx);
+      const name = templates[idx] ? templates[idx].name : '';
+      if (confirm(`¿Eliminar la plantilla "${name}"?`)) {
+        templates.splice(idx, 1);
+        saveTemplates(templates);
+        renderTemplatesList();
+        showStatus('Plantilla eliminada', 'success');
+      }
+    });
+  });
+}
+
+async function saveCurrentAsTemplate() {
+  const nameInput = $('templateNameInput');
+  const name = nameInput ? nameInput.value.trim() : '';
+
+  if (!name) {
+    showStatus('Introduce un nombre para la plantilla', 'error');
+    return;
+  }
+
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) {
+    showStatus('No hay documento activo', 'error');
+    return;
+  }
+
+  // Collect all elements from all pages
+  let allElements = [];
+  for (let page = 1; page <= activeDoc.totalPages; page++) {
+    const pageEls = activeDoc.elements[page] || [];
+    pageEls.forEach(el => {
+      allElements.push({ ...el });
+    });
+  }
+
+  if (allElements.length === 0) {
+    showStatus('No hay elementos para guardar', 'error');
+    return;
+  }
+
+  const templates = await loadTemplates();
+  templates.push({
+    name: name,
+    elements: allElements,
+    createdAt: Date.now()
+  });
+
+  await saveTemplates(templates);
+  if (nameInput) nameInput.value = '';
+  renderTemplatesList();
+  showStatus(`Plantilla "${name}" guardada (${allElements.length} elementos)`, 'success');
+}
+
+async function applyTemplate(template) {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) {
+    showStatus('Primero carga un PDF', 'error');
+    return;
+  }
+
+  if (!template || !template.elements || template.elements.length === 0) {
+    showStatus('Plantilla vacía', 'error');
+    return;
+  }
+
+  // Deep clone elements and add to current page
+  const cloned = JSON.parse(JSON.stringify(template.elements));
+  cloned.forEach(el => {
+    pushElement(activeDoc, activeDoc.currentPage, el);
+  });
+
+  updateTabModified(activeDoc.id, true);
+  renderPage();
+  showStatus(`Plantilla aplicada: ${cloned.length} elemento(s)`, 'success');
 }
