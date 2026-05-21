@@ -875,12 +875,27 @@ function setupEventListeners() {
   if (btnOpenTemplates) btnOpenTemplates.addEventListener('click', showTemplatesModal);
 
   // Templates modal buttons
-  const btnSaveTemplate = $('btnSaveTemplate');
-  if (btnSaveTemplate) btnSaveTemplate.addEventListener('click', saveCurrentAsTemplate);
+  const btnShowSaveView = $('btnShowSaveView');
+  if (btnShowSaveView) btnShowSaveView.addEventListener('click', showTemplateSaveView);
+  const btnConfirmSaveTemplate = $('btnConfirmSaveTemplate');
+  if (btnConfirmSaveTemplate) btnConfirmSaveTemplate.addEventListener('click', confirmSaveTemplate);
+  const btnCancelSaveTemplate = $('btnCancelSaveTemplate');
+  if (btnCancelSaveTemplate) btnCancelSaveTemplate.addEventListener('click', () => {
+    const listView = $('templateListView');
+    const saveView = $('templateSaveView');
+    if (listView) listView.style.display = '';
+    if (saveView) saveView.style.display = 'none';
+    renderTemplatesList();
+  });
   const closeTemplatesModal = $('closeTemplatesModal');
   if (closeTemplatesModal) closeTemplatesModal.addEventListener('click', () => {
     const modal = $('templatesModal');
     if (modal) modal.classList.remove('show');
+  });
+  // Enter on template name input confirms save
+  const templateNameInput = $('templateNameInput');
+  if (templateNameInput) templateNameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') confirmSaveTemplate();
   });
 
   // Keep Elements modal - Escape to close
@@ -3577,62 +3592,108 @@ async function saveTemplates(templates) {
 
 function showTemplatesModal() {
   const modal = $('templatesModal');
-  const list = $('templatesList');
-  const nameInput = $('templateNameInput');
-  if (!modal || !list) return;
+  if (!modal) return;
 
+  // Show list view by default
+  const listView = $('templateListView');
+  const saveView = $('templateSaveView');
+  if (listView) listView.style.display = '';
+  if (saveView) saveView.style.display = 'none';
+
+  const nameInput = $('templateNameInput');
   if (nameInput) nameInput.value = '';
+
   modal.classList.add('show');
   renderTemplatesList();
 }
 
-async function renderTemplatesList() {
-  const list = $('templatesList');
+function showTemplateSaveView() {
+  const listView = $('templateListView');
+  const saveView = $('templateSaveView');
+  const nameInput = $('templateNameInput');
+  if (!listView || !saveView) return;
+
+  listView.style.display = 'none';
+  saveView.style.display = '';
+  if (nameInput) { nameInput.value = ''; nameInput.focus(); }
+
+  renderTemplateSlotSelection();
+}
+
+function renderTemplateSlotSelection() {
+  const list = $('templateSlotList');
   if (!list) return;
 
-  const templates = await loadTemplates();
-
-  if (templates.length === 0) {
-    list.innerHTML = '<div style="color:#64748b;font-size:12px;text-align:center;padding:20px;">No hay plantillas guardadas.<br>Guarda las posiciones de los elementos de la página actual.</div>';
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) {
+    list.innerHTML = '<div style="color:#ef4444;font-size:12px;text-align:center;padding:20px;">No hay documento activo. Carga un PDF primero.</div>';
     return;
   }
 
-  list.innerHTML = templates.map((tmpl, i) => {
-    const slotCount = tmpl.slots ? tmpl.slots.length : 0;
-    const typeSummary = tmpl.slots ? tmpl.slots.map(s => getElementTypeLabel(s)).join(' ') : '';
-    return `<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#1e293b;border-radius:6px;margin-bottom:6px;">
-      <span style="flex:1;font-size:12px;color:#e2e8f0;">
-        <strong>${escapeHtml(tmpl.name)}</strong><br>
-        <span style="color:#94a3b8;font-size:11px;">${typeSummary} ${slotCount} posición(es)</span>
-      </span>
-      <button class="sidebar-btn" data-tmpl-action="load" data-tmpl-idx="${i}" style="padding:4px 8px;font-size:10px;background:#2563eb;color:white;">Usar</button>
-      <button class="sidebar-btn" data-tmpl-action="delete" data-tmpl-idx="${i}" style="padding:4px 8px;font-size:10px;background:#7f1d1d;color:#fca5a5;">🗑️</button>
+  // Collect all non-placeholder elements across all pages
+  let allElements = [];
+  for (let page = 1; page <= activeDoc.totalPages; page++) {
+    const pageEls = activeDoc.elements[page] || [];
+    pageEls.forEach((el) => {
+      if (el.isPlaceholder) return;
+
+      let label = '';
+      let preview = '';
+      if (el.type === 'text') {
+        // Suggest label from text content (first word/short text)
+        const suggested = el.text ? el.text.substring(0, 20).trim() : 'Texto';
+        label = suggested;
+        preview = el.text ? el.text.substring(0, 40) : '(vacío)';
+      } else if (el.type === 'signature') {
+        label = el.name ? `Firma: ${el.name}` : 'Firma';
+        preview = el.name || '(sin nombre)';
+      } else if (el.type === 'image') {
+        label = 'Imagen';
+        preview = `${Math.round(el.width || 100)}x${Math.round(el.height || 100)}`;
+      }
+
+      allElements.push({ page, el, label, preview });
+    });
+  }
+
+  if (allElements.length === 0) {
+    list.innerHTML = '<div style="color:#64748b;font-size:12px;text-align:center;padding:20px;">No hay elementos en el documento.<br>Añade textos, firmas o imágenes primero.</div>';
+    return;
+  }
+
+  list.innerHTML = allElements.map((item, i) => {
+    const typeIcon = getElementTypeLabel(item.el);
+    const pageLabel = item.page > 1 ? ` [Pág.${item.page}]` : '';
+    return `<div style="display:flex;align-items:center;gap:6px;padding:6px 8px;background:#1e293b;border-radius:6px;margin-bottom:4px;">
+      <input type="checkbox" class="tmpl-slot-cb" data-idx="${i}" checked style="width:16px;height:16px;accent-color:#6366f1;flex-shrink:0;">
+      <span style="font-size:12px;color:#e2e8f0;flex-shrink:0;">${typeIcon}${pageLabel}</span>
+      <input type="text" class="tmpl-slot-label" data-idx="${i}" value="${escapeHtml(item.label)}" style="flex:1;padding:4px 6px;background:#0f172a;border:1px solid #334155;border-radius:4px;color:#f1f5f9;font-size:11px;min-width:0;" title="Etiqueta del hueco">
+      <span style="color:#64748b;font-size:10px;max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:0;" title="${escapeHtml(item.preview)}">${escapeHtml(item.preview)}</span>
     </div>`;
   }).join('');
 
-  // Event listeners for load/delete buttons
-  list.querySelectorAll('[data-tmpl-action="load"]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const idx = parseInt(btn.dataset.tmplIdx);
-      applyTemplate(templates[idx]);
-    });
-  });
+  // Select all / deselect all
+  const selectAllBtn = $('tmplSelectAll');
+  const deselectAllBtn = $('tmplDeselectAll');
 
-  list.querySelectorAll('[data-tmpl-action="delete"]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const idx = parseInt(btn.dataset.tmplIdx);
-      const name = templates[idx] ? templates[idx].name : '';
-      if (confirm(`¿Eliminar la plantilla "${name}"?`)) {
-        templates.splice(idx, 1);
-        saveTemplates(templates);
-        renderTemplatesList();
-        showStatus('Plantilla eliminada', 'success');
-      }
+  if (selectAllBtn) {
+    const newBtn = selectAllBtn.cloneNode(true);
+    selectAllBtn.parentNode.replaceChild(newBtn, selectAllBtn);
+    newBtn.addEventListener('click', () => {
+      list.querySelectorAll('.tmpl-slot-cb').forEach(cb => cb.checked = true);
     });
-  });
+  }
+
+  if (deselectAllBtn) {
+    const newBtn = deselectAllBtn.cloneNode(true);
+    deselectAllBtn.parentNode.replaceChild(newBtn, deselectAllBtn);
+    newBtn.addEventListener('click', () => {
+      list.querySelectorAll('.tmpl-slot-cb').forEach(cb => cb.checked = false);
+    });
+  }
 }
 
-async function saveCurrentAsTemplate() {
+async function confirmSaveTemplate() {
   const nameInput = $('templateNameInput');
   const name = nameInput ? nameInput.value.trim() : '';
 
@@ -3647,37 +3708,59 @@ async function saveCurrentAsTemplate() {
     return;
   }
 
-  // Collect position/config data from all pages (NOT actual content)
-  let slots = [];
+  // Collect all non-placeholder elements (same order as rendered)
+  let allElements = [];
   for (let page = 1; page <= activeDoc.totalPages; page++) {
     const pageEls = activeDoc.elements[page] || [];
-    pageEls.forEach(el => {
-      // Skip existing placeholders
+    pageEls.forEach((el) => {
       if (el.isPlaceholder) return;
-      
-      const slot = { type: el.type, x: el.x, y: el.y };
-      
-      if (el.type === 'text') {
-        slot.size = el.size || 14;
-        slot.color = el.color || '#000000';
-        // Generate a descriptive label based on the text content (for reference only)
-        slot.placeholderLabel = el.text ? `Texto: "${el.text.substring(0, 30)}${el.text.length > 30 ? '...' : ''}"` : 'Texto';
-      } else if (el.type === 'signature') {
-        slot.width = el.width || 200;
-        slot.height = el.height || 80;
-        slot.placeholderLabel = el.name ? `Firma: ${el.name}` : 'Firma';
-      } else if (el.type === 'image') {
-        slot.width = el.width || 100;
-        slot.height = el.height || 100;
-        slot.placeholderLabel = 'Imagen';
-      }
-      
-      slots.push(slot);
+      allElements.push({ page, el });
     });
   }
 
+  if (allElements.length === 0) {
+    showStatus('No hay elementos para guardar', 'error');
+    return;
+  }
+
+  // Read selections from UI
+  const list = $('templateSlotList');
+  if (!list) return;
+
+  const checkboxes = list.querySelectorAll('.tmpl-slot-cb');
+  const labelInputs = list.querySelectorAll('.tmpl-slot-label');
+
+  let slots = [];
+  checkboxes.forEach((cb, i) => {
+    if (cb.checked && allElements[i]) {
+      const item = allElements[i];
+      const customLabel = labelInputs[i] ? labelInputs[i].value.trim() : '';
+
+      const slot = {
+        type: item.el.type,
+        x: item.el.x,
+        y: item.el.y,
+        page: item.page,
+        label: customLabel || (item.el.type === 'text' ? 'Texto' : item.el.type === 'signature' ? 'Firma' : 'Imagen')
+      };
+
+      if (item.el.type === 'text') {
+        slot.size = item.el.size || 14;
+        slot.color = item.el.color || '#000000';
+      } else if (item.el.type === 'signature') {
+        slot.width = item.el.width || 200;
+        slot.height = item.el.height || 80;
+      } else if (item.el.type === 'image') {
+        slot.width = item.el.width || 100;
+        slot.height = item.el.height || 100;
+      }
+
+      slots.push(slot);
+    }
+  });
+
   if (slots.length === 0) {
-    showStatus('No hay elementos para guardar como plantilla', 'error');
+    showStatus('Selecciona al menos un elemento', 'error');
     return;
   }
 
@@ -3689,9 +3772,69 @@ async function saveCurrentAsTemplate() {
   });
 
   await saveTemplates(templates);
-  if (nameInput) nameInput.value = '';
-  renderTemplatesList();
-  showStatus(`Plantilla "${name}" guardada (${slots.length} posición(es))`, 'success');
+  showStatus(`Plantilla "${name}" guardada (${slots.length} hueco(s))`, 'success');
+
+  // Switch back to list view
+  showTemplatesModal();
+}
+
+async function renderTemplatesList() {
+  const list = $('templatesList');
+  if (!list) return;
+
+  const templates = await loadTemplates();
+
+  if (templates.length === 0) {
+    list.innerHTML = '<div style="color:#64748b;font-size:12px;text-align:center;padding:20px;">No hay plantillas guardadas.<br>Crea una nueva para guardar posiciones de huecos reutilizables.</div>';
+    return;
+  }
+
+  list.innerHTML = templates.map((tmpl, i) => {
+    const slotCount = tmpl.slots ? tmpl.slots.length : 0;
+    const typeSummary = tmpl.slots ? tmpl.slots.map(s => getElementTypeLabel(s)).join(' ') : '';
+
+    // Multi-page info
+    const pages = new Set(tmpl.slots ? tmpl.slots.map(s => s.page || 1) : [1]);
+    const pageInfo = pages.size > 1 ? `${pages.size} páginas` : `Pág.${[...pages][0]}`;
+
+    // Show custom labels if available
+    const labelSummary = tmpl.slots && tmpl.slots[0] && (tmpl.slots[0].label || tmpl.slots[0].placeholderLabel)
+      ? tmpl.slots.map(s => s.label || s.placeholderLabel || '').filter(Boolean).join(', ')
+      : typeSummary;
+
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#1e293b;border-radius:6px;margin-bottom:6px;">
+      <span style="flex:1;font-size:12px;color:#e2e8f0;">
+        <strong>${escapeHtml(tmpl.name)}</strong><br>
+        <span style="color:#94a3b8;font-size:11px;">${typeSummary} ${slotCount} hueco(s) · ${pageInfo}</span>
+        <br><span style="color:#818cf8;font-size:10px;">${escapeHtml(labelSummary.substring(0, 70))}${labelSummary.length > 70 ? '...' : ''}</span>
+      </span>
+      <button class="sidebar-btn" data-tmpl-action="load" data-tmpl-idx="${i}" style="padding:4px 8px;font-size:10px;background:#2563eb;color:white;">Usar</button>
+      <button class="sidebar-btn" data-tmpl-action="delete" data-tmpl-idx="${i}" style="padding:4px 8px;font-size:10px;background:#7f1d1d;color:#fca5a5;">🗑️</button>
+    </div>`;
+  }).join('');
+
+  // Event listeners for load/delete buttons
+  list.querySelectorAll('[data-tmpl-action="load"]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx = parseInt(btn.dataset.tmplIdx);
+      const templates = await loadTemplates();
+      if (templates[idx]) applyTemplate(templates[idx]);
+    });
+  });
+
+  list.querySelectorAll('[data-tmpl-action="delete"]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx = parseInt(btn.dataset.tmplIdx);
+      const templates = await loadTemplates();
+      const name = templates[idx] ? templates[idx].name : '';
+      if (confirm(`¿Eliminar la plantilla "${name}"?`)) {
+        templates.splice(idx, 1);
+        await saveTemplates(templates);
+        renderTemplatesList();
+        showStatus('Plantilla eliminada', 'success');
+      }
+    });
+  });
 }
 
 async function applyTemplate(template) {
@@ -3706,16 +3849,21 @@ async function applyTemplate(template) {
     return;
   }
 
-  // Create placeholder elements from template slots
+  let firstPage = null;
+
+  // Create placeholder elements from template slots on correct pages
   template.slots.forEach(slot => {
+    const targetPage = Math.min(slot.page || 1, activeDoc.totalPages);
+    if (firstPage === null || targetPage < firstPage) firstPage = targetPage;
+
     const placeholder = {
       type: slot.type,
       x: slot.x,
       y: slot.y,
       isPlaceholder: true,
-      placeholderLabel: slot.placeholderLabel || (slot.type === 'text' ? 'Texto' : slot.type === 'signature' ? 'Firma' : 'Imagen')
+      placeholderLabel: slot.label || slot.placeholderLabel || (slot.type === 'text' ? 'Texto' : slot.type === 'signature' ? 'Firma' : 'Imagen')
     };
-    
+
     if (slot.type === 'text') {
       placeholder.text = '';
       placeholder.size = slot.size || 14;
@@ -3730,11 +3878,22 @@ async function applyTemplate(template) {
       placeholder.height = slot.height || 100;
       placeholder.src = '';
     }
-    
-    pushElement(activeDoc, activeDoc.currentPage, placeholder);
+
+    pushElement(activeDoc, targetPage, placeholder);
   });
+
+  // Navigate to first page with slots
+  if (firstPage !== null && firstPage !== activeDoc.currentPage) {
+    activeDoc.currentPage = firstPage;
+  }
 
   updateTabModified(activeDoc.id, true);
   renderPage();
-  showStatus(`Plantilla aplicada: ${template.slots.length} posición(es) creadas`, 'success');
+
+  // Close modal
+  const modal = $('templatesModal');
+  if (modal) modal.classList.remove('show');
+
+  const pagesInfo = new Set(template.slots.map(s => s.page || 1));
+  showStatus(`Plantilla "${template.name}" aplicada: ${template.slots.length} hueco(s). Doble clic en cada hueco para rellenar.`, 'success');
 }
