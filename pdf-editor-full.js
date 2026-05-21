@@ -3618,6 +3618,35 @@ function guessFieldType(el) {
 
 async function loadTemplates() {
   try {
+    // Try Supabase first (shared templates for all users)
+    await ensureSession();
+    const headers = { 'apikey': SUPABASE_KEY };
+    if (session && session.access_token) {
+      headers['Authorization'] = `Bearer ${session.access_token}`;
+    } else {
+      headers['Authorization'] = `Bearer ${SUPABASE_KEY}`;
+    }
+
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/pdf_templates?select=*&order=created_at.desc`, { headers });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && Array.isArray(data)) {
+        // Transform Supabase rows to our template format
+        return data.map(row => ({
+          id: row.id,
+          name: row.name,
+          slots: row.slots,
+          user_name: row.user_name || '',
+          createdAt: new Date(row.created_at).getTime()
+        }));
+      }
+    }
+  } catch (err) {
+    console.warn('Supabase template load failed, falling back to local:', err);
+  }
+
+  // Fallback: load from chrome.storage.local
+  try {
     const stored = await chrome.storage.local.get(TEMPLATES_STORAGE_KEY);
     return stored[TEMPLATES_STORAGE_KEY] || [];
   } catch {
@@ -3626,10 +3655,66 @@ async function loadTemplates() {
 }
 
 async function saveTemplates(templates) {
+  // Templates are now saved individually to Supabase, not as a batch
+  // This function is kept for backward compatibility but does nothing for Supabase templates
+  // Local-only templates still use this
   try {
-    await chrome.storage.local.set({ [TEMPLATES_STORAGE_KEY]: templates });
+    const localOnly = templates.filter(t => !t.id || t.id.startsWith('local_'));
+    await chrome.storage.local.set({ [TEMPLATES_STORAGE_KEY]: localOnly });
   } catch (err) {
-    console.error('Error saving templates:', err);
+    console.error('Error saving local templates:', err);
+  }
+}
+
+async function saveTemplateToSupabase(name, slots) {
+  await ensureSession();
+  const headers = {
+    'apikey': SUPABASE_KEY,
+    'Authorization': `Bearer ${session?.access_token || SUPABASE_KEY}`,
+    'Content-Type': 'application/json',
+    'Prefer': 'return=representation'
+  };
+
+  const id = Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
+
+  const body = {
+    id: id,
+    name: name,
+    slots: slots,
+    user_id: currentUser?.id || null,
+    user_name: currentUser?.name || currentUser?.user_name || 'Anónimo'
+  };
+
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/pdf_templates`, {
+    method: 'POST',
+    headers: headers,
+    body: JSON.stringify(body)
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error('Supabase template save error:', errText);
+    throw new Error('Error al guardar en Supabase');
+  }
+
+  return id;
+}
+
+async function deleteTemplateFromSupabase(templateId) {
+  await ensureSession();
+  const headers = {
+    'apikey': SUPABASE_KEY,
+    'Authorization': `Bearer ${session?.access_token || SUPABASE_KEY}`
+  };
+
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/pdf_templates?id=eq.${encodeURIComponent(templateId)}`, {
+    method: 'DELETE',
+    headers: headers
+  });
+
+  if (!res.ok) {
+    console.error('Supabase template delete error:', await res.text());
+    throw new Error('Error al eliminar de Supabase');
   }
 }
 
@@ -3774,10 +3859,16 @@ async function confirmSaveTemplate() {
 
   if (slots.length === 0) { showStatus('Selecciona al menos un elemento', 'error'); return; }
 
-  const templates = await loadTemplates();
-  templates.push({ name, slots, createdAt: Date.now() });
-  await saveTemplates(templates);
-  showStatus(`Plantilla "${name}" guardada (${slots.length} hueco(s))`, 'success');
+  try {
+    const newId = await saveTemplateToSupabase(name, slots);
+    showStatus(`Plantilla "${name}" guardada (${slots.length} hueco(s)) — visible para todos`, 'success');
+  } catch (err) {
+    // Fallback: save locally
+    const templates = await loadTemplates();
+    templates.push({ id: 'local_' + Date.now(), name, slots, createdAt: Date.now() });
+    await chrome.storage.local.set({ [TEMPLATES_STORAGE_KEY]: templates });
+    showStatus(`Plantilla "${name}" guardada localmente (sin conexión a Supabase)`, 'error');
+  }
   showTemplatesModal(); // back to list view
 }
 
@@ -3805,14 +3896,18 @@ async function renderTemplatesList() {
     });
     const groupSummary = Object.entries(groups).map(([k, v]) => `${k}×${v}`).join(' · ');
 
+    // Show who created it (for shared templates)
+    const creatorInfo = tmpl.user_name ? `<span style="color:#64748b;font-size:9px;">por ${escapeHtml(tmpl.user_name)}</span>` : '';
+    const tmplId = tmpl.id || '';
+
     return `<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#1e293b;border-radius:6px;margin-bottom:6px;">
       <span style="flex:1;font-size:12px;color:#e2e8f0;">
-        <strong>${escapeHtml(tmpl.name)}</strong><br>
+        <strong>${escapeHtml(tmpl.name)}</strong> ${creatorInfo}<br>
         <span style="color:#818cf8;font-size:10px;">${escapeHtml(groupSummary)}</span><br>
         <span style="color:#64748b;font-size:10px;">${slotCount} hueco(s) · ${pageInfo}</span>
       </span>
       <button class="sidebar-btn" data-tmpl-action="load" data-tmpl-idx="${i}" style="padding:4px 8px;font-size:10px;background:#2563eb;color:white;">Usar</button>
-      <button class="sidebar-btn" data-tmpl-action="delete" data-tmpl-idx="${i}" style="padding:4px 8px;font-size:10px;background:#7f1d1d;color:#fca5a5;">🗑️</button>
+      <button class="sidebar-btn" data-tmpl-action="delete" data-tmpl-idx="${i}" data-tmpl-id="${escapeHtml(tmplId)}" style="padding:4px 8px;font-size:10px;background:#7f1d1d;color:#fca5a5;">🗑️</button>
     </div>`;
   }).join('');
 
@@ -3828,12 +3923,25 @@ async function renderTemplatesList() {
     btn.addEventListener('click', async () => {
       const idx = parseInt(btn.dataset.tmplIdx);
       const templates = await loadTemplates();
-      const name = templates[idx] ? templates[idx].name : '';
+      const tmpl = templates[idx];
+      const name = tmpl ? tmpl.name : '';
       if (confirm(`¿Eliminar la plantilla "${name}"?`)) {
-        templates.splice(idx, 1);
-        await saveTemplates(templates);
+        const tmplId = tmpl?.id || '';
+        if (tmplId && !tmplId.startsWith('local_')) {
+          // Delete from Supabase
+          try {
+            await deleteTemplateFromSupabase(tmplId);
+            showStatus('Plantilla eliminada', 'success');
+          } catch (err) {
+            showStatus('Error al eliminar: ' + err.message, 'error');
+          }
+        } else {
+          // Delete from local storage
+          templates.splice(idx, 1);
+          await chrome.storage.local.set({ [TEMPLATES_STORAGE_KEY]: templates });
+          showStatus('Plantilla eliminada', 'success');
+        }
         renderTemplatesList();
-        showStatus('Plantilla eliminada', 'success');
       }
     });
   });
