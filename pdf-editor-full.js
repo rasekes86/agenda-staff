@@ -874,6 +874,10 @@ function setupEventListeners() {
   const btnOpenTemplates = $('btnOpenTemplates');
   if (btnOpenTemplates) btnOpenTemplates.addEventListener('click', showTemplatesModal);
 
+  // Fill template button
+  const btnFillTemplate = $('btnFillTemplate');
+  if (btnFillTemplate) btnFillTemplate.addEventListener('click', showFillModal);
+
   // Templates modal buttons
   const btnShowSaveView = $('btnShowSaveView');
   if (btnShowSaveView) btnShowSaveView.addEventListener('click', showTemplateSaveView);
@@ -890,6 +894,12 @@ function setupEventListeners() {
   const closeTemplatesModal = $('closeTemplatesModal');
   if (closeTemplatesModal) closeTemplatesModal.addEventListener('click', () => {
     const modal = $('templatesModal');
+    if (modal) modal.classList.remove('show');
+  });
+  // Fill template modal close
+  const closeFillTemplateModal = $('closeFillTemplateModal');
+  if (closeFillTemplateModal) closeFillTemplateModal.addEventListener('click', () => {
+    const modal = $('fillTemplateModal');
     if (modal) modal.classList.remove('show');
   });
   // Enter on template name input confirms save
@@ -1336,6 +1346,8 @@ async function renderPage() {
     if (totalPagesNum) totalPagesNum.textContent = activeDoc.totalPages;
     if (btnPrevPage) btnPrevPage.disabled = activeDoc.currentPage <= 1;
     if (btnNextPage) btnNextPage.disabled = activeDoc.currentPage >= activeDoc.totalPages;
+    
+    updateFillButtonVisibility();
     
   } catch (err) {
     console.error('Error rendering page:', err);
@@ -2361,22 +2373,45 @@ function selectSignature(url, name) {
       imgHeight = Math.round(imgHeight * ratio);
     }
     
-    const offset = addedSignaturesCount * 15;
+    // Check if there are empty signature placeholders to auto-fill
+    let filledInSlot = false;
+    for (let page = 1; page <= activeDoc.totalPages && !filledInSlot; page++) {
+      const pageEls = activeDoc.elements[page] || [];
+      for (let idx = 0; idx < pageEls.length && !filledInSlot; idx++) {
+        const el = pageEls[idx];
+        if (el.isPlaceholder && el.type === 'signature') {
+          // Fill this placeholder
+          el.isPlaceholder = false;
+          el.src = url;
+          el.width = imgWidth;
+          el.height = imgHeight;
+          el.name = name;
+          delete el.fieldGroup;
+          delete el.fieldSlotIndex;
+          delete el.fieldSlotTotal;
+          filledInSlot = true;
+        }
+      }
+    }
     
-    pushElement(activeDoc, activeDoc.currentPage, {
-      type: 'signature',
-      src: url,
-      x: activeDoc.pageWidth / 2 - imgWidth / 2 + offset,
-      y: activeDoc.pageHeight / 2 - imgHeight / 2 + offset,
-      width: imgWidth,
-      height: imgHeight,
-      name: name
-    });
+    if (!filledInSlot) {
+      // No placeholder: place at center as before
+      const offset = addedSignaturesCount * 15;
+      pushElement(activeDoc, activeDoc.currentPage, {
+        type: 'signature',
+        src: url,
+        x: activeDoc.pageWidth / 2 - imgWidth / 2 + offset,
+        y: activeDoc.pageHeight / 2 - imgHeight / 2 + offset,
+        width: imgWidth,
+        height: imgHeight,
+        name: name
+      });
+    }
     
     addedSignaturesCount++;
     updateTabModified(activeDoc.id, true);
     renderPage();
-    showStatus(`✓ Firma añadida: ${name}`, 'success');
+    showStatus(filledInSlot ? `✓ Firma colocada en hueco: ${name}` : `✓ Firma añadida: ${name}`, 'success');
     
     const countEl = $('signatureCount');
     if (countEl) {
@@ -3555,7 +3590,7 @@ function showKeepElementsModal(activeDoc) {
 }
 
 // ============================================
-// TEMPLATES SYSTEM (Position-only templates)
+// TEMPLATES SYSTEM (Position + field type templates)
 // ============================================
 const TEMPLATES_STORAGE_KEY = 'pdfEditorTemplates';
 
@@ -3566,11 +3601,19 @@ function getElementTypeLabel(el) {
   return '❓';
 }
 
-function getSlotLabel(slot) {
-  if (slot.type === 'text') return `Texto (${slot.size || 14}px)`;
-  if (slot.type === 'signature') return `Firma (${Math.round(slot.width || 200)}x${Math.round(slot.height || 80)})`;
-  if (slot.type === 'image') return `Imagen (${Math.round(slot.width || 100)}x${Math.round(slot.height || 100)})`;
-  return slot.type;
+function guessFieldType(el) {
+  if (el.type === 'signature') return 'FIRMA';
+  if (el.type === 'image') return 'IMAGEN';
+  if (el.name && (el.name.toUpperCase().includes('DNI') || el.name.toUpperCase().includes('NIE'))) return 'DNI';
+  if (el.text) {
+    const t = el.text.trim().toUpperCase();
+    if (/^\d{8}[A-Z]$/.test(t)) return 'DNI';
+    if (/^\d{11}$/.test(t) || /^\d{6,8}[A-Z]?$/.test(t)) return 'DNI';
+    if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(t)) return 'FECHA';
+    if (/@/.test(t)) return 'EMAIL';
+    if (/^(\+?\d[\d\s\-]{6,})$/.test(t)) return 'TELEFONO';
+  }
+  return 'TEXTO';
 }
 
 async function loadTemplates() {
@@ -3590,19 +3633,30 @@ async function saveTemplates(templates) {
   }
 }
 
+// Show/hide "Rellenar plantilla" button based on placeholder presence
+function updateFillButtonVisibility() {
+  const section = $('fillTemplateSection');
+  if (!section) return;
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) { section.style.display = 'none'; return; }
+
+  let hasPlaceholders = false;
+  for (let page = 1; page <= activeDoc.totalPages; page++) {
+    const pageEls = activeDoc.elements[page] || [];
+    if (pageEls.some(el => el.isPlaceholder)) { hasPlaceholders = true; break; }
+  }
+  section.style.display = hasPlaceholders ? '' : 'none';
+}
+
 function showTemplatesModal() {
   const modal = $('templatesModal');
   if (!modal) return;
-
-  // Show list view by default
   const listView = $('templateListView');
   const saveView = $('templateSaveView');
   if (listView) listView.style.display = '';
   if (saveView) saveView.style.display = 'none';
-
   const nameInput = $('templateNameInput');
   if (nameInput) nameInput.value = '';
-
   modal.classList.add('show');
   renderTemplatesList();
 }
@@ -3612,11 +3666,9 @@ function showTemplateSaveView() {
   const saveView = $('templateSaveView');
   const nameInput = $('templateNameInput');
   if (!listView || !saveView) return;
-
   listView.style.display = 'none';
   saveView.style.display = '';
   if (nameInput) { nameInput.value = ''; nameInput.focus(); }
-
   renderTemplateSlotSelection();
 }
 
@@ -3626,7 +3678,7 @@ function renderTemplateSlotSelection() {
 
   const activeDoc = getActiveDoc();
   if (!activeDoc) {
-    list.innerHTML = '<div style="color:#ef4444;font-size:12px;text-align:center;padding:20px;">No hay documento activo. Carga un PDF primero.</div>';
+    list.innerHTML = '<div style="color:#ef4444;font-size:12px;text-align:center;padding:20px;">No hay documento activo.</div>';
     return;
   }
 
@@ -3636,113 +3688,75 @@ function renderTemplateSlotSelection() {
     const pageEls = activeDoc.elements[page] || [];
     pageEls.forEach((el) => {
       if (el.isPlaceholder) return;
-
-      let label = '';
       let preview = '';
-      if (el.type === 'text') {
-        // Suggest label from text content (first word/short text)
-        const suggested = el.text ? el.text.substring(0, 20).trim() : 'Texto';
-        label = suggested;
-        preview = el.text ? el.text.substring(0, 40) : '(vacío)';
-      } else if (el.type === 'signature') {
-        label = el.name ? `Firma: ${el.name}` : 'Firma';
-        preview = el.name || '(sin nombre)';
-      } else if (el.type === 'image') {
-        label = 'Imagen';
-        preview = `${Math.round(el.width || 100)}x${Math.round(el.height || 100)}`;
-      }
-
-      allElements.push({ page, el, label, preview });
+      if (el.type === 'text') preview = el.text ? el.text.substring(0, 35) : '(vacío)';
+      else if (el.type === 'signature') preview = el.name || '(sin nombre)';
+      else if (el.type === 'image') preview = `${Math.round(el.width || 100)}x${Math.round(el.height || 100)}`;
+      allElements.push({ page, el, preview });
     });
   }
 
   if (allElements.length === 0) {
-    list.innerHTML = '<div style="color:#64748b;font-size:12px;text-align:center;padding:20px;">No hay elementos en el documento.<br>Añade textos, firmas o imágenes primero.</div>';
+    list.innerHTML = '<div style="color:#64748b;font-size:12px;text-align:center;padding:20px;">No hay elementos. Añade textos, firmas o imágenes primero.</div>';
     return;
   }
 
   list.innerHTML = allElements.map((item, i) => {
     const typeIcon = getElementTypeLabel(item.el);
     const pageLabel = item.page > 1 ? ` [Pág.${item.page}]` : '';
-    return `<div style="display:flex;align-items:center;gap:6px;padding:6px 8px;background:#1e293b;border-radius:6px;margin-bottom:4px;">
-      <input type="checkbox" class="tmpl-slot-cb" data-idx="${i}" checked style="width:16px;height:16px;accent-color:#6366f1;flex-shrink:0;">
-      <span style="font-size:12px;color:#e2e8f0;flex-shrink:0;">${typeIcon}${pageLabel}</span>
-      <input type="text" class="tmpl-slot-label" data-idx="${i}" value="${escapeHtml(item.label)}" style="flex:1;padding:4px 6px;background:#0f172a;border:1px solid #334155;border-radius:4px;color:#f1f5f9;font-size:11px;min-width:0;" title="Etiqueta del hueco">
-      <span style="color:#64748b;font-size:10px;max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:0;" title="${escapeHtml(item.preview)}">${escapeHtml(item.preview)}</span>
+    const suggested = guessFieldType(item.el);
+    return `<div style="display:flex;align-items:center;gap:5px;padding:5px 7px;background:#1e293b;border-radius:6px;margin-bottom:3px;flex-wrap:nowrap;">
+      <input type="checkbox" class="tmpl-slot-cb" data-idx="${i}" checked style="width:14px;height:14px;accent-color:#6366f1;flex-shrink:0;">
+      <span style="font-size:11px;color:#e2e8f0;flex-shrink:0;">${typeIcon}${pageLabel}</span>
+      <input type="text" list="fieldTypeSuggestions" class="tmpl-slot-field" data-idx="${i}" value="${escapeHtml(suggested)}" style="width:80px;padding:3px 5px;background:#0f172a;border:1px solid #4338ca;border-radius:4px;color:#c4b5fd;font-size:10px;min-width:0;text-transform:uppercase;" title="Tipo de dato">
+      <span style="color:#64748b;font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;" title="${escapeHtml(item.preview)}">${escapeHtml(item.preview)}</span>
     </div>`;
   }).join('');
 
   // Select all / deselect all
   const selectAllBtn = $('tmplSelectAll');
   const deselectAllBtn = $('tmplDeselectAll');
-
   if (selectAllBtn) {
     const newBtn = selectAllBtn.cloneNode(true);
     selectAllBtn.parentNode.replaceChild(newBtn, selectAllBtn);
-    newBtn.addEventListener('click', () => {
-      list.querySelectorAll('.tmpl-slot-cb').forEach(cb => cb.checked = true);
-    });
+    newBtn.addEventListener('click', () => list.querySelectorAll('.tmpl-slot-cb').forEach(cb => cb.checked = true));
   }
-
   if (deselectAllBtn) {
     const newBtn = deselectAllBtn.cloneNode(true);
     deselectAllBtn.parentNode.replaceChild(newBtn, deselectAllBtn);
-    newBtn.addEventListener('click', () => {
-      list.querySelectorAll('.tmpl-slot-cb').forEach(cb => cb.checked = false);
-    });
+    newBtn.addEventListener('click', () => list.querySelectorAll('.tmpl-slot-cb').forEach(cb => cb.checked = false));
   }
 }
 
 async function confirmSaveTemplate() {
   const nameInput = $('templateNameInput');
   const name = nameInput ? nameInput.value.trim() : '';
-
-  if (!name) {
-    showStatus('Introduce un nombre para la plantilla', 'error');
-    return;
-  }
+  if (!name) { showStatus('Introduce un nombre', 'error'); return; }
 
   const activeDoc = getActiveDoc();
-  if (!activeDoc) {
-    showStatus('No hay documento activo', 'error');
-    return;
-  }
+  if (!activeDoc) { showStatus('No hay documento activo', 'error'); return; }
 
   // Collect all non-placeholder elements (same order as rendered)
   let allElements = [];
   for (let page = 1; page <= activeDoc.totalPages; page++) {
-    const pageEls = activeDoc.elements[page] || [];
-    pageEls.forEach((el) => {
-      if (el.isPlaceholder) return;
-      allElements.push({ page, el });
+    (activeDoc.elements[page] || []).forEach((el) => {
+      if (!el.isPlaceholder) allElements.push({ page, el });
     });
   }
+  if (allElements.length === 0) { showStatus('No hay elementos', 'error'); return; }
 
-  if (allElements.length === 0) {
-    showStatus('No hay elementos para guardar', 'error');
-    return;
-  }
-
-  // Read selections from UI
   const list = $('templateSlotList');
   if (!list) return;
-
   const checkboxes = list.querySelectorAll('.tmpl-slot-cb');
-  const labelInputs = list.querySelectorAll('.tmpl-slot-label');
+  const fieldInputs = list.querySelectorAll('.tmpl-slot-field');
 
   let slots = [];
   checkboxes.forEach((cb, i) => {
     if (cb.checked && allElements[i]) {
       const item = allElements[i];
-      const customLabel = labelInputs[i] ? labelInputs[i].value.trim() : '';
+      const fieldGroup = fieldInputs[i] ? fieldInputs[i].value.trim().toUpperCase() : 'TEXTO';
 
-      const slot = {
-        type: item.el.type,
-        x: item.el.x,
-        y: item.el.y,
-        page: item.page,
-        label: customLabel || (item.el.type === 'text' ? 'Texto' : item.el.type === 'signature' ? 'Firma' : 'Imagen')
-      };
+      const slot = { type: item.el.type, x: item.el.x, y: item.el.y, page: item.page, label: fieldGroup };
 
       if (item.el.type === 'text') {
         slot.size = item.el.size || 14;
@@ -3754,66 +3768,54 @@ async function confirmSaveTemplate() {
         slot.width = item.el.width || 100;
         slot.height = item.el.height || 100;
       }
-
       slots.push(slot);
     }
   });
 
-  if (slots.length === 0) {
-    showStatus('Selecciona al menos un elemento', 'error');
-    return;
-  }
+  if (slots.length === 0) { showStatus('Selecciona al menos un elemento', 'error'); return; }
 
   const templates = await loadTemplates();
-  templates.push({
-    name: name,
-    slots: slots,
-    createdAt: Date.now()
-  });
-
+  templates.push({ name, slots, createdAt: Date.now() });
   await saveTemplates(templates);
   showStatus(`Plantilla "${name}" guardada (${slots.length} hueco(s))`, 'success');
-
-  // Switch back to list view
-  showTemplatesModal();
+  showTemplatesModal(); // back to list view
 }
 
 async function renderTemplatesList() {
   const list = $('templatesList');
   if (!list) return;
-
   const templates = await loadTemplates();
 
   if (templates.length === 0) {
-    list.innerHTML = '<div style="color:#64748b;font-size:12px;text-align:center;padding:20px;">No hay plantillas guardadas.<br>Crea una nueva para guardar posiciones de huecos reutilizables.</div>';
+    list.innerHTML = '<div style="color:#64748b;font-size:12px;text-align:center;padding:20px;">No hay plantillas guardadas.<br>Crea una para guardar posiciones de huecos reutilizables.</div>';
     return;
   }
 
+  // Summarize: group slots by label
   list.innerHTML = templates.map((tmpl, i) => {
     const slotCount = tmpl.slots ? tmpl.slots.length : 0;
-    const typeSummary = tmpl.slots ? tmpl.slots.map(s => getElementTypeLabel(s)).join(' ') : '';
+    const pages = new Set((tmpl.slots || []).map(s => s.page || 1));
+    const pageInfo = pages.size > 1 ? `${pages.size} págs` : `Pág.${[...pages][0]}`;
 
-    // Multi-page info
-    const pages = new Set(tmpl.slots ? tmpl.slots.map(s => s.page || 1) : [1]);
-    const pageInfo = pages.size > 1 ? `${pages.size} páginas` : `Pág.${[...pages][0]}`;
-
-    // Show custom labels if available
-    const labelSummary = tmpl.slots && tmpl.slots[0] && (tmpl.slots[0].label || tmpl.slots[0].placeholderLabel)
-      ? tmpl.slots.map(s => s.label || s.placeholderLabel || '').filter(Boolean).join(', ')
-      : typeSummary;
+    // Group by label
+    const groups = {};
+    (tmpl.slots || []).forEach(s => {
+      const lbl = s.label || 'TEXTO';
+      groups[lbl] = (groups[lbl] || 0) + 1;
+    });
+    const groupSummary = Object.entries(groups).map(([k, v]) => `${k}×${v}`).join(' · ');
 
     return `<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#1e293b;border-radius:6px;margin-bottom:6px;">
       <span style="flex:1;font-size:12px;color:#e2e8f0;">
         <strong>${escapeHtml(tmpl.name)}</strong><br>
-        <span style="color:#94a3b8;font-size:11px;">${typeSummary} ${slotCount} hueco(s) · ${pageInfo}</span>
-        <br><span style="color:#818cf8;font-size:10px;">${escapeHtml(labelSummary.substring(0, 70))}${labelSummary.length > 70 ? '...' : ''}</span>
+        <span style="color:#818cf8;font-size:10px;">${escapeHtml(groupSummary)}</span><br>
+        <span style="color:#64748b;font-size:10px;">${slotCount} hueco(s) · ${pageInfo}</span>
       </span>
       <button class="sidebar-btn" data-tmpl-action="load" data-tmpl-idx="${i}" style="padding:4px 8px;font-size:10px;background:#2563eb;color:white;">Usar</button>
       <button class="sidebar-btn" data-tmpl-action="delete" data-tmpl-idx="${i}" style="padding:4px 8px;font-size:10px;background:#7f1d1d;color:#fca5a5;">🗑️</button>
     </div>`;
   }).join('');
 
-  // Event listeners for load/delete buttons
   list.querySelectorAll('[data-tmpl-action="load"]').forEach(btn => {
     btn.addEventListener('click', async () => {
       const idx = parseInt(btn.dataset.tmplIdx);
@@ -3839,29 +3841,40 @@ async function renderTemplatesList() {
 
 async function applyTemplate(template) {
   const activeDoc = getActiveDoc();
-  if (!activeDoc) {
-    showStatus('Primero carga un PDF', 'error');
-    return;
-  }
+  if (!activeDoc) { showStatus('Primero carga un PDF', 'error'); return; }
+  if (!template || !template.slots || template.slots.length === 0) { showStatus('Plantilla vacía', 'error'); return; }
 
-  if (!template || !template.slots || template.slots.length === 0) {
-    showStatus('Plantilla vacía', 'error');
-    return;
-  }
+  // Count slots per group for labeling
+  const groupCounts = {};
+  const groupIndices = {};
+  template.slots.forEach(slot => {
+    const g = slot.label || slot.placeholderLabel || 'TEXTO';
+    groupCounts[g] = (groupCounts[g] || 0) + 1;
+    groupIndices[g] = 0;
+  });
+
+  // Sort slots by page then y then x for consistent ordering
+  const sortedSlots = [...template.slots].sort((a, b) => (a.page || 1) - (b.page || 1) || a.y - b.y || a.x - b.x);
 
   let firstPage = null;
-
-  // Create placeholder elements from template slots on correct pages
-  template.slots.forEach(slot => {
+  sortedSlots.forEach(slot => {
     const targetPage = Math.min(slot.page || 1, activeDoc.totalPages);
     if (firstPage === null || targetPage < firstPage) firstPage = targetPage;
+
+    const group = slot.label || slot.placeholderLabel || 'TEXTO';
+    const idx = groupIndices[group];
+    const total = groupCounts[group];
+    groupIndices[group]++;
 
     const placeholder = {
       type: slot.type,
       x: slot.x,
       y: slot.y,
       isPlaceholder: true,
-      placeholderLabel: slot.label || slot.placeholderLabel || (slot.type === 'text' ? 'Texto' : slot.type === 'signature' ? 'Firma' : 'Imagen')
+      placeholderLabel: `${group} (${idx + 1}/${total})`,
+      fieldGroup: group,
+      fieldSlotIndex: idx,
+      fieldSlotTotal: total
     };
 
     if (slot.type === 'text') {
@@ -3882,7 +3895,6 @@ async function applyTemplate(template) {
     pushElement(activeDoc, targetPage, placeholder);
   });
 
-  // Navigate to first page with slots
   if (firstPage !== null && firstPage !== activeDoc.currentPage) {
     activeDoc.currentPage = firstPage;
   }
@@ -3890,10 +3902,210 @@ async function applyTemplate(template) {
   updateTabModified(activeDoc.id, true);
   renderPage();
 
-  // Close modal
   const modal = $('templatesModal');
   if (modal) modal.classList.remove('show');
 
-  const pagesInfo = new Set(template.slots.map(s => s.page || 1));
-  showStatus(`Plantilla "${template.name}" aplicada: ${template.slots.length} hueco(s). Doble clic en cada hueco para rellenar.`, 'success');
+  const groups = Object.entries(groupCounts).map(([k, v]) => `${k}×${v}`).join(', ');
+  showStatus(`Plantilla "${template.name}" aplicada: ${groups}. Botón "Rellenar plantilla" disponible.`, 'success');
+}
+
+// ============================================
+// FILL TEMPLATE SYSTEM
+// ============================================
+
+function showFillModal() {
+  const modal = $('fillTemplateModal');
+  if (!modal) return;
+
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) { showStatus('No hay documento', 'error'); return; }
+
+  // Collect all placeholders grouped by fieldGroup
+  const groups = {};
+  for (let page = 1; page <= activeDoc.totalPages; page++) {
+    const pageEls = activeDoc.elements[page] || [];
+    pageEls.forEach(el => {
+      if (!el.isPlaceholder) return;
+      const group = el.fieldGroup || 'TEXTO';
+      if (!groups[group]) groups[group] = [];
+      groups[group].push({ page, el });
+    });
+  }
+
+  // Sort each group by position (top to bottom, left to right)
+  Object.values(groups).forEach(slots => {
+    slots.sort((a, b) => a.el.y - b.el.y || a.el.x - b.el.x);
+  });
+
+  const content = $('fillTemplateContent');
+  if (!content) return;
+
+  const groupNames = Object.keys(groups).sort();
+  if (groupNames.length === 0) {
+    content.innerHTML = '<div style="color:#64748b;font-size:12px;text-align:center;padding:20px;">No hay huecos de plantilla para rellenar.</div>';
+    modal.classList.add('show');
+    return;
+  }
+
+  content.innerHTML = groupNames.map(groupName => {
+    const slots = groups[groupName];
+    const totalCount = slots.length;
+    const firstType = slots[0].el.type;
+
+    if (firstType === 'text') {
+      const isDate = groupName === 'FECHA' || groupName === 'DATE';
+      return `<div style="background:#1e293b;border-radius:8px;padding:10px;margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <strong style="color:#e2e8f0;font-size:12px;">📝 ${escapeHtml(groupName)}</strong>
+          <span style="color:#94a3b8;font-size:10px;">${totalCount} hueco(s)</span>
+        </div>
+        ${isDate ? `
+          <button class="sidebar-btn fill-date-btn" data-group="${escapeHtml(groupName)}" style="width:100%;background:#8b5cf6;color:white;padding:6px;margin-bottom:4px;">📅 Rellenar con fecha de hoy</button>
+          <textarea class="fill-group-input" data-group="${escapeHtml(groupName)}" placeholder="O escribe fechas personalizadas (una por línea)..." rows="2" style="width:100%;padding:6px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#f1f5f9;font-size:11px;resize:vertical;margin-top:4px;"></textarea>
+        ` : `
+          <textarea class="fill-group-input" data-group="${escapeHtml(groupName)}" placeholder="Un valor por línea (${totalCount} huecos)..." rows="${Math.min(totalCount + 1, 6)}" style="width:100%;padding:6px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#f1f5f9;font-size:11px;resize:vertical;"></textarea>
+        `}
+        <button class="sidebar-btn fill-text-btn" data-group="${escapeHtml(groupName)}" style="width:100%;margin-top:4px;background:#4338ca;color:#e0e7ff;padding:5px;">Rellenar ${escapeHtml(groupName)}</button>
+      </div>`;
+    } else if (firstType === 'signature') {
+      return `<div style="background:#1e293b;border-radius:8px;padding:10px;margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <strong style="color:#e2e8f0;font-size:12px;">✍️ ${escapeHtml(groupName)}</strong>
+          <span style="color:#94a3b8;font-size:10px;">${totalCount} hueco(s)</span>
+        </div>
+        <p style="color:#94a3b8;font-size:10px;margin-bottom:6px;">Busca firmas y se colocarán automáticamente en estos ${totalCount} huecos.</p>
+        <button class="sidebar-btn fill-sig-btn" data-group="${escapeHtml(groupName)}" style="width:100%;background:#7c3aed;color:white;padding:6px;">🔍 Buscar firmas</button>
+      </div>`;
+    } else {
+      return `<div style="background:#1e293b;border-radius:8px;padding:10px;margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <strong style="color:#e2e8f0;font-size:12px;">🖼️ ${escapeHtml(groupName)}</strong>
+          <span style="color:#94a3b8;font-size:10px;">${totalCount} hueco(s)</span>
+        </div>
+        <p style="color:#94a3b8;font-size:10px;">Haz doble clic en cada hueco de imagen para rellenar.</p>
+      </div>`;
+    }
+  }).join('');
+
+  modal.classList.add('show');
+
+  // Wire up text fill buttons
+  content.querySelectorAll('.fill-text-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const groupName = btn.dataset.group;
+      const textarea = content.querySelector(`textarea[data-group="${groupName}"]`);
+      fillTextGroup(groupName, textarea ? textarea.value : '');
+    });
+  });
+
+  // Wire up date fill buttons
+  content.querySelectorAll('.fill-date-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const groupName = btn.dataset.group;
+      fillDateGroup(groupName);
+    });
+  });
+
+  // Wire up signature fill buttons
+  content.querySelectorAll('.fill-sig-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const groupName = btn.dataset.group;
+      // Open signature search; signatures will auto-fill into placeholders
+      const sigModal = $('signatureModal');
+      if (sigModal) {
+        sigModal.classList.add('show');
+        const sigInput = $('signatureSearchInput');
+        if (sigInput) { sigInput.value = ''; sigInput.focus(); }
+        const sigResults = $('signatureResults');
+        if (sigResults) sigResults.innerHTML = '<div class="signature-empty">Escribe nombres para buscar. Se colocarán en los huecos de ' + escapeHtml(groupName) + '.</div>';
+        const sigCount = $('signatureCount');
+        if (sigCount) sigCount.style.display = 'none';
+        addedSignaturesCount = 0;
+      }
+      // Close fill modal
+      modal.classList.remove('show');
+    });
+  });
+}
+
+function getEmptyPlaceholdersForGroup(groupName) {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) return [];
+
+  let slots = [];
+  for (let page = 1; page <= activeDoc.totalPages; page++) {
+    const pageEls = activeDoc.elements[page] || [];
+    pageEls.forEach((el, idx) => {
+      const g = el.fieldGroup || el.placeholderLabel || 'TEXTO';
+      if (el.isPlaceholder && g.toUpperCase() === groupName.toUpperCase()) {
+        slots.push({ page, idx, el });
+      }
+    });
+  }
+
+  // Sort by position (top to bottom, left to right)
+  slots.sort((a, b) => a.el.y - b.el.y || a.el.x - b.el.x);
+  return slots;
+}
+
+function fillTextGroup(groupName, valuesText) {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) return;
+
+  const lines = valuesText.split('\n').map(l => l.trim()).filter(Boolean);
+  if (lines.length === 0) { showStatus('Escribe al menos un valor', 'error'); return; }
+
+  const slots = getEmptyPlaceholdersForGroup(groupName);
+  if (slots.length === 0) { showStatus(`No hay huecos vacíos de ${groupName}`, 'error'); return; }
+
+  const count = Math.min(lines.length, slots.length);
+  for (let i = 0; i < count; i++) {
+    const slot = slots[i];
+    const el = activeDoc.elements[slot.page][slot.idx];
+    el.text = lines[i];
+    el.isPlaceholder = false;
+    el.placeholderLabel = '';
+    delete el.fieldGroup;
+    delete el.fieldSlotIndex;
+    delete el.fieldSlotTotal;
+  }
+
+  updateTabModified(activeDoc.id, true);
+  renderPage();
+  showStatus(`${count} "${groupName}" rellenado(s)${lines.length > slots.length ? ` (sobraron ${lines.length - slots.length})` : ''}${lines.length < slots.length ? ` (quedan ${slots.length - count} vacíos)` : ''}`, 'success');
+
+  // Refresh fill modal if open
+  const fillModal = $('fillTemplateModal');
+  if (fillModal && fillModal.classList.contains('show')) showFillModal();
+}
+
+function fillDateGroup(groupName) {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) return;
+
+  const today = new Date();
+  const day = String(today.getDate()).padStart(2, '0');
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const year = today.getFullYear();
+  const dateStr = `${day}/${month}/${year}`;
+
+  const slots = getEmptyPlaceholdersForGroup(groupName);
+  if (slots.length === 0) { showStatus(`No hay huecos vacíos de ${groupName}`, 'error'); return; }
+
+  slots.forEach(slot => {
+    const el = activeDoc.elements[slot.page][slot.idx];
+    el.text = dateStr;
+    el.isPlaceholder = false;
+    el.placeholderLabel = '';
+    delete el.fieldGroup;
+    delete el.fieldSlotIndex;
+    delete el.fieldSlotTotal;
+  });
+
+  updateTabModified(activeDoc.id, true);
+  renderPage();
+  showStatus(`${slots.length} fecha(s) rellenada(s): ${dateStr}`, 'success');
+
+  const fillModal = $('fillTemplateModal');
+  if (fillModal && fillModal.classList.contains('show')) showFillModal();
 }
