@@ -1,5 +1,5 @@
 // ============================================
-// AGENDA STAFF v5.23.20 - STICKY SIDEBAR
+// AGENDA STAFF v8.0.0 - FIXED AUTH
 // ============================================
 
 // SUPABASE_URL and SUPABASE_KEY are loaded from supabase-config.js (loaded before this script)
@@ -184,6 +184,12 @@ async function clearSession() {
 function showAuthScreen() {
   $('authScreen').style.display = 'flex';
   $('mainScreen').style.display = 'none';
+  hideResendConfirmation();
+  // Clear any previous auth errors
+  const loginErr = $('loginError');
+  const registerErr = $('registerError');
+  if (loginErr) { loginErr.classList.remove('show'); loginErr.textContent = ''; }
+  if (registerErr) { registerErr.classList.remove('show'); registerErr.textContent = ''; }
 }
 
 async function showMainScreen() {
@@ -262,6 +268,7 @@ async function handleLogin(e) {
   btn.querySelector('.btn-text').textContent = 'Entrando...';
   btn.querySelector('.btn-loader').style.display = 'block';
   errorEl.classList.remove('show');
+  hideResendConfirmation();
   
   try {
     const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
@@ -276,7 +283,25 @@ async function handleLogin(e) {
     const data = await res.json();
     
     if (!res.ok) {
-      throw new Error(data.error_description || data.message || 'Error al iniciar sesión');
+      // Handle specific Supabase auth errors with clear Spanish messages
+      const errorMsg = data.error_description || data.msg || data.message || '';
+      const errorCode = data.error_code || data.code || '';
+      
+      if (errorMsg.includes('Email not confirmed') || errorMsg.includes('email_not_confirmed') || errorCode === 'email_not_confirmed') {
+        showAuthError(errorEl, 'Tu email aún no está confirmado. Revisa tu bandeja de entrada (y spam) y haz clic en el enlace de confirmación.');
+        showResendConfirmation(email);
+        throw new Error('__skip__');
+      }
+      
+      if (errorMsg.includes('Invalid login credentials') || errorMsg.includes('invalid_credentials') || errorCode === 'invalid_credentials') {
+        throw new Error('Email o contraseña incorrectos');
+      }
+      
+      if (errorMsg.includes('Too many requests') || errorMsg.includes('rate_limit')) {
+        throw new Error('Demasiados intentos. Espera unos segundos e inténtalo de nuevo.');
+      }
+      
+      throw new Error(errorMsg || 'Error al iniciar sesión');
     }
     
     session = data;
@@ -290,7 +315,9 @@ async function handleLogin(e) {
     showMainScreen();
     
   } catch (err) {
-    showAuthError(errorEl, err.message);
+    if (err.message !== '__skip__') {
+      showAuthError(errorEl, err.message);
+    }
   } finally {
     btn.disabled = false;
     btn.querySelector('.btn-text').textContent = 'Entrar';
@@ -322,6 +349,7 @@ async function handleRegister(e) {
   btn.querySelector('.btn-text').textContent = 'Creando cuenta...';
   btn.querySelector('.btn-loader').style.display = 'block';
   errorEl.classList.remove('show');
+  hideResendConfirmation();
   
   try {
     const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
@@ -340,12 +368,25 @@ async function handleRegister(e) {
     const data = await res.json();
     
     if (!res.ok) {
-      if (data.message?.includes('already registered')) {
-        throw new Error('Este email ya está registrado');
+      const errorMsg = data.error_description || data.msg || data.message || '';
+      const errorCode = data.error_code || data.code || '';
+      
+      if (errorMsg.includes('already registered') || errorMsg.includes('User already registered')) {
+        throw new Error('Este email ya está registrado. Intenta iniciar sesión.');
       }
-      throw new Error(data.error_description || data.message || 'Error al registrar');
+      
+      if (errorMsg.includes('Too many requests') || errorMsg.includes('rate_limit')) {
+        throw new Error('Demasiados intentos de registro. Espera unos segundos e inténtalo de nuevo.');
+      }
+      
+      if (errorMsg.includes('Password should be') || errorMsg.includes('password')) {
+        throw new Error('La contraseña no cumple los requisitos. Usa al menos 6 caracteres.');
+      }
+      
+      throw new Error(errorMsg || 'Error al registrar');
     }
     
+    // Case 1: Supabase auto-confirms email — we get session + user immediately
     if (data.session && data.user) {
       session = data.session;
       currentUser = {
@@ -357,18 +398,69 @@ async function handleRegister(e) {
       await saveSession(session, currentUser);
       showMainScreen();
       showToast('¡Cuenta creada correctamente!');
-    } else if (data.user) {
-      showAuthError(errorEl, '✓ Cuenta creada. Revisa tu email para confirmarla y luego inicia sesión.');
-      setTimeout(() => {
+      
+    // Case 2: Email confirmation required — try auto-login, then guide the user
+    } else if (data.user || data.id) {
+      // Try to login immediately — if Supabase has auto-confirm OFF,
+      // this will fail with "Email not confirmed" but we handle it gracefully
+      try {
+        const loginRes = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ email, password })
+        });
+        
+        if (loginRes.ok) {
+          // Auto-login succeeded! (maybe confirmation was auto-accepted)
+          const loginData = await loginRes.json();
+          session = loginData;
+          currentUser = {
+            id: loginData.user.id,
+            email: loginData.user.email,
+            name: loginData.user.user_metadata?.name || name
+          };
+          await saveSession(session, currentUser);
+          showMainScreen();
+          showToast('¡Cuenta creada y sesión iniciada!');
+        } else {
+          // Login failed — likely needs email confirmation
+          // Switch to login tab and show helpful message
+          document.querySelector('[data-tab="login"]').click();
+          $('loginEmail').value = email;
+          $('loginPassword').value = '';
+          
+          const loginErrorData = await loginRes.json();
+          const loginErrorMsg = loginErrorData.error_description || loginErrorData.msg || loginErrorData.message || '';
+          
+          if (loginErrorMsg.includes('Email not confirmed') || loginErrorMsg.includes('email_not_confirmed')) {
+            const loginErrorEl = $('loginError');
+            showAuthError(loginErrorEl, 'Cuenta creada. Necesitas confirmar tu email: revisa tu bandeja de entrada (y spam) y haz clic en el enlace.');
+            showResendConfirmation(email);
+          } else {
+            const loginErrorEl = $('loginError');
+            showAuthError(loginErrorEl, 'Cuenta creada. Ahora inicia sesión con tu email y contraseña.');
+          }
+        }
+      } catch (loginErr) {
+        // Auto-login attempt failed — fall back to manual login
         document.querySelector('[data-tab="login"]').click();
         $('loginEmail').value = email;
-      }, HIGHLIGHT_DURATION_MS);
+        $('loginPassword').value = '';
+        const loginErrorEl = $('loginError');
+        showAuthError(loginErrorEl, 'Cuenta creada. Revisa tu email para confirmarla y luego inicia sesión.');
+        showResendConfirmation(email);
+      }
     } else {
       throw new Error('Respuesta inesperada del servidor');
     }
     
   } catch (err) {
-    showAuthError(errorEl, err.message);
+    if (err.message !== '__skip__') {
+      showAuthError(errorEl, err.message);
+    }
   } finally {
     btn.disabled = false;
     btn.querySelector('.btn-text').textContent = 'Crear Cuenta';
@@ -401,6 +493,81 @@ async function handleLogout() {
 function showAuthError(el, msg) {
   el.textContent = msg;
   el.classList.add('show');
+}
+
+// ============================================
+// RESEND EMAIL CONFIRMATION
+// ============================================
+
+let pendingConfirmationEmail = null;
+
+function showResendConfirmation(email) {
+  pendingConfirmationEmail = email;
+  const resendEl = $('resendConfirmation');
+  if (resendEl) {
+    resendEl.style.display = 'block';
+    const btn = $('btnResendConfirmation');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Reenviar email de confirmación';
+    }
+  }
+}
+
+function hideResendConfirmation() {
+  pendingConfirmationEmail = null;
+  const resendEl = $('resendConfirmation');
+  if (resendEl) {
+    resendEl.style.display = 'none';
+  }
+}
+
+async function handleResendConfirmation() {
+  const email = pendingConfirmationEmail || $('loginEmail')?.value?.trim();
+  if (!email) {
+    showToast('No hay email para reenviar confirmación');
+    return;
+  }
+  
+  const btn = $('btnResendConfirmation');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Enviando...';
+  }
+  
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/resend`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ 
+        type: 'signup',
+        email: email
+      })
+    });
+    
+    if (res.ok) {
+      showToast('Email de confirmación reenviado a ' + email);
+    } else {
+      const data = await res.json();
+      const errorMsg = data.error_description || data.message || '';
+      
+      if (errorMsg.includes('already confirmed') || errorMsg.includes('rate_limit')) {
+        showToast('El email ya fue confirmado o se envió recientemente. Intenta iniciar sesión.');
+      } else {
+        showToast('Error al reenviar: ' + (errorMsg || 'intenta de nuevo'));
+      }
+    }
+  } catch (err) {
+    showToast('Error de conexión al reenviar confirmación');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Reenviar email de confirmación';
+    }
+  }
 }
 
 // ============================================
@@ -497,6 +664,7 @@ function setupListeners() {
       } else {
         $('loginForm').style.display = 'none';
         $('registerForm').style.display = 'block';
+        hideResendConfirmation();
       }
     });
   });
@@ -504,6 +672,12 @@ function setupListeners() {
   // Auth forms
   $('loginForm').addEventListener('submit', handleLogin);
   $('registerForm').addEventListener('submit', handleRegister);
+  
+  // Resend confirmation email
+  const btnResend = $('btnResendConfirmation');
+  if (btnResend) {
+    btnResend.addEventListener('click', handleResendConfirmation);
+  }
   
   // User menu
   $('btnUser').addEventListener('click', (e) => {
