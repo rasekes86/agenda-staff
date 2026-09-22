@@ -87,7 +87,13 @@
   </div>
   
   <main class="editor-main">
-    <aside class="editor-sidebar">
+    <aside class="editor-sidebar" id="editorSidebar">
+      <!-- Sidebar Toggle -->
+      <button class="sidebar-toggle" id="btnSidebarToggle" title="Colapsar sidebar">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="15 18 9 12 15 6"></polyline>
+        </svg>
+      </button>
       <!-- Tool Tabs -->
       <div class="tool-tabs">
         <button class="tool-tab active" data-tool="editor">
@@ -132,6 +138,14 @@
           </svg>
           Juntar
         </button>
+        <button class="tool-tab" data-tool="pages">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="3" y1="9" x2="21" y2="9"></line>
+            <line x1="9" y1="3" x2="9" y2="21"></line>
+          </svg>
+          Páginas
+        </button>
       </div>
       
       <!-- Editor Tool -->
@@ -168,6 +182,34 @@
               <line x1="3" y1="10" x2="21" y2="10"></line>
             </svg>
             Añadir fecha
+          </button>
+          <button class="sidebar-btn" id="btnDraw" style="background:#f59e0b;color:#1e293b;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 19l7-7 3 3-7 7-3-3z"></path>
+              <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
+              <path d="M2 2l7.586 7.586"></path>
+              <circle cx="11" cy="11" r="2"></circle>
+            </svg>
+            Dibujar
+          </button>
+          <button class="sidebar-btn" id="btnShapeRect" style="background:#64748b;color:#f1f5f9;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            </svg>
+            Rectángulo
+          </button>
+          <button class="sidebar-btn" id="btnShapeLine" style="background:#64748b;color:#f1f5f9;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="5" y1="19" x2="19" y2="5"></line>
+            </svg>
+            Línea
+          </button>
+          <button class="sidebar-btn" id="btnShapeArrow" style="background:#64748b;color:#f1f5f9;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="5" y1="19" x2="19" y2="5"></line>
+              <polyline points="10 5 19 5 19 14"></polyline>
+            </svg>
+            Flecha
           </button>
         </div>
         
@@ -356,6 +398,17 @@
           <button class="sidebar-btn primary" id="btnMergePdfs" disabled>Juntar PDFs</button>
         </div>
       </div>
+
+      <!-- Pages Tool (Reorder) -->
+      <div class="tool-content" id="toolPages">
+        <div class="sidebar-section">
+          <div class="sidebar-title">Reordenar páginas</div>
+          <div class="no-pdf-warning" id="pagesNoPdf">
+            <p>⚠️ Primero carga un PDF</p>
+          </div>
+          <div class="page-thumbnails" id="pageThumbnails" style="display:none;"></div>
+        </div>
+      </div>
     </aside>
     
     <div class="editor-canvas-area" id="canvasArea">
@@ -430,6 +483,9 @@
       <div class="modal-row">
         <input type="number" id="textSize" placeholder="Tamaño" value="14" min="8" max="72">
         <input type="color" id="textColor" value="#000000" title="Color">
+        <button class="rich-text-btn" id="btnBold" title="Negrita" style="font-weight:bold;">B</button>
+        <button class="rich-text-btn" id="btnItalic" title="Cursiva" style="font-style:italic;">I</button>
+        <button class="rich-text-btn" id="btnUnderline" title="Subrayado" style="text-decoration:underline;">U</button>
       </div>
       <div class="modal-actions">
         <button class="btn-cancel" id="cancelText">Cancelar</button>
@@ -458,6 +514,10 @@
   <div class="modal-overlay" id="signatureModal">
     <div class="modal signature-modal">
       <h3>✍️ Buscar firmas</h3>
+      <div class="recent-sigs" id="recentSigs" style="display:none;">
+        <div class="sidebar-title">Firmas recientes</div>
+        <div class="recent-sigs-list" id="recentSigsList"></div>
+      </div>
       <div class="signature-count" id="signatureCount" style="display:none;">
         0 firmas añadidas - continúa añadiendo
       </div>
@@ -550,6 +610,17 @@
       </div>
     </div>
   </div>
+
+  <!-- Drawing Toolbar (floating) -->
+  <div class="draw-toolbar" id="drawToolbar" style="display:none;">
+    <label title="Color de trazo">Color <input type="color" id="drawStrokeColor" value="#000000"></label>
+    <label title="Grosor de trazo">Grosor <input type="range" id="drawStrokeWidth" min="1" max="5" value="2" style="width:60px;"></label>
+    <button class="draw-toolbar-btn" id="btnDrawClear" title="Limpiar dibujo">Limpiar</button>
+    <button class="draw-toolbar-btn draw-confirm" id="btnDrawConfirm" title="Confirmar dibujo">Confirmar</button>
+  </div>
+
+  <!-- Shape Preview Overlay (SVG) -->
+  <svg class="shape-preview-svg" id="shapePreviewSvg" style="display:none;position:absolute;top:0;left:0;z-index:60;pointer-events:none;"></svg>
 
   <!-- Status message -->
   <div class="status-msg" id="statusMsg"></div>

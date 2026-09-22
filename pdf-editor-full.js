@@ -27,6 +27,29 @@ let documents = [];
 let activeDocIndex = -1;
 let tabCounter = 0;
 
+// ============================================
+// #20 COLLAPSIBLE SIDEBAR STATE
+// ============================================
+let sidebarCollapsed = localStorage.getItem('pe_sidebarCollapsed') === 'true';
+
+// ============================================
+// #21 DRAWING TOOL STATE
+// ============================================
+let isDrawMode = false;
+let drawPaths = [];
+let drawCurrentPath = [];
+let drawStrokeColor = '#000000';
+let drawStrokeWidth = 2;
+let drawCanvasOverlay = null;
+
+// ============================================
+// #22 SHAPE TOOL STATE
+// ============================================
+let shapeMode = null; // 'rect', 'line', 'arrow' or null
+let shapeStartX = 0;
+let shapeStartY = 0;
+let shapeIsDrawing = false;
+
 // State for tools that create NEW PDFs
 let imgFiles = [];
 let wordFiles = [];
@@ -599,6 +622,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (textInput) textInput.value = '';
       if (textSize) textSize.value = DEFAULT_FONT_SIZE;
       if (textColor) textColor.value = '#000000';
+      // #25 Reset rich text for dblclick new text
+      setRichTextState(false, false, false);
       if (textModal) {
         textModal.classList.add('show');
         textModal.dataset.posX = x;
@@ -610,6 +635,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // Try to restore auto-saved state after a short delay (wait for PDFs to load)
   setTimeout(restoreAutoSave, 1500);
+  
+  // #20 Apply initial sidebar state
+  applySidebarState();
   
   showStatus('Carga uno o más PDFs para comenzar');
 });
@@ -687,6 +715,34 @@ function setupEventListeners() {
   
   const btnAddDate = $('btnAddDate');
   if (btnAddDate) btnAddDate.addEventListener('click', addCurrentDate);
+  
+  // #20 Sidebar toggle
+  const btnSidebarToggle = $('btnSidebarToggle');
+  if (btnSidebarToggle) btnSidebarToggle.addEventListener('click', toggleSidebar);
+  
+  // #21 Drawing tool buttons
+  const btnDraw = $('btnDraw');
+  if (btnDraw) btnDraw.addEventListener('click', enterDrawMode);
+  const btnDrawClear = $('btnDrawClear');
+  if (btnDrawClear) btnDrawClear.addEventListener('click', clearDrawing);
+  const btnDrawConfirm = $('btnDrawConfirm');
+  if (btnDrawConfirm) btnDrawConfirm.addEventListener('click', confirmDrawing);
+  
+  // #22 Shape tool buttons
+  const btnShapeRect = $('btnShapeRect');
+  if (btnShapeRect) btnShapeRect.addEventListener('click', () => enterShapeMode('rect'));
+  const btnShapeLine = $('btnShapeLine');
+  if (btnShapeLine) btnShapeLine.addEventListener('click', () => enterShapeMode('line'));
+  const btnShapeArrow = $('btnShapeArrow');
+  if (btnShapeArrow) btnShapeArrow.addEventListener('click', () => enterShapeMode('arrow'));
+  
+  // #25 Rich text toggle buttons
+  const btnBold = $('btnBold');
+  if (btnBold) btnBold.addEventListener('click', () => btnBold.classList.toggle('active'));
+  const btnItalic = $('btnItalic');
+  if (btnItalic) btnItalic.addEventListener('click', () => btnItalic.classList.toggle('active'));
+  const btnUnderline = $('btnUnderline');
+  if (btnUnderline) btnUnderline.addEventListener('click', () => btnUnderline.classList.toggle('active'));
   
   const cancelText = $('cancelText');
   if (cancelText) {
@@ -769,6 +825,22 @@ function setupEventListeners() {
 
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
+    // #21 Enter in draw mode = confirm drawing
+    if (e.key === 'Enter' && isDrawMode && !e.target.closest('input, textarea, select')) {
+      e.preventDefault();
+      confirmDrawing();
+      return;
+    }
+    // Escape in draw/shape mode = exit
+    if (e.key === 'Escape' && isDrawMode) {
+      exitDrawMode();
+      return;
+    }
+    if (e.key === 'Escape' && shapeMode) {
+      exitShapeMode();
+      return;
+    }
+    
     // Ctrl+Z = Undo
     if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
       e.preventDefault(); undo();
@@ -1120,6 +1192,7 @@ function setupToolTabs() {
       if (btnSave) btnSave.style.display = isEditor ? 'flex' : 'none';
       
       if (tool === 'split') updateSplitTool();
+      if (tool === 'pages') renderPageThumbnails();
     });
   });
 }
@@ -1178,8 +1251,16 @@ async function renderPage() {
     
     // dblclick handler is now delegated on canvasArea (M9) — no inline listener here
     
-    // Mousedown on overlay starts box selection
+    // Mousedown on overlay starts box selection (or shape drawing)
     overlay.addEventListener('mousedown', (e) => {
+      // #22 Shape mode: handle shape drawing on overlay
+      if (shapeMode) {
+        onShapeMouseDown(e);
+        return;
+      }
+      // Don't start box selection in draw mode
+      if (isDrawMode) return;
+      
       if (e.target === overlay || e.target.classList.contains('elements-overlay')) {
         // If clicking on empty area while elements are selected, clear selection
         if (selectedIndices.size > 0 && !boxSelectJustFinished) {
@@ -1188,6 +1269,14 @@ async function renderPage() {
         }
         startBoxSelection(e, overlay, scale, activeDoc);
       }
+    });
+    
+    // #22 Shape mouse move/up on overlay
+    overlay.addEventListener('mousemove', (e) => {
+      if (shapeMode) onShapeMouseMove(e);
+    });
+    overlay.addEventListener('mouseup', (e) => {
+      if (shapeMode) onShapeMouseUp(e);
     });
     
     const currentPageNum = $('currentPageNum');
@@ -1222,6 +1311,11 @@ function createElementDiv(el, idx, scale, activeDoc) {
     div.style.minWidth = MIN_ELEMENT_SIZE + 'px';
     div.style.minHeight = MIN_ELEMENT_SIZE + 'px';
     
+    // #25 Rich text styles
+    if (el.bold) div.style.fontWeight = 'bold';
+    if (el.italic) div.style.fontStyle = 'italic';
+    if (el.underline) div.style.textDecoration = 'underline';
+    
     // Show name label for DNI/NIE texts (like signatures)
     if (el.name) {
       const nameLabel = document.createElement('div');
@@ -1230,7 +1324,7 @@ function createElementDiv(el, idx, scale, activeDoc) {
       div.appendChild(nameLabel);
       div.title = `DNI de: ${el.name}`;
     }
-  } else if (el.type === 'image' || el.type === 'signature') {
+  } else if (el.type === 'image' || el.type === 'signature' || el.type === 'drawing') {
     const img = document.createElement('img');
     img.src = el.src;
     img.style.width = (el.width * scale) + 'px';
@@ -1245,6 +1339,78 @@ function createElementDiv(el, idx, scale, activeDoc) {
       nameLabel.textContent = el.name;
       div.appendChild(nameLabel);
     }
+    if (el.type === 'drawing') {
+      div.title = 'Dibujo';
+    }
+  } else if (el.type === 'shape') {
+    // #22 Render shape as SVG
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', Math.max(1, el.width * scale));
+    svg.setAttribute('height', Math.max(1, el.height * scale));
+    svg.style.overflow = 'visible';
+    
+    const strokeColor = el.strokeColor || '#000000';
+    const strokeWidth = el.strokeWidth || 2;
+    const fillColor = el.fillColor || 'transparent';
+    
+    if (el.shape === 'rect') {
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('x', '0');
+      rect.setAttribute('y', '0');
+      rect.setAttribute('width', Math.max(1, el.width * scale));
+      rect.setAttribute('height', Math.max(1, el.height * scale));
+      rect.setAttribute('fill', fillColor);
+      rect.setAttribute('stroke', strokeColor);
+      rect.setAttribute('stroke-width', strokeWidth);
+      svg.appendChild(rect);
+    } else if (el.shape === 'line') {
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      const sx = (el.startX - el.x) * scale;
+      const sy = (el.startY - el.y) * scale;
+      const ex = (el.endX - el.x) * scale;
+      const ey = (el.endY - el.y) * scale;
+      line.setAttribute('x1', sx);
+      line.setAttribute('y1', sy);
+      line.setAttribute('x2', ex);
+      line.setAttribute('y2', ey);
+      line.setAttribute('stroke', strokeColor);
+      line.setAttribute('stroke-width', strokeWidth);
+      svg.appendChild(line);
+    } else if (el.shape === 'arrow') {
+      const sx = (el.startX - el.x) * scale;
+      const sy = (el.startY - el.y) * scale;
+      const ex = (el.endX - el.x) * scale;
+      const ey = (el.endY - el.y) * scale;
+      
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', sx);
+      line.setAttribute('y1', sy);
+      line.setAttribute('x2', ex);
+      line.setAttribute('y2', ey);
+      line.setAttribute('stroke', strokeColor);
+      line.setAttribute('stroke-width', strokeWidth);
+      svg.appendChild(line);
+      
+      // Arrowhead
+      const dx = ex - sx;
+      const dy = ey - sy;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      const arrowSize = Math.min(12, len * 0.15);
+      const angle = Math.atan2(dy, dx);
+      const ax1 = ex - arrowSize * Math.cos(angle - Math.PI / 6);
+      const ay1 = ey - arrowSize * Math.sin(angle - Math.PI / 6);
+      const ax2 = ex - arrowSize * Math.cos(angle + Math.PI / 6);
+      const ay2 = ey - arrowSize * Math.sin(angle + Math.PI / 6);
+      
+      const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+      polygon.setAttribute('points', `${ex},${ey} ${ax1},${ay1} ${ax2},${ay2}`);
+      polygon.setAttribute('fill', strokeColor);
+      svg.appendChild(polygon);
+    }
+    
+    div.appendChild(svg);
+    div.style.width = Math.max(1, el.width * scale) + 'px';
+    div.style.height = Math.max(1, el.height * scale) + 'px';
   }
   
   // Multi-select: Shift+click to toggle selection
@@ -1310,6 +1476,8 @@ function openNewTextModal(x, y) {
   if (textModalTitle) textModalTitle.textContent = '📝 Añadir texto';
   if (confirmBtn) confirmBtn.textContent = 'Añadir';
   if (editingIdx) editingIdx.value = '';
+  // #25 Reset rich text state for new text
+  setRichTextState(false, false, false);
   if (textModal) {
     textModal.classList.add('show');
     if (x !== undefined && y !== undefined) {
@@ -1343,6 +1511,8 @@ function openEditTextModal(idx, activeDoc, scale) {
   if (textModalTitle) textModalTitle.textContent = '✏️ Editar texto';
   if (confirmBtn) confirmBtn.textContent = 'Guardar';
   if (editingIdx) editingIdx.value = idx;
+  // #25 Set rich text state from element
+  setRichTextState(!!el.bold, !!el.italic, !!el.underline);
   if (textModal) {
     delete textModal.dataset.posX;
     delete textModal.dataset.posY;
@@ -1366,6 +1536,9 @@ function confirmTextWithPosition() {
   const color = textColor ? textColor.value : '#000000';
   const editingIdx = editingIdxEl ? editingIdxEl.value : '';
   
+  // #25 Read rich text state
+  const richState = getRichTextState();
+  
   if (!text) {
     showStatus('Escribe un texto', 'error');
     return;
@@ -1381,6 +1554,9 @@ function confirmTextWithPosition() {
       el.text = text;
       el.size = size;
       el.color = color;
+      el.bold = richState.bold;
+      el.italic = richState.italic;
+      el.underline = richState.underline;
       if (textModal) textModal.classList.remove('show');
       editingIdxEl.value = '';
       updateTabModified(activeDoc.id, true);
@@ -1396,7 +1572,13 @@ function confirmTextWithPosition() {
   
   // Use shared DNI/NIE processing (from shared-utils.js)
   const { elements, totalCreated } = processTextWithDni(text, posX, posY, size, color);
-  elements.forEach(el => activeDoc.elements[activeDoc.currentPage].push(el));
+  elements.forEach(el => {
+    // #25 Apply rich text properties to created elements
+    el.bold = richState.bold;
+    el.italic = richState.italic;
+    el.underline = richState.underline;
+    activeDoc.elements[activeDoc.currentPage].push(el);
+  });
   
   const lines = text.split(/\n|\r\n|\r/).map(l => l.trim()).filter(l => l);
   if (totalCreated > 1 && lines.length > 1) {
@@ -1690,6 +1872,8 @@ function showTextModal() {
   if (textInput) textInput.value = '';
   if (textSize) textSize.value = DEFAULT_FONT_SIZE;
   if (textColor) textColor.value = '#000000';
+  // #25 Reset rich text state for new text
+  setRichTextState(false, false, false);
   if (textModal) {
     delete textModal.dataset.posX;
     delete textModal.dataset.posY;
@@ -1765,6 +1949,9 @@ function showSignatureModal() {
   
   addedSignaturesCount = 0;
   if (signatureCount) signatureCount.style.display = 'none';
+  
+  // #19 Render recent signatures
+  renderRecentSignatures();
 }
 
 // removeDniNie and normalizeText moved to shared-utils.js
@@ -2137,6 +2324,9 @@ function selectSignature(url, name) {
     renderPage();
     showStatus(`✓ Firma añadida: ${name}`, 'success');
     
+    // #19 Add to recent signatures
+    addRecentSignature(name, url);
+    
     const countEl = $('signatureCount');
     if (countEl) {
       countEl.style.display = 'block';
@@ -2169,6 +2359,10 @@ async function savePdf() {
     
     const newPdfDoc = await PDFDocument.load(activeDoc.originalPdfBytes, { ignoreEncryption: true });
     const font = await newPdfDoc.embedFont(StandardFonts.Helvetica);
+    // #25 Pre-embed font variants for rich text
+    const fontBold = await newPdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const fontItalic = await newPdfDoc.embedFont(StandardFonts.HelveticaOblique);
+    const fontBoldItalic = await newPdfDoc.embedFont(StandardFonts.HelveticaBoldOblique);
     
     // Collect all signatures from all pages to determine filename
     let allSignatures = [];
@@ -2200,14 +2394,35 @@ async function savePdf() {
           const pdfY = height - el.y - fontSize;
           const color = hexToRgb(el.color || '#000000');
           
+          // #25 Select font variant based on bold/italic
+          let selectedFont = font;
+          if (el.bold && el.italic) {
+            selectedFont = fontBoldItalic;
+          } else if (el.bold) {
+            selectedFont = fontBold;
+          } else if (el.italic) {
+            selectedFont = fontItalic;
+          }
+          
           page.drawText(el.text, {
             x: el.x,
             y: pdfY,
             size: fontSize,
-            font: font,
+            font: selectedFont,
             color: rgb(color.r / 255, color.g / 255, color.b / 255)
           });
-        } else if (el.type === 'image' || el.type === 'signature') {
+          
+          // #25 Draw underline if needed
+          if (el.underline) {
+            const textWidth = selectedFont.widthOfTextAtSize(el.text, fontSize);
+            page.drawLine({
+              start: { x: el.x, y: pdfY - 2 },
+              end: { x: el.x + textWidth, y: pdfY - 2 },
+              thickness: 1,
+              color: rgb(color.r / 255, color.g / 255, color.b / 255)
+            });
+          }
+        } else if (el.type === 'image' || el.type === 'signature' || el.type === 'drawing') {
           try {
             let imageBytes;
             let isPng = false;
@@ -2234,6 +2449,62 @@ async function savePdf() {
             });
           } catch (imgErr) {
             console.error('Error embedding image:', imgErr);
+          }
+        } else if (el.type === 'shape') {
+          // #22 Draw shapes on PDF
+          const strokeColor = hexToRgb(el.strokeColor || '#000000');
+          const strokeWidth = el.strokeWidth || 2;
+          
+          if (el.shape === 'rect') {
+            page.drawRectangle({
+              x: el.x,
+              y: height - el.y - el.height,
+              width: el.width,
+              height: el.height,
+              borderColor: rgb(strokeColor.r / 255, strokeColor.g / 255, strokeColor.b / 255),
+              borderWidth: strokeWidth,
+              color: undefined // transparent fill
+            });
+          } else if (el.shape === 'line' || el.shape === 'arrow') {
+            const pdfStartY = height - el.startY;
+            const pdfEndY = height - el.endY;
+            page.drawLine({
+              start: { x: el.startX, y: pdfStartY },
+              end: { x: el.endX, y: pdfEndY },
+              thickness: strokeWidth,
+              color: rgb(strokeColor.r / 255, strokeColor.g / 255, strokeColor.b / 255)
+            });
+            
+            // Draw arrowhead for arrow shapes
+            if (el.shape === 'arrow') {
+              const dx = el.endX - el.startX;
+              const dy = pdfEndY - pdfStartY;
+              const len = Math.sqrt(dx * dx + dy * dy);
+              const arrowSize = Math.min(10, len * 0.15);
+              const angle = Math.atan2(dy, dx);
+              
+              // Arrowhead as a small filled triangle
+              const tipX = el.endX;
+              const tipY = pdfEndY;
+              const leftX = tipX - arrowSize * Math.cos(angle - Math.PI / 6);
+              const leftY = tipY - arrowSize * Math.sin(angle - Math.PI / 6);
+              const rightX = tipX - arrowSize * Math.cos(angle + Math.PI / 6);
+              const rightY = tipY - arrowSize * Math.sin(angle + Math.PI / 6);
+              
+              // Draw arrowhead as two small lines forming a V
+              page.drawLine({
+                start: { x: tipX, y: tipY },
+                end: { x: leftX, y: leftY },
+                thickness: strokeWidth,
+                color: rgb(strokeColor.r / 255, strokeColor.g / 255, strokeColor.b / 255)
+              });
+              page.drawLine({
+                start: { x: tipX, y: tipY },
+                end: { x: rightX, y: rightY },
+                thickness: strokeWidth,
+                color: rgb(strokeColor.r / 255, strokeColor.g / 255, strokeColor.b / 255)
+              });
+            }
           }
         }
       }
@@ -2282,7 +2553,596 @@ function clearEditor() {
 // hexToRgb moved to shared-utils.js
 
 // ============================================
-// SPLIT PDF
+// #20 COLLAPSIBLE SIDEBAR
+// ============================================
+function toggleSidebar() {
+  sidebarCollapsed = !sidebarCollapsed;
+  localStorage.setItem('pe_sidebarCollapsed', sidebarCollapsed);
+  applySidebarState();
+}
+
+function applySidebarState() {
+  const sidebar = $('editorSidebar');
+  const canvasArea = $('canvasArea');
+  if (sidebar) {
+    if (sidebarCollapsed) {
+      sidebar.classList.add('sidebar-collapsed');
+    } else {
+      sidebar.classList.remove('sidebar-collapsed');
+    }
+  }
+  if (canvasArea) {
+    if (sidebarCollapsed) {
+      canvasArea.classList.add('sidebar-expanded');
+    } else {
+      canvasArea.classList.remove('sidebar-expanded');
+    }
+  }
+}
+
+// ============================================
+// #19 RECENT SIGNATURES CACHE
+// ============================================
+function getRecentSignatures() {
+  try {
+    return JSON.parse(localStorage.getItem('pe_recentSignatures') || '[]');
+  } catch (e) {
+    return [];
+  }
+}
+
+function addRecentSignature(name, imageUrl) {
+  if (!name || !imageUrl) return;
+  let recents = getRecentSignatures();
+  // Remove duplicate by name
+  recents = recents.filter(s => s.name !== name);
+  // Add to front
+  recents.unshift({ name: name, imageUrl: imageUrl });
+  // Keep max 5
+  if (recents.length > 5) recents = recents.slice(0, 5);
+  localStorage.setItem('pe_recentSignatures', JSON.stringify(recents));
+  renderRecentSignatures();
+}
+
+function renderRecentSignatures() {
+  const recents = getRecentSignatures();
+  const container = $('recentSigs');
+  const list = $('recentSigsList');
+  if (!container || !list) return;
+  
+  if (recents.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+  
+  container.style.display = 'block';
+  list.innerHTML = '';
+  
+  recents.forEach(sig => {
+    const btn = document.createElement('button');
+    btn.className = 'recent-sig-btn';
+    btn.title = sig.name;
+    
+    const img = document.createElement('img');
+    img.src = sig.imageUrl;
+    img.alt = sig.name;
+    btn.appendChild(img);
+    
+    const span = document.createElement('span');
+    span.textContent = sig.name;
+    btn.appendChild(span);
+    
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectSignature(sig.imageUrl, sig.name);
+    });
+    
+    list.appendChild(btn);
+  });
+}
+
+// ============================================
+// #21 FREEHAND DRAWING / PEN TOOL
+// ============================================
+function enterDrawMode() {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc || !activeDoc.pdfJsDoc) {
+    showStatus('Primero carga un PDF', 'error');
+    return;
+  }
+  
+  // Exit shape mode if active
+  if (shapeMode) exitShapeMode();
+  
+  isDrawMode = true;
+  drawPaths = [];
+  drawCurrentPath = [];
+  
+  // Show toolbar
+  const toolbar = $('drawToolbar');
+  if (toolbar) toolbar.style.display = 'flex';
+  
+  // Create canvas overlay on the PDF
+  const canvasArea = $('canvasArea');
+  const container = canvasArea ? canvasArea.querySelector('.canvas-container') : null;
+  if (container) {
+    const overlay = document.createElement('canvas');
+    overlay.className = 'draw-canvas-overlay';
+    overlay.id = 'drawCanvasOverlay';
+    overlay.width = container.offsetWidth;
+    overlay.height = container.offsetHeight;
+    overlay.style.width = container.offsetWidth + 'px';
+    overlay.style.height = container.offsetHeight + 'px';
+    container.appendChild(overlay);
+    drawCanvasOverlay = overlay;
+    
+    overlay.addEventListener('mousedown', onDrawStart);
+    overlay.addEventListener('mousemove', onDrawMove);
+    overlay.addEventListener('mouseup', onDrawEnd);
+    overlay.addEventListener('mouseleave', onDrawEnd);
+  }
+  
+  showStatus('Modo dibujo activado - dibuja sobre el PDF', 'success');
+}
+
+function exitDrawMode() {
+  isDrawMode = false;
+  drawPaths = [];
+  drawCurrentPath = [];
+  
+  const toolbar = $('drawToolbar');
+  if (toolbar) toolbar.style.display = 'none';
+  
+  if (drawCanvasOverlay) {
+    drawCanvasOverlay.removeEventListener('mousedown', onDrawStart);
+    drawCanvasOverlay.removeEventListener('mousemove', onDrawMove);
+    drawCanvasOverlay.removeEventListener('mouseup', onDrawEnd);
+    drawCanvasOverlay.removeEventListener('mouseleave', onDrawEnd);
+    drawCanvasOverlay.remove();
+    drawCanvasOverlay = null;
+  }
+}
+
+function onDrawStart(e) {
+  if (!isDrawMode) return;
+  const rect = drawCanvasOverlay.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  
+  drawStrokeColor = $('drawStrokeColor') ? $('drawStrokeColor').value : '#000000';
+  drawStrokeWidth = $('drawStrokeWidth') ? parseInt($('drawStrokeWidth').value) : 2;
+  
+  drawCurrentPath = [{ x, y, color: drawStrokeColor, width: drawStrokeWidth }];
+  e.preventDefault();
+}
+
+function onDrawMove(e) {
+  if (!isDrawMode || drawCurrentPath.length === 0) return;
+  const rect = drawCanvasOverlay.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  
+  drawCurrentPath.push({ x, y, color: drawStrokeColor, width: drawStrokeWidth });
+  
+  // Draw the latest segment
+  const ctx = drawCanvasOverlay.getContext('2d');
+  const prev = drawCurrentPath[drawCurrentPath.length - 2];
+  ctx.beginPath();
+  ctx.strokeStyle = drawStrokeColor;
+  ctx.lineWidth = drawStrokeWidth;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.moveTo(prev.x, prev.y);
+  ctx.lineTo(x, y);
+  ctx.stroke();
+}
+
+function onDrawEnd(e) {
+  if (!isDrawMode || drawCurrentPath.length === 0) return;
+  
+  if (drawCurrentPath.length > 1) {
+    drawPaths.push([...drawCurrentPath]);
+  }
+  drawCurrentPath = [];
+}
+
+function clearDrawing() {
+  drawPaths = [];
+  drawCurrentPath = [];
+  if (drawCanvasOverlay) {
+    const ctx = drawCanvasOverlay.getContext('2d');
+    ctx.clearRect(0, 0, drawCanvasOverlay.width, drawCanvasOverlay.height);
+  }
+}
+
+function confirmDrawing() {
+  if (drawPaths.length === 0) {
+    showStatus('No hay dibujo para confirmar', 'error');
+    return;
+  }
+  
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) return;
+  
+  // Capture the drawing as a PNG data URL
+  const dataUrl = drawCanvasOverlay.toDataURL('image/png');
+  
+  // Calculate bounding box of the drawing
+  const scale = activeDoc.zoom;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  drawPaths.forEach(path => {
+    path.forEach(pt => {
+      if (pt.x < minX) minX = pt.x;
+      if (pt.y < minY) minY = pt.y;
+      if (pt.x > maxX) maxX = pt.x;
+      if (pt.y > maxY) maxY = pt.y;
+    });
+  });
+  
+  // Convert to PDF coordinates (unscaled)
+  const pdfX = minX / scale;
+  const pdfY = minY / scale;
+  const pdfW = (maxX - minX) / scale || 10;
+  const pdfH = (maxY - minY) / scale || 10;
+  
+  // Store paths for potential re-editing
+  const storedPaths = drawPaths.map(path => path.map(pt => ({
+    x: pt.x / scale,
+    y: pt.y / scale,
+    color: pt.color,
+    width: pt.width / scale
+  })));
+  
+  // Add as a drawing element (rendered as image, like signature)
+  pushElement(activeDoc, activeDoc.currentPage, {
+    type: 'drawing',
+    src: dataUrl,
+    x: pdfX,
+    y: pdfY,
+    width: pdfW,
+    height: pdfH,
+    paths: storedPaths
+  });
+  
+  updateTabModified(activeDoc.id, true);
+  
+  // Exit draw mode and re-render
+  exitDrawMode();
+  renderPage();
+  showStatus('Dibujo añadido', 'success');
+  scheduleAutoSave();
+}
+
+// ============================================
+// #22 SHAPE TOOLS
+// ============================================
+function enterShapeMode(type) {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc || !activeDoc.pdfJsDoc) {
+    showStatus('Primero carga un PDF', 'error');
+    return;
+  }
+  
+  // Exit draw mode if active
+  if (isDrawMode) exitDrawMode();
+  
+  // Toggle shape mode
+  if (shapeMode === type) {
+    exitShapeMode();
+    return;
+  }
+  
+  shapeMode = type;
+  shapeIsDrawing = false;
+  showStatus(`Modo ${type === 'rect' ? 'rectángulo' : type === 'line' ? 'línea' : 'flecha'} activado - arrastra sobre el PDF`, 'success');
+}
+
+function exitShapeMode() {
+  shapeMode = null;
+  shapeIsDrawing = false;
+  const svg = $('shapePreviewSvg');
+  if (svg) { svg.style.display = 'none'; svg.innerHTML = ''; }
+}
+
+function getCanvasContainer() {
+  const canvasArea = $('canvasArea');
+  return canvasArea ? canvasArea.querySelector('.canvas-container') : null;
+}
+
+function onShapeMouseDown(e) {
+  if (!shapeMode) return;
+  const container = getCanvasContainer();
+  if (!container) return;
+  
+  // Only handle clicks on the overlay or container, not on elements
+  if (e.target.closest('.pdf-element') || e.target.closest('.resize-handle')) return;
+  
+  const rect = container.getBoundingClientRect();
+  shapeStartX = e.clientX - rect.left;
+  shapeStartY = e.clientY - rect.top;
+  shapeIsDrawing = true;
+  
+  const svg = $('shapePreviewSvg');
+  if (svg) {
+    svg.style.display = 'block';
+    svg.style.width = container.offsetWidth + 'px';
+    svg.style.height = container.offsetHeight + 'px';
+    svg.style.left = container.offsetLeft + 'px';
+    svg.style.top = container.offsetTop + 'px';
+    svg.innerHTML = '';
+  }
+  
+  e.preventDefault();
+}
+
+function onShapeMouseMove(e) {
+  if (!shapeMode || !shapeIsDrawing) return;
+  const container = getCanvasContainer();
+  if (!container) return;
+  
+  const rect = container.getBoundingClientRect();
+  const curX = e.clientX - rect.left;
+  const curY = e.clientY - rect.top;
+  
+  const svg = $('shapePreviewSvg');
+  if (!svg) return;
+  
+  const x1 = Math.min(shapeStartX, curX);
+  const y1 = Math.min(shapeStartY, curY);
+  const w = Math.abs(curX - shapeStartX);
+  const h = Math.abs(curY - shapeStartY);
+  
+  svg.innerHTML = '';
+  
+  if (shapeMode === 'rect') {
+    svg.innerHTML = `<rect x="${x1}" y="${y1}" width="${w}" height="${h}" fill="none" stroke="#000000" stroke-width="2"/>`;
+  } else if (shapeMode === 'line') {
+    svg.innerHTML = `<line x1="${shapeStartX}" y1="${shapeStartY}" x2="${curX}" y2="${curY}" stroke="#000000" stroke-width="2"/>`;
+  } else if (shapeMode === 'arrow') {
+    const dx = curX - shapeStartX;
+    const dy = curY - shapeStartY;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const arrowSize = Math.min(15, len * 0.15);
+    const angle = Math.atan2(dy, dx);
+    const ax1 = curX - arrowSize * Math.cos(angle - Math.PI / 6);
+    const ay1 = curY - arrowSize * Math.sin(angle - Math.PI / 6);
+    const ax2 = curX - arrowSize * Math.cos(angle + Math.PI / 6);
+    const ay2 = curY - arrowSize * Math.sin(angle + Math.PI / 6);
+    svg.innerHTML = `<line x1="${shapeStartX}" y1="${shapeStartY}" x2="${curX}" y2="${curY}" stroke="#000000" stroke-width="2"/>
+      <polygon points="${curX},${curY} ${ax1},${ay1} ${ax2},${ay2}" fill="#000000"/>`;
+  }
+}
+
+function onShapeMouseUp(e) {
+  if (!shapeMode || !shapeIsDrawing) return;
+  shapeIsDrawing = false;
+  
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) return;
+  
+  const container = getCanvasContainer();
+  if (!container) return;
+  
+  const rect = container.getBoundingClientRect();
+  const curX = e.clientX - rect.left;
+  const curY = e.clientY - rect.top;
+  const scale = activeDoc.zoom;
+  
+  const w = Math.abs(curX - shapeStartX);
+  const h = Math.abs(curY - shapeStartY);
+  
+  // Minimum size to create a shape
+  if (w < 5 && h < 5) {
+    const svg = $('shapePreviewSvg');
+    if (svg) { svg.style.display = 'none'; svg.innerHTML = ''; }
+    return;
+  }
+  
+  const x = Math.min(shapeStartX, shapeStartX + (curX - shapeStartX)) / scale;
+  const y = Math.min(shapeStartY, shapeStartY + (curY - shapeStartY)) / scale;
+  const pdfW = w / scale;
+  const pdfH = h / scale;
+  
+  // For line/arrow, store start and end points relative to the bounding box
+  const startXpdf = shapeStartX / scale;
+  const startYpdf = shapeStartY / scale;
+  const endXpdf = curX / scale;
+  const endYpdf = curY / scale;
+  
+  pushElement(activeDoc, activeDoc.currentPage, {
+    type: 'shape',
+    shape: shapeMode,
+    x: Math.min(startXpdf, endXpdf),
+    y: Math.min(startYpdf, endYpdf),
+    width: pdfW,
+    height: pdfH,
+    startX: startXpdf,
+    startY: startYpdf,
+    endX: endXpdf,
+    endY: endYpdf,
+    strokeColor: '#000000',
+    strokeWidth: 2,
+    fillColor: 'transparent'
+  });
+  
+  // Clear preview
+  const svg = $('shapePreviewSvg');
+  if (svg) { svg.style.display = 'none'; svg.innerHTML = ''; }
+  
+  updateTabModified(activeDoc.id, true);
+  renderPage();
+  showStatus(`${shapeMode === 'rect' ? 'Rectángulo' : shapeMode === 'line' ? 'Línea' : 'Flecha'} añadido`, 'success');
+  scheduleAutoSave();
+  
+  // Stay in shape mode for repeated shapes
+}
+
+// ============================================
+// #25 RICH TEXT HELPERS
+// ============================================
+function getRichTextState() {
+  return {
+    bold: $('btnBold') ? $('btnBold').classList.contains('active') : false,
+    italic: $('btnItalic') ? $('btnItalic').classList.contains('active') : false,
+    underline: $('btnUnderline') ? $('btnUnderline').classList.contains('active') : false
+  };
+}
+
+function setRichTextState(bold, italic, underline) {
+  const btnBold = $('btnBold');
+  const btnItalic = $('btnItalic');
+  const btnUnderline = $('btnUnderline');
+  if (btnBold) { if (bold) btnBold.classList.add('active'); else btnBold.classList.remove('active'); }
+  if (btnItalic) { if (italic) btnItalic.classList.add('active'); else btnItalic.classList.remove('active'); }
+  if (btnUnderline) { if (underline) btnUnderline.classList.add('active'); else btnUnderline.classList.remove('active'); }
+}
+
+// ============================================
+// #26 PAGE REORDERING
+// ============================================
+async function renderPageThumbnails() {
+  const activeDoc = getActiveDoc();
+  const container = $('pageThumbnails');
+  const noPdf = $('pagesNoPdf');
+  if (!container) return;
+  
+  if (!activeDoc || !activeDoc.pdfJsDoc) {
+    if (noPdf) noPdf.style.display = 'block';
+    container.style.display = 'none';
+    return;
+  }
+  
+  if (noPdf) noPdf.style.display = 'none';
+  container.style.display = 'flex';
+  container.innerHTML = '';
+  
+  for (let i = 1; i <= activeDoc.totalPages; i++) {
+    const thumb = document.createElement('div');
+    thumb.className = 'page-thumb' + (i === activeDoc.currentPage ? ' active-page' : '');
+    thumb.draggable = true;
+    thumb.dataset.pageNum = i;
+    
+    // Render thumbnail canvas
+    try {
+      const page = await activeDoc.pdfJsDoc.getPage(i);
+      const viewport = page.getViewport({ scale: 0.2 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext('2d');
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      thumb.appendChild(canvas);
+    } catch (err) {
+      const placeholder = document.createElement('div');
+      placeholder.style.cssText = 'width:60px;height:80px;background:#1e293b;border-radius:4px;';
+      thumb.appendChild(placeholder);
+    }
+    
+    const label = document.createElement('span');
+    label.className = 'page-thumb-label';
+    label.textContent = `Pág. ${i}`;
+    thumb.appendChild(label);
+    
+    // Click to navigate
+    thumb.addEventListener('click', () => {
+      activeDoc.currentPage = i;
+      renderPage();
+      renderPageThumbnails();
+    });
+    
+    // Drag events
+    thumb.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', i.toString());
+      thumb.classList.add('dragging');
+    });
+    
+    thumb.addEventListener('dragend', () => {
+      thumb.classList.remove('dragging');
+    });
+    
+    thumb.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      thumb.classList.add('drag-over');
+    });
+    
+    thumb.addEventListener('dragleave', () => {
+      thumb.classList.remove('drag-over');
+    });
+    
+    thumb.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      thumb.classList.remove('drag-over');
+      const fromPage = parseInt(e.dataTransfer.getData('text/plain'));
+      const toPage = i;
+      if (fromPage !== toPage) {
+        await reorderPages(fromPage, toPage);
+      }
+    });
+    
+    container.appendChild(thumb);
+  }
+}
+
+async function reorderPages(fromIndex, toIndex) {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc || !activeDoc.originalPdfBytes) return;
+  
+  try {
+    const pdfLib = window.PDFLib;
+    const { PDFDocument } = pdfLib;
+    
+    const srcPdf = await PDFDocument.load(activeDoc.originalPdfBytes, { ignoreEncryption: true });
+    const newPdfDoc = await PDFDocument.create();
+    
+    // Build new page order
+    const pageOrder = [];
+    for (let i = 1; i <= activeDoc.totalPages; i++) pageOrder.push(i);
+    
+    // Move fromIndex to toIndex
+    const moved = pageOrder.splice(fromIndex - 1, 1)[0];
+    pageOrder.splice(toIndex - 1, 0, moved);
+    
+    // Copy pages in new order
+    for (const pageNum of pageOrder) {
+      const [copiedPage] = await newPdfDoc.copyPages(srcPdf, [pageNum - 1]);
+      newPdfDoc.addPage(copiedPage);
+    }
+    
+    const newPdfBytes = await newPdfDoc.save();
+    
+    // Update the document with new PDF bytes
+    activeDoc.originalPdfBytes = newPdfBytes;
+    
+    // Re-load with pdfjs
+    const pdfjsDoc = await window.pdfjsLib.getDocument({ data: newPdfBytes.slice(0) }).promise;
+    activeDoc.pdfJsDoc = pdfjsDoc;
+    activeDoc.totalPages = pdfjsDoc.numPages;
+    
+    // Remap elements: elements were keyed by old page numbers
+    // After reorder, element on old page X is now on new position
+    const oldElements = activeDoc.elements;
+    const newElements = {};
+    pageOrder.forEach((oldPageNum, newPageNum) => {
+      newElements[newPageNum + 1] = oldElements[oldPageNum] || [];
+    });
+    activeDoc.elements = newElements;
+    
+    // Ensure current page is valid
+    if (activeDoc.currentPage > activeDoc.totalPages) {
+      activeDoc.currentPage = activeDoc.totalPages;
+    }
+    
+    updateTabModified(activeDoc.id, true);
+    renderPage();
+    renderPageThumbnails();
+    showStatus(`Página ${fromIndex} movida a posición ${toIndex}`, 'success');
+    scheduleAutoSave();
+    
+  } catch (err) {
+    console.error('Reorder error:', err);
+    showStatus('Error al reordenar: ' + err.message, 'error');
+  }
+}
 // ============================================
 
 function setupSplit() {
