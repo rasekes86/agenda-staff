@@ -1,5 +1,5 @@
 // ============================================
-// PDF EDITOR FULL SCREEN - AGENDA STAFF v8.1.0
+// PDF EDITOR FULL SCREEN - AGENDA STAFF v8.2.0
 // Fixed: Auth, Natural signatures, PDF protection (encryption + permissions)
 // ============================================
 
@@ -594,6 +594,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   setupEventListeners();
   setupToolTabs();
+  setupCollapsibleInstructions();
   setupImgToPdf();
   setupWordToPdf();
   setupMerge();
@@ -1194,6 +1195,27 @@ function setupToolTabs() {
       if (tool === 'split') updateSplitTool();
       if (tool === 'pages') renderPageThumbnails();
     });
+  });
+}
+
+// ============================================
+// COLLAPSIBLE INSTRUCTIONS
+// ============================================
+
+function setupCollapsibleInstructions() {
+  const toggle = $('instructionsToggle');
+  const content = $('instructionsContent');
+  if (!toggle || !content) return;
+  
+  toggle.addEventListener('click', () => {
+    const isOpen = content.style.display !== 'none';
+    if (isOpen) {
+      content.style.display = 'none';
+      toggle.classList.remove('open');
+    } else {
+      content.style.display = 'block';
+      toggle.classList.add('open');
+    }
   });
 }
 
@@ -2181,7 +2203,7 @@ async function uploadMissingSignature(name) {
         }
       }
       
-      // Now upload the new signature
+      // Now upload the new signature to Supabase
       const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
       const bodyData = { id, name: upperName, image_url: processedBase64 };
       if (currentUser) {
@@ -2205,7 +2227,12 @@ async function uploadMissingSignature(name) {
         throw new Error('Error al subir: ' + errorText);
       }
       
-      showStatus('✓ Firma guardada: ' + name, 'success');
+      showStatus('✓ Firma guardada en Supabase: ' + name, 'success');
+      
+      // Also place the signature on the PDF (same as selectSignature flow)
+      selectSignature(processedBase64, name);
+      
+      // Refresh search results
       searchSignatures();
     } catch (err) {
       console.error('Upload signature error:', err);
