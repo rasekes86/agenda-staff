@@ -389,8 +389,10 @@ function formatTime(time) {
 }
 
 async function sendToSupabase(content, accessToken, userId, userName) {
+  // SUPABASE_URL and SUPABASE_KEY are loaded from supabase-config.js (imported by sidepanel)
+  // In service worker context, we need them defined here since scripts don't share scope
   const SUPABASE_URL = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
-  const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1Z3V0Y3N1a3hreGxncGttenh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzc5OTExMjksImV4cCI6MjA1MzU2NzEyOX0.PpolAzqqXNBOhRlUVzplqkKeGQxzfed4gH377CidVJE';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1Z3V0Y3N1a3hreGxncGttenh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzc5OTExMjksImV4cCI6MjA1MzU2NzEyOX0.PpolAzqqXNBOhRlUVzplqkKeGQxzfed4gH377CidVJE';
   
   const detectedDate = detectDate(content);
   
@@ -414,7 +416,7 @@ async function sendToSupabase(content, accessToken, userId, userName) {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/calendar_events`, {
       method: 'POST',
       headers: {
-        'apikey': SUPABASE_KEY,
+        'apikey': SUPABASE_ANON_KEY,
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
         'Prefer': 'return=representation'
