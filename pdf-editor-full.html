@@ -192,24 +192,18 @@
             </svg>
             Dibujar
           </button>
-          <button class="sidebar-btn" id="btnShapeRect" style="background:#64748b;color:#f1f5f9;">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          <button class="sidebar-btn" id="btnStampCheck" style="background:#16a34a;color:#f1f5f9;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+              <polyline points="20 6 9 17 4 12"></polyline>
             </svg>
-            Rectángulo
+            ✓ Check
           </button>
-          <button class="sidebar-btn" id="btnShapeLine" style="background:#64748b;color:#f1f5f9;">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="5" y1="19" x2="19" y2="5"></line>
+          <button class="sidebar-btn" id="btnStampX" style="background:#dc2626;color:#f1f5f9;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
             </svg>
-            Línea
-          </button>
-          <button class="sidebar-btn" id="btnShapeArrow" style="background:#64748b;color:#f1f5f9;">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="5" y1="19" x2="19" y2="5"></line>
-              <polyline points="10 5 19 5 19 14"></polyline>
-            </svg>
-            Flecha
+            ✗ X
           </button>
         </div>
         
@@ -619,8 +613,7 @@
     <button class="draw-toolbar-btn draw-confirm" id="btnDrawConfirm" title="Confirmar dibujo">Confirmar</button>
   </div>
 
-  <!-- Shape Preview Overlay (SVG) -->
-  <svg class="shape-preview-svg" id="shapePreviewSvg" style="display:none;position:absolute;top:0;left:0;z-index:60;pointer-events:none;"></svg>
+  <!-- Shape preview removed (stamps use click placement, no drag preview) -->
 
   <!-- Status message -->
   <div class="status-msg" id="statusMsg"></div>

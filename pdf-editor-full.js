@@ -48,12 +48,9 @@ let drawStrokeWidth = 2;
 let drawCanvasOverlay = null;
 
 // ============================================
-// #22 SHAPE TOOL STATE
+// #22 STAMP TOOL STATE
 // ============================================
-let shapeMode = null; // 'rect', 'line', 'arrow' or null
-let shapeStartX = 0;
-let shapeStartY = 0;
-let shapeIsDrawing = false;
+// stampMode is declared with the stamp functions below
 
 // State for tools that create NEW PDFs
 let imgFiles = [];
@@ -733,13 +730,11 @@ function setupEventListeners() {
   const btnDrawConfirm = $('btnDrawConfirm');
   if (btnDrawConfirm) btnDrawConfirm.addEventListener('click', confirmDrawing);
   
-  // #22 Shape tool buttons
-  const btnShapeRect = $('btnShapeRect');
-  if (btnShapeRect) btnShapeRect.addEventListener('click', () => enterShapeMode('rect'));
-  const btnShapeLine = $('btnShapeLine');
-  if (btnShapeLine) btnShapeLine.addEventListener('click', () => enterShapeMode('line'));
-  const btnShapeArrow = $('btnShapeArrow');
-  if (btnShapeArrow) btnShapeArrow.addEventListener('click', () => enterShapeMode('arrow'));
+  // #22 Stamp tool buttons (Check and X)
+  const btnStampCheck = $('btnStampCheck');
+  if (btnStampCheck) btnStampCheck.addEventListener('click', () => enterStampMode('check'));
+  const btnStampX = $('btnStampX');
+  if (btnStampX) btnStampX.addEventListener('click', () => enterStampMode('x'));
   
   // #25 Rich text toggle buttons
   const btnBold = $('btnBold');
@@ -841,8 +836,8 @@ function setupEventListeners() {
       exitDrawMode();
       return;
     }
-    if (e.key === 'Escape' && shapeMode) {
-      exitShapeMode();
+    if (e.key === 'Escape' && stampMode) {
+      exitStampMode();
       return;
     }
     
@@ -1256,11 +1251,11 @@ async function renderPage() {
     
     // dblclick handler is now delegated on canvasArea (M9) — no inline listener here
     
-    // Mousedown on overlay starts box selection (or shape drawing)
+    // Mousedown on overlay starts box selection (or stamp placement)
     overlay.addEventListener('mousedown', (e) => {
-      // #22 Shape mode: handle shape drawing on overlay
-      if (shapeMode) {
-        onShapeMouseDown(e);
+      // #22 Stamp mode: place check/X on click
+      if (stampMode) {
+        onStampClick(e);
         return;
       }
       // Don't start box selection in draw mode
@@ -1276,13 +1271,7 @@ async function renderPage() {
       }
     });
     
-    // #22 Shape mouse move/up on overlay
-    overlay.addEventListener('mousemove', (e) => {
-      if (shapeMode) onShapeMouseMove(e);
-    });
-    overlay.addEventListener('mouseup', (e) => {
-      if (shapeMode) onShapeMouseUp(e);
-    });
+    // #22 Stamp click handled in mousedown above
     
     const currentPageNum = $('currentPageNum');
     const totalPagesNum = $('totalPagesNum');
@@ -1347,76 +1336,7 @@ function createElementDiv(el, idx, scale, activeDoc) {
     if (el.type === 'drawing') {
       div.title = 'Dibujo';
     }
-  } else if (el.type === 'shape') {
-    // #22 Render shape as SVG
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('width', Math.max(1, el.width * scale));
-    svg.setAttribute('height', Math.max(1, el.height * scale));
-    svg.style.overflow = 'visible';
-    
-    const strokeColor = el.strokeColor || '#000000';
-    const strokeWidth = el.strokeWidth || 2;
-    const fillColor = el.fillColor || 'transparent';
-    
-    if (el.shape === 'rect') {
-      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-      rect.setAttribute('x', '0');
-      rect.setAttribute('y', '0');
-      rect.setAttribute('width', Math.max(1, el.width * scale));
-      rect.setAttribute('height', Math.max(1, el.height * scale));
-      rect.setAttribute('fill', fillColor);
-      rect.setAttribute('stroke', strokeColor);
-      rect.setAttribute('stroke-width', strokeWidth);
-      svg.appendChild(rect);
-    } else if (el.shape === 'line') {
-      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      const sx = (el.startX - el.x) * scale;
-      const sy = (el.startY - el.y) * scale;
-      const ex = (el.endX - el.x) * scale;
-      const ey = (el.endY - el.y) * scale;
-      line.setAttribute('x1', sx);
-      line.setAttribute('y1', sy);
-      line.setAttribute('x2', ex);
-      line.setAttribute('y2', ey);
-      line.setAttribute('stroke', strokeColor);
-      line.setAttribute('stroke-width', strokeWidth);
-      svg.appendChild(line);
-    } else if (el.shape === 'arrow') {
-      const sx = (el.startX - el.x) * scale;
-      const sy = (el.startY - el.y) * scale;
-      const ex = (el.endX - el.x) * scale;
-      const ey = (el.endY - el.y) * scale;
-      
-      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      line.setAttribute('x1', sx);
-      line.setAttribute('y1', sy);
-      line.setAttribute('x2', ex);
-      line.setAttribute('y2', ey);
-      line.setAttribute('stroke', strokeColor);
-      line.setAttribute('stroke-width', strokeWidth);
-      svg.appendChild(line);
-      
-      // Arrowhead
-      const dx = ex - sx;
-      const dy = ey - sy;
-      const len = Math.sqrt(dx * dx + dy * dy);
-      const arrowSize = Math.min(12, len * 0.15);
-      const angle = Math.atan2(dy, dx);
-      const ax1 = ex - arrowSize * Math.cos(angle - Math.PI / 6);
-      const ay1 = ey - arrowSize * Math.sin(angle - Math.PI / 6);
-      const ax2 = ex - arrowSize * Math.cos(angle + Math.PI / 6);
-      const ay2 = ey - arrowSize * Math.sin(angle + Math.PI / 6);
-      
-      const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-      polygon.setAttribute('points', `${ex},${ey} ${ax1},${ay1} ${ax2},${ay2}`);
-      polygon.setAttribute('fill', strokeColor);
-      svg.appendChild(polygon);
-    }
-    
-    div.appendChild(svg);
-    div.style.width = Math.max(1, el.width * scale) + 'px';
-    div.style.height = Math.max(1, el.height * scale) + 'px';
-  }
+  } // end shape/image element rendering (shapes removed, stamps are type 'image')
   
   // Multi-select: Shift+click to toggle selection
   div.addEventListener('click', (e) => {
@@ -2927,63 +2847,8 @@ async function savePdf() {
           } catch (imgErr) {
             console.error('Error embedding image:', imgErr);
           }
-        } else if (el.type === 'shape') {
-          // #22 Draw shapes on PDF
-          const strokeColor = hexToRgb(el.strokeColor || '#000000');
-          const strokeWidth = el.strokeWidth || 2;
-          
-          if (el.shape === 'rect') {
-            page.drawRectangle({
-              x: el.x,
-              y: height - el.y - el.height,
-              width: el.width,
-              height: el.height,
-              borderColor: rgb(strokeColor.r / 255, strokeColor.g / 255, strokeColor.b / 255),
-              borderWidth: strokeWidth,
-              color: undefined // transparent fill
-            });
-          } else if (el.shape === 'line' || el.shape === 'arrow') {
-            const pdfStartY = height - el.startY;
-            const pdfEndY = height - el.endY;
-            page.drawLine({
-              start: { x: el.startX, y: pdfStartY },
-              end: { x: el.endX, y: pdfEndY },
-              thickness: strokeWidth,
-              color: rgb(strokeColor.r / 255, strokeColor.g / 255, strokeColor.b / 255)
-            });
-            
-            // Draw arrowhead for arrow shapes
-            if (el.shape === 'arrow') {
-              const dx = el.endX - el.startX;
-              const dy = pdfEndY - pdfStartY;
-              const len = Math.sqrt(dx * dx + dy * dy);
-              const arrowSize = Math.min(10, len * 0.15);
-              const angle = Math.atan2(dy, dx);
-              
-              // Arrowhead as a small filled triangle
-              const tipX = el.endX;
-              const tipY = pdfEndY;
-              const leftX = tipX - arrowSize * Math.cos(angle - Math.PI / 6);
-              const leftY = tipY - arrowSize * Math.sin(angle - Math.PI / 6);
-              const rightX = tipX - arrowSize * Math.cos(angle + Math.PI / 6);
-              const rightY = tipY - arrowSize * Math.sin(angle + Math.PI / 6);
-              
-              // Draw arrowhead as two small lines forming a V
-              page.drawLine({
-                start: { x: tipX, y: tipY },
-                end: { x: leftX, y: leftY },
-                thickness: strokeWidth,
-                color: rgb(strokeColor.r / 255, strokeColor.g / 255, strokeColor.b / 255)
-              });
-              page.drawLine({
-                start: { x: tipX, y: tipY },
-                end: { x: rightX, y: rightY },
-                thickness: strokeWidth,
-                color: rgb(strokeColor.r / 255, strokeColor.g / 255, strokeColor.b / 255)
-              });
-            }
-          }
         }
+        // Shape type removed — stamps are saved as type 'image' above
       }
     }
     
@@ -3045,13 +2910,24 @@ async function savePdf() {
 }
 
 function clearEditor() {
-  const activeDoc = getActiveDoc();
-  if (!activeDoc) return;
+  // Clear ALL loaded PDFs and return to upload screen
+  if (documents.length === 0) return;
   
-  const hasElements = Object.values(activeDoc.elements).some(arr => arr.length > 0);
-  if (hasElements && !confirm('¿Limpiar los cambios del documento actual?')) return;
+  const hasAnyElements = documents.some(doc => 
+    Object.values(doc.elements).some(arr => arr.length > 0)
+  );
+  if (hasAnyElements && !confirm('¿Limpiar todos los documentos? Se perderán los cambios no guardados.')) return;
   
-  closeTab(activeDoc.id);
+  // Remove all documents at once
+  documents.length = 0;
+  activeDocIndex = -1;
+  
+  // Remove all tabs
+  document.querySelectorAll('.doc-tab').forEach(tab => tab.remove());
+  
+  // Show upload area
+  showUploadArea();
+  showStatus('Documentos limpiados', 'success');
 }
 
 // hexToRgb moved to shared-utils.js
@@ -3155,8 +3031,8 @@ function enterDrawMode() {
     return;
   }
   
-  // Exit shape mode if active
-  if (shapeMode) exitShapeMode();
+  // Exit stamp mode if active
+  if (stampMode) exitStampMode();
   
   isDrawMode = true;
   drawPaths = [];
@@ -3297,14 +3173,15 @@ function confirmDrawing() {
     width: pt.width / scale
   })));
   
-  // Add as a drawing element (rendered as image, like signature)
+  // Add as a signature element (so save dialog recognizes it)
   pushElement(activeDoc, activeDoc.currentPage, {
-    type: 'drawing',
+    type: 'signature',
     src: dataUrl,
     x: pdfX,
     y: pdfY,
     width: pdfW,
     height: pdfH,
+    name: 'Firma manuscrita',
     paths: storedPaths
   });
   
@@ -3313,14 +3190,62 @@ function confirmDrawing() {
   // Exit draw mode and re-render
   exitDrawMode();
   renderPage();
-  showStatus('Dibujo añadido', 'success');
+  showStatus('Firma manuscrita añadida', 'success');
   scheduleAutoSave();
 }
 
 // ============================================
-// #22 SHAPE TOOLS
+// #22 STAMP TOOLS (Check ✓ and X ✗)
 // ============================================
-function enterShapeMode(type) {
+let stampMode = null; // 'check' or 'x' or null
+
+/**
+ * Generate a stamp image (check or X) as a PNG data URL.
+ * @param {string} type - 'check' or 'x'
+ * @param {string} color - hex color
+ * @param {number} size - canvas size in pixels
+ * @returns {string} PNG data URL
+ */
+function generateStampImage(type, color, size) {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  
+  const r = parseInt(color.slice(1,3), 16);
+  const g = parseInt(color.slice(3,5), 16);
+  const b = parseInt(color.slice(5,7), 16);
+  
+  ctx.strokeStyle = `rgba(${r},${g},${b},0.85)`;
+  ctx.lineWidth = Math.max(2, size * 0.08);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  
+  const pad = size * 0.15;
+  
+  if (type === 'check') {
+    // Draw a checkmark ✓
+    ctx.beginPath();
+    ctx.moveTo(pad, size * 0.55);
+    ctx.lineTo(size * 0.38, size - pad);
+    ctx.lineTo(size - pad, pad);
+    ctx.stroke();
+  } else {
+    // Draw an X ✗
+    ctx.beginPath();
+    ctx.moveTo(pad, pad);
+    ctx.lineTo(size - pad, size - pad);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(size - pad, pad);
+    ctx.lineTo(pad, size - pad);
+    ctx.stroke();
+  }
+  
+  return canvas.toDataURL('image/png');
+}
+
+function enterStampMode(type) {
   const activeDoc = getActiveDoc();
   if (!activeDoc || !activeDoc.pdfJsDoc) {
     showStatus('Primero carga un PDF', 'error');
@@ -3330,96 +3255,22 @@ function enterShapeMode(type) {
   // Exit draw mode if active
   if (isDrawMode) exitDrawMode();
   
-  // Toggle shape mode
-  if (shapeMode === type) {
-    exitShapeMode();
+  // Toggle stamp mode
+  if (stampMode === type) {
+    exitStampMode();
     return;
   }
   
-  shapeMode = type;
-  shapeIsDrawing = false;
-  showStatus(`Modo ${type === 'rect' ? 'rectángulo' : type === 'line' ? 'línea' : 'flecha'} activado - arrastra sobre el PDF`, 'success');
+  stampMode = type;
+  showStatus(`Modo ${type === 'check' ? '✓ Check' : '✗ X'} activado - haz clic en el PDF para colocar`, 'success');
 }
 
-function exitShapeMode() {
-  shapeMode = null;
-  shapeIsDrawing = false;
-  const svg = $('shapePreviewSvg');
-  if (svg) { svg.style.display = 'none'; svg.innerHTML = ''; }
+function exitStampMode() {
+  stampMode = null;
 }
 
-function getCanvasContainer() {
-  const canvasArea = $('canvasArea');
-  return canvasArea ? canvasArea.querySelector('.canvas-container') : null;
-}
-
-function onShapeMouseDown(e) {
-  if (!shapeMode) return;
-  const container = getCanvasContainer();
-  if (!container) return;
-  
-  // Only handle clicks on the overlay or container, not on elements
-  if (e.target.closest('.pdf-element') || e.target.closest('.resize-handle')) return;
-  
-  const rect = container.getBoundingClientRect();
-  shapeStartX = e.clientX - rect.left;
-  shapeStartY = e.clientY - rect.top;
-  shapeIsDrawing = true;
-  
-  const svg = $('shapePreviewSvg');
-  if (svg) {
-    svg.style.display = 'block';
-    svg.style.width = container.offsetWidth + 'px';
-    svg.style.height = container.offsetHeight + 'px';
-    svg.style.left = container.offsetLeft + 'px';
-    svg.style.top = container.offsetTop + 'px';
-    svg.innerHTML = '';
-  }
-  
-  e.preventDefault();
-}
-
-function onShapeMouseMove(e) {
-  if (!shapeMode || !shapeIsDrawing) return;
-  const container = getCanvasContainer();
-  if (!container) return;
-  
-  const rect = container.getBoundingClientRect();
-  const curX = e.clientX - rect.left;
-  const curY = e.clientY - rect.top;
-  
-  const svg = $('shapePreviewSvg');
-  if (!svg) return;
-  
-  const x1 = Math.min(shapeStartX, curX);
-  const y1 = Math.min(shapeStartY, curY);
-  const w = Math.abs(curX - shapeStartX);
-  const h = Math.abs(curY - shapeStartY);
-  
-  svg.innerHTML = '';
-  
-  if (shapeMode === 'rect') {
-    svg.innerHTML = `<rect x="${x1}" y="${y1}" width="${w}" height="${h}" fill="none" stroke="#000000" stroke-width="2"/>`;
-  } else if (shapeMode === 'line') {
-    svg.innerHTML = `<line x1="${shapeStartX}" y1="${shapeStartY}" x2="${curX}" y2="${curY}" stroke="#000000" stroke-width="2"/>`;
-  } else if (shapeMode === 'arrow') {
-    const dx = curX - shapeStartX;
-    const dy = curY - shapeStartY;
-    const len = Math.sqrt(dx * dx + dy * dy);
-    const arrowSize = Math.min(15, len * 0.15);
-    const angle = Math.atan2(dy, dx);
-    const ax1 = curX - arrowSize * Math.cos(angle - Math.PI / 6);
-    const ay1 = curY - arrowSize * Math.sin(angle - Math.PI / 6);
-    const ax2 = curX - arrowSize * Math.cos(angle + Math.PI / 6);
-    const ay2 = curY - arrowSize * Math.sin(angle + Math.PI / 6);
-    svg.innerHTML = `<line x1="${shapeStartX}" y1="${shapeStartY}" x2="${curX}" y2="${curY}" stroke="#000000" stroke-width="2"/>
-      <polygon points="${curX},${curY} ${ax1},${ay1} ${ax2},${ay2}" fill="#000000"/>`;
-  }
-}
-
-function onShapeMouseUp(e) {
-  if (!shapeMode || !shapeIsDrawing) return;
-  shapeIsDrawing = false;
+function onStampClick(e) {
+  if (!stampMode) return;
   
   const activeDoc = getActiveDoc();
   if (!activeDoc) return;
@@ -3427,58 +3278,45 @@ function onShapeMouseUp(e) {
   const container = getCanvasContainer();
   if (!container) return;
   
+  // Only handle clicks on the container, not on existing elements
+  if (e.target.closest('.pdf-element') || e.target.closest('.resize-handle')) return;
+  
   const rect = container.getBoundingClientRect();
-  const curX = e.clientX - rect.left;
-  const curY = e.clientY - rect.top;
+  const clickX = e.clientX - rect.left;
+  const clickY = e.clientY - rect.top;
   const scale = activeDoc.zoom;
   
-  const w = Math.abs(curX - shapeStartX);
-  const h = Math.abs(curY - shapeStartY);
+  // Stamp size (in PDF points, ~30pt)
+  const stampSize = 30;
+  const stampSizePx = stampSize * scale;
   
-  // Minimum size to create a shape
-  if (w < 5 && h < 5) {
-    const svg = $('shapePreviewSvg');
-    if (svg) { svg.style.display = 'none'; svg.innerHTML = ''; }
-    return;
-  }
+  // Generate stamp image
+  const dataUrl = generateStampImage(stampMode, '#000000', Math.round(stampSizePx * 2));
   
-  const x = Math.min(shapeStartX, shapeStartX + (curX - shapeStartX)) / scale;
-  const y = Math.min(shapeStartY, shapeStartY + (curY - shapeStartY)) / scale;
-  const pdfW = w / scale;
-  const pdfH = h / scale;
-  
-  // For line/arrow, store start and end points relative to the bounding box
-  const startXpdf = shapeStartX / scale;
-  const startYpdf = shapeStartY / scale;
-  const endXpdf = curX / scale;
-  const endYpdf = curY / scale;
+  // Position: center the stamp on the click point
+  const pdfX = (clickX - stampSizePx / 2) / scale;
+  const pdfY = (clickY - stampSizePx / 2) / scale;
   
   pushElement(activeDoc, activeDoc.currentPage, {
-    type: 'shape',
-    shape: shapeMode,
-    x: Math.min(startXpdf, endXpdf),
-    y: Math.min(startYpdf, endYpdf),
-    width: pdfW,
-    height: pdfH,
-    startX: startXpdf,
-    startY: startYpdf,
-    endX: endXpdf,
-    endY: endYpdf,
-    strokeColor: '#000000',
-    strokeWidth: 2,
-    fillColor: 'transparent'
+    type: 'image',
+    src: dataUrl,
+    x: pdfX,
+    y: pdfY,
+    width: stampSize,
+    height: stampSize
   });
-  
-  // Clear preview
-  const svg = $('shapePreviewSvg');
-  if (svg) { svg.style.display = 'none'; svg.innerHTML = ''; }
   
   updateTabModified(activeDoc.id, true);
   renderPage();
-  showStatus(`${shapeMode === 'rect' ? 'Rectángulo' : shapeMode === 'line' ? 'Línea' : 'Flecha'} añadido`, 'success');
+  showStatus(`${stampMode === 'check' ? '✓ Check' : '✗ X'} añadido`, 'success');
   scheduleAutoSave();
   
-  // Stay in shape mode for repeated shapes
+  // Stay in stamp mode for repeated stamps
+}
+
+function getCanvasContainer() {
+  const canvasArea = $('canvasArea');
+  return canvasArea ? canvasArea.querySelector('.canvas-container') : null;
 }
 
 // ============================================
