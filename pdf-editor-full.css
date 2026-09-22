@@ -481,10 +481,21 @@ body {
 }
 
 .pdf-element-text {
-  background: rgba(255, 255, 0, 0.2);
+  background: transparent;
   color: #000;
   white-space: pre-wrap;
   font-family: sans-serif;
+  padding: 2px 4px;
+}
+
+/* Draw canvas overlay - must be positioned over the PDF */
+.draw-canvas-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 10;
+  cursor: crosshair;
+  pointer-events: auto;
 }
 
 .pdf-element-image,
