@@ -2,8 +2,8 @@
 // AGENDA STAFF v5.23.20 - STICKY SIDEBAR
 // ============================================
 
-const SUPABASE_URL = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1Z3V0Y3N1a3hreGxncGttenh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzc5OTExMjksImV4cCI6MjA1MzU2NzEyOX0.PpolAzqqXNBOhRlUVzplqkKeGQxzfed4gH377CidVJE';
+// SUPABASE_URL and SUPABASE_KEY are loaded from supabase-config.js (loaded before this script)
+// Do NOT redefine them here.
 
 // ============================================
 // CONSTANTS
@@ -1350,8 +1350,8 @@ function renderPdfPreview() {
   $('pdfPreviewArea').style.display = 'block';
   $('pdfPreviewList').innerHTML = pdfImages.map((img, i) => `
     <div class="pdf-preview-item">
-      <img src="${img.dataUrl}" alt="${img.name}">
-      <span class="pdf-preview-name">${img.name}</span>
+      <img src="${esc(img.dataUrl)}" alt="${esc(img.name)}">
+      <span class="pdf-preview-name">${esc(img.name)}</span>
       <button class="pdf-remove-btn" data-index="${i}">✕</button>
     </div>
   `).join('');
@@ -1514,7 +1514,7 @@ function renderMergePreview() {
   $('mergePreviewList').innerHTML = mergePdfs.map((pdf, i) => `
     <div class="pdf-preview-item" draggable="true" data-index="${i}">
       <span class="pdf-icon">📄</span>
-      <span class="pdf-preview-name">${pdf.name}</span>
+      <span class="pdf-preview-name">${esc(pdf.name)}</span>
       <button class="pdf-remove-btn" data-index="${i}">✕</button>
     </div>
   `).join('');
@@ -1616,7 +1616,7 @@ async function setSplitFile(file) {
   $('splitPreviewArea').style.display = 'block';
   $('splitFileInfo').innerHTML = `
     <span class="pdf-icon">📄</span>
-    <span>${file.name}</span>
+    <span>${esc(file.name)}</span>
   `;
 }
 
@@ -1884,7 +1884,7 @@ function processWordFile(file) {
   }
   
   wordFile = file;
-  $('wordFileInfo').innerHTML = `<span style="font-size:16px">📝</span> ${file.name}`;
+  $('wordFileInfo').innerHTML = `<span style="font-size:16px">📝</span> ${esc(file.name)}`;
   $('wordPreviewArea').style.display = 'block';
   $('wordDropzone').style.display = 'none';
 }

@@ -1,6 +1,6 @@
 // ============================================
-// PDF EDITOR FULL SCREEN - AGENDA STAFF v7.1.0
-// Added: Position-only templates (placeholders), Keep elements selector
+// PDF EDITOR FULL SCREEN - AGENDA STAFF v6.3.0
+// Fixed: Box selection persistence, Add All signatures, Date quantity
 // ============================================
 
 // ============================================
@@ -19,8 +19,8 @@ const ZOOM_MAX = 2.5;
 const MAX_UNDO_STATES = 30;
 const PASTE_OFFSET = 30;
 
-const SUPABASE_URL = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1Z3V0Y3N1a3hreGxncGttenh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzc5OTExMjksImV4cCI6MjA1MzU2NzEyOX0.PpolAzqqXNBOhRlUVzplqkKeGQxzfed4gH377CidVJE';
+// SUPABASE_URL and SUPABASE_KEY are loaded from supabase-config.js (loaded before this script)
+// Do NOT redefine them here.
 
 // Multi-document state
 let documents = [];
@@ -244,37 +244,10 @@ function updateMultiSelectUI() {
   const info = $('multiSelectInfo');
   const deleteBtn = $('btnDeleteSelected');
   const copyBtn = $('btnCopySelected');
-  const multiTextResize = $('multiTextResize');
-  
   if (info) info.textContent = count > 0 ? `${count} elemento(s) seleccionado(s)` : '';
   if (info) info.style.display = count > 0 ? 'block' : 'none';
   if (deleteBtn) deleteBtn.style.display = count > 0 ? 'flex' : 'none';
   if (copyBtn) copyBtn.style.display = count > 0 ? 'flex' : 'none';
-  
-  // Show text resize control if any selected elements are text type
-  const activeDoc = getActiveDoc();
-  let hasTextElements = false;
-  if (activeDoc && count > 0) {
-    const pageElements = activeDoc.elements[activeDoc.currentPage] || [];
-    hasTextElements = Array.from(selectedIndices).some(idx => {
-      const el = pageElements[idx];
-      return el && el.type === 'text';
-    });
-  }
-  if (multiTextResize) {
-    if (hasTextElements) {
-      multiTextResize.style.display = 'block';
-      // Set the input to the first selected text element's size
-      const pageElements = activeDoc.elements[activeDoc.currentPage] || [];
-      const firstTextIdx = Array.from(selectedIndices).find(idx => pageElements[idx] && pageElements[idx].type === 'text');
-      if (firstTextIdx !== undefined && pageElements[firstTextIdx]) {
-        const sizeInput = $('multiFontSize');
-        if (sizeInput) sizeInput.value = pageElements[firstTextIdx].size || 14;
-      }
-    } else {
-      multiTextResize.style.display = 'none';
-    }
-  }
 }
 
 function deleteSelectedElements() {
@@ -769,40 +742,6 @@ function setupEventListeners() {
   if (btnDeleteSelected) btnDeleteSelected.addEventListener('click', deleteSelectedElements);
   const btnCopySelected = $('btnCopySelected');
   if (btnCopySelected) btnCopySelected.addEventListener('click', copySelectedElements);
-  
-  // Multi-select text resize
-  const btnApplyMultiFontSize = $('btnApplyMultiFontSize');
-  if (btnApplyMultiFontSize) {
-    btnApplyMultiFontSize.addEventListener('click', () => {
-      const sizeInput = $('multiFontSize');
-      const newSize = parseInt(sizeInput ? sizeInput.value : 14);
-      if (isNaN(newSize) || newSize < MIN_FONT_SIZE || newSize > MAX_FONT_SIZE) {
-        showStatus(`El tamaño debe estar entre ${MIN_FONT_SIZE} y ${MAX_FONT_SIZE}`, 'error');
-        return;
-      }
-      const activeDoc = getActiveDoc();
-      if (!activeDoc) return;
-      const pageElements = activeDoc.elements[activeDoc.currentPage] || [];
-      let changedCount = 0;
-      selectedIndices.forEach(idx => {
-        const el = pageElements[idx];
-        if (el && el.type === 'text') {
-          const prevSize = el.size || 14;
-          el.size = newSize;
-          pushUndo(activeDoc.id, { type: 'resize', page: activeDoc.currentPage, index: idx, prevProps: { size: prevSize }, currentProps: { size: newSize } });
-          changedCount++;
-        }
-      });
-      if (changedCount > 0) {
-        updateTabModified(activeDoc.id, true);
-        renderPage();
-        // Re-apply multi-selection visual state after render
-        selectedIndices.forEach(idx => selectElementIdx(idx));
-        scheduleAutoSave();
-        showStatus(`Tamaño cambiado a ${newSize}px en ${changedCount} texto(s)`, 'success');
-      }
-    });
-  }
 
   // Copy selector modal
   const btnCopySelector = $('btnCopySelector');
@@ -869,75 +808,6 @@ function setupEventListeners() {
   // Re-assign confirmText to handle both add and edit
   const confirmTextBtn2 = $('confirmText');
   if (confirmTextBtn2) confirmTextBtn2.addEventListener('click', confirmTextWithPosition);
-
-  // Templates button
-  const btnOpenTemplates = $('btnOpenTemplates');
-  if (btnOpenTemplates) btnOpenTemplates.addEventListener('click', showTemplatesModal);
-
-  // Fill template button
-  const btnFillTemplate = $('btnFillTemplate');
-  if (btnFillTemplate) btnFillTemplate.addEventListener('click', showFillModal);
-
-  // Templates modal buttons
-  const btnShowSaveView = $('btnShowSaveView');
-  if (btnShowSaveView) btnShowSaveView.addEventListener('click', showTemplateSaveView);
-  const btnConfirmSaveTemplate = $('btnConfirmSaveTemplate');
-  if (btnConfirmSaveTemplate) btnConfirmSaveTemplate.addEventListener('click', confirmSaveTemplate);
-  const btnCancelSaveTemplate = $('btnCancelSaveTemplate');
-  if (btnCancelSaveTemplate) btnCancelSaveTemplate.addEventListener('click', () => {
-    const listView = $('templateListView');
-    const saveView = $('templateSaveView');
-    if (listView) listView.style.display = '';
-    if (saveView) saveView.style.display = 'none';
-    renderTemplatesList();
-  });
-  const closeTemplatesModal = $('closeTemplatesModal');
-  if (closeTemplatesModal) closeTemplatesModal.addEventListener('click', () => {
-    const modal = $('templatesModal');
-    if (modal) modal.classList.remove('show');
-  });
-  // Fill template modal close
-  const closeFillTemplateModal = $('closeFillTemplateModal');
-  if (closeFillTemplateModal) closeFillTemplateModal.addEventListener('click', () => {
-    const modal = $('fillTemplateModal');
-    if (modal) modal.classList.remove('show');
-  });
-  // Enter on template name input confirms save
-  const templateNameInput = $('templateNameInput');
-  if (templateNameInput) templateNameInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') confirmSaveTemplate();
-  });
-
-  // Keep Elements modal - Escape to close
-  const keepElementsModal = $('keepElementsModal');
-  if (keepElementsModal) {
-    keepElementsModal.addEventListener('click', (e) => {
-      if (e.target === keepElementsModal) {
-        // Click outside modal = clear all (cancel behavior)
-        const activeDoc = getActiveDoc();
-        if (activeDoc) {
-          for (let i = 1; i <= activeDoc.totalPages; i++) {
-            activeDoc.elements[i] = [];
-          }
-          delete undoStacks[activeDoc.id];
-          delete redoStacks[activeDoc.id];
-          clearSelection();
-          updateMultiSelectUI();
-          updateTabModified(activeDoc.id, false);
-          renderPage();
-        }
-        keepElementsModal.classList.remove('show');
-      }
-    });
-  }
-
-  // Templates modal - Escape to close
-  const templatesModal = $('templatesModal');
-  if (templatesModal) {
-    templatesModal.addEventListener('click', (e) => {
-      if (e.target === templatesModal) templatesModal.classList.remove('show');
-    });
-  }
 }
 
 // ============================================
@@ -1058,7 +928,7 @@ function createTab(doc) {
   tab.dataset.docId = doc.id;
   tab.innerHTML = `
     <span class="doc-tab-icon">📄</span>
-    <span class="doc-tab-name">${doc.fileName}</span>
+    <span class="doc-tab-name">${escapeHtml(doc.fileName)}</span>
     <span class="doc-tab-pages">${doc.totalPages} pág.</span>
     <button class="doc-tab-close" title="Cerrar">×</button>
   `;
@@ -1142,10 +1012,10 @@ function closeTab(docId) {
 }
 
 function showUploadArea() {
-  const workspace = $('workspaceEditor');
-  if (!workspace) return;
+  const canvasArea = $('canvasArea');
+  if (!canvasArea) return;
   
-  workspace.innerHTML = `
+  canvasArea.innerHTML = `
     <div class="upload-wrapper" id="uploadWrapper">
       <input type="file" class="file-input-overlay" id="fileInput" accept=".pdf" multiple>
       <div class="upload-area" id="uploadArea">
@@ -1249,23 +1119,6 @@ function setupToolTabs() {
       if (zoomControls) zoomControls.style.display = isEditor && activeDoc ? 'flex' : 'none';
       if (btnSave) btnSave.style.display = isEditor ? 'flex' : 'none';
       
-      // Switch workspace visibility in canvas area
-      const workspaceMap = {
-        editor: 'workspaceEditor',
-        imgToPdf: 'workspaceImgToPdf',
-        wordToPdf: 'workspaceWordToPdf',
-        merge: 'workspaceMerge',
-        split: 'workspaceEditor'
-      };
-      document.querySelectorAll('.tool-workspace').forEach(ws => ws.style.display = 'none');
-      const ws = $(workspaceMap[tool]);
-      if (ws) ws.style.display = 'flex';
-      
-      // If switching to editor with a loaded PDF, re-render the page
-      if (isEditor && activeDoc && activeDoc.pdfJsDoc) {
-        renderPage();
-      }
-      
       if (tool === 'split') updateSplitTool();
     });
   });
@@ -1347,8 +1200,6 @@ async function renderPage() {
     if (btnPrevPage) btnPrevPage.disabled = activeDoc.currentPage <= 1;
     if (btnNextPage) btnNextPage.disabled = activeDoc.currentPage >= activeDoc.totalPages;
     
-    updateFillButtonVisibility();
-    
   } catch (err) {
     console.error('Error rendering page:', err);
   }
@@ -1357,40 +1208,11 @@ async function renderPage() {
 function createElementDiv(el, idx, scale, activeDoc) {
   const div = document.createElement('div');
   div.className = 'pdf-element pdf-element-' + el.type;
-  if (el.isPlaceholder) div.classList.add('pdf-element-placeholder');
   div.dataset.idx = idx;
   div.style.left = (el.x * scale) + 'px';
   div.style.top = (el.y * scale) + 'px';
   
-  if (el.isPlaceholder) {
-    // Placeholder rendering: dashed frame with label
-    if (el.type === 'text') {
-      div.style.width = '150px';
-      div.style.height = ((el.size || 14) * scale + 10) + 'px';
-      div.style.minWidth = MIN_ELEMENT_SIZE + 'px';
-      div.style.minHeight = MIN_ELEMENT_SIZE + 'px';
-      const placeholder = document.createElement('div');
-      placeholder.className = 'placeholder-label';
-      placeholder.textContent = el.placeholderLabel || 'Texto';
-      placeholder.style.fontSize = ((el.size || 14) * scale) + 'px';
-      placeholder.style.color = el.color || '#94a3b8';
-      div.appendChild(placeholder);
-    } else if (el.type === 'signature') {
-      div.style.width = ((el.width || 200) * scale) + 'px';
-      div.style.height = ((el.height || 80) * scale) + 'px';
-      const placeholder = document.createElement('div');
-      placeholder.className = 'placeholder-label';
-      placeholder.textContent = el.placeholderLabel || 'Firma';
-      div.appendChild(placeholder);
-    } else if (el.type === 'image') {
-      div.style.width = ((el.width || 100) * scale) + 'px';
-      div.style.height = ((el.height || 100) * scale) + 'px';
-      const placeholder = document.createElement('div');
-      placeholder.className = 'placeholder-label';
-      placeholder.textContent = el.placeholderLabel || 'Imagen';
-      div.appendChild(placeholder);
-    }
-  } else if (el.type === 'text') {
+  if (el.type === 'text') {
     // Create text span (not using textContent to allow child elements)
     const textSpan = document.createElement('span');
     textSpan.textContent = el.text;
@@ -1434,30 +1256,10 @@ function createElementDiv(el, idx, scale, activeDoc) {
     }
   });
 
-  // Double click on text element (or text placeholder): open edit modal
+  // Double click on text element: open edit modal
   if (el.type === 'text') {
     div.addEventListener('dblclick', (e) => {
       e.stopPropagation();
-      // For placeholders, open the text modal to fill in content
-      if (el.isPlaceholder) {
-        const textInput = $('textInput');
-        const textSize = $('textSize');
-        const textColor = $('textColor');
-        const textModal = $('textModal');
-        const editingIdx = $('editingElementIdx');
-        if (textInput) textInput.value = '';
-        if (textSize) textSize.value = el.size || 14;
-        if (textColor) textColor.value = el.color || '#000000';
-        if (editingIdx) editingIdx.value = idx;
-        if ($('textModalTitle')) $('textModalTitle').textContent = '\u{1F4DD} Rellenar texto';
-        if (textModal) {
-          textModal.classList.add('show');
-          textModal.dataset.posX = el.x;
-          textModal.dataset.posY = el.y;
-        }
-        if (textInput) textInput.focus();
-        return;
-      }
       openEditTextModal(idx, activeDoc, scale);
     });
   }
@@ -1569,7 +1371,7 @@ function confirmTextWithPosition() {
     return;
   }
   
-  // --- EDIT MODE: update existing text element (or fill placeholder) ---
+  // --- EDIT MODE: update existing text element ---
   if (editingIdx !== '' && editingIdx !== null && editingIdx !== undefined) {
     const idx = parseInt(editingIdx);
     const pageElements = activeDoc.elements[activeDoc.currentPage] || [];
@@ -1579,17 +1381,10 @@ function confirmTextWithPosition() {
       el.text = text;
       el.size = size;
       el.color = color;
-      // Remove placeholder flag when user fills in content
-      if (el.isPlaceholder) {
-        delete el.isPlaceholder;
-        delete el.placeholderLabel;
-      }
       if (textModal) textModal.classList.remove('show');
-      if ($('textModalTitle')) $('textModalTitle').textContent = '\u{1F4DD} A\u00f1adir texto';
       editingIdxEl.value = '';
       updateTabModified(activeDoc.id, true);
       renderPage();
-      scheduleAutoSave();
       showStatus('Texto actualizado', 'success');
       return;
     }
@@ -1679,52 +1474,21 @@ function confirmAddDates() {
 }
 
 function makeDraggable(div, el, scale, activeDoc, idx) {
-  let isDragging = false;
   let startX, startY, origX, origY;
   let hasMoved = false;
   
-  div.addEventListener('mousedown', (e) => {
-    if (e.target.classList.contains('pdf-element-delete') || e.target.classList.contains('resize-handle')) return;
-    
-    // If this element is already multi-selected, start multi-drag
-    if (selectedIndices.has(idx)) {
-      e.preventDefault();
-      e.stopPropagation();
-      startMultiDrag(e, scale, activeDoc);
-      return;
-    }
-    
-    if (e.shiftKey) return; // Let multi-select handle it
-    
-    isDragging = true;
-    hasMoved = false;
-    startX = e.clientX;
-    startY = e.clientY;
-    origX = el.x * scale;
-    origY = el.y * scale;
-    // Record undo state for move
-    div.dataset.undoOrigX = el.x;
-    div.dataset.undoOrigY = el.y;
-    div.dataset.undoIdx = div.dataset.idx;
-    div.classList.add('selected');
-    // Clear multi-selection when clicking without shift
-    if (selectedIndices.size > 0 && !e.shiftKey) clearSelection();
-    e.preventDefault();
-    e.stopPropagation();
-  });
-  
-  document.addEventListener('mousemove', (e) => {
-    if (!isDragging) return;
+  // Handlers will be attached/removed on mousedown/mouseup to prevent memory leaks
+  function onMouseMove(e) {
     hasMoved = true;
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
     div.style.left = (origX + dx) + 'px';
     div.style.top = (origY + dy) + 'px';
-  });
+  }
   
-  document.addEventListener('mouseup', (e) => {
-    if (!isDragging) return;
-    isDragging = false;
+  function onMouseUp(e) {
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
     const newX = Math.max(0, (origX + dx) / scale);
@@ -1742,42 +1506,50 @@ function makeDraggable(div, el, scale, activeDoc, idx) {
       updateTabModified(activeDoc.id, true);
       scheduleAutoSave();
     }
+  }
+  
+  div.addEventListener('mousedown', (e) => {
+    if (e.target.classList.contains('pdf-element-delete') || e.target.classList.contains('resize-handle')) return;
+    
+    // If this element is already multi-selected, start multi-drag
+    if (selectedIndices.has(idx)) {
+      e.preventDefault();
+      e.stopPropagation();
+      startMultiDrag(e, scale, activeDoc);
+      return;
+    }
+    
+    if (e.shiftKey) return; // Let multi-select handle it
+    
+    hasMoved = false;
+    startX = e.clientX;
+    startY = e.clientY;
+    origX = el.x * scale;
+    origY = el.y * scale;
+    // Record undo state for move
+    div.dataset.undoOrigX = el.x;
+    div.dataset.undoOrigY = el.y;
+    div.dataset.undoIdx = div.dataset.idx;
+    div.classList.add('selected');
+    // Clear multi-selection when clicking without shift
+    if (selectedIndices.size > 0 && !e.shiftKey) clearSelection();
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Attach document listeners only while dragging
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
   });
 }
 
 function makeResizable(div, el, scale, activeDoc) {
   const handles = div.querySelectorAll('.resize-handle');
-  let isResizing = false;
   let currentHandle = null;
   let startX, startY, startWidth, startHeight, startFontSize, startXPos, startYPos;
   let elIdx = parseInt(div.dataset.idx);
   
-  handles.forEach(handle => {
-    handle.addEventListener('mousedown', (e) => {
-      e.stopPropagation();
-      isResizing = true;
-      currentHandle = handle.dataset.handle;
-      startX = e.clientX;
-      startY = e.clientY;
-      elIdx = parseInt(div.dataset.idx);
-      
-      if (el.type === 'text') {
-        startFontSize = el.size || 14;
-      } else {
-        startWidth = el.width;
-        startHeight = el.height;
-      }
-      startXPos = el.x;
-      startYPos = el.y;
-      
-      div.classList.add('selected');
-      div.classList.add('resizing');
-    });
-  });
-  
-  document.addEventListener('mousemove', (e) => {
-    if (!isResizing) return;
-    
+  // Handlers attached/removed on mousedown/mouseup to prevent memory leaks
+  function onMouseMove(e) {
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
     
@@ -1836,11 +1608,11 @@ function makeResizable(div, el, scale, activeDoc) {
       div.style.left = (newX * scale) + 'px';
       div.style.top = (newY * scale) + 'px';
     }
-  });
+  }
   
-  document.addEventListener('mouseup', () => {
-    if (!isResizing) return;
-    isResizing = false;
+  function onMouseUp() {
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
     div.classList.remove('resizing');
     div.classList.remove('selected');
     
@@ -1853,6 +1625,32 @@ function makeResizable(div, el, scale, activeDoc) {
     updateTabModified(activeDoc.id, true);
     showStatus('Tamaño actualizado', 'success');
     scheduleAutoSave();
+  }
+  
+  handles.forEach(handle => {
+    handle.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      currentHandle = handle.dataset.handle;
+      startX = e.clientX;
+      startY = e.clientY;
+      elIdx = parseInt(div.dataset.idx);
+      
+      if (el.type === 'text') {
+        startFontSize = el.size || 14;
+      } else {
+        startWidth = el.width;
+        startHeight = el.height;
+      }
+      startXPos = el.x;
+      startYPos = el.y;
+      
+      div.classList.add('selected');
+      div.classList.add('resizing');
+      
+      // Attach document listeners only while resizing
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    });
   });
 }
 
@@ -1988,34 +1786,13 @@ async function searchSignatures() {
   
   if (signatureResults) signatureResults.innerHTML = '<div class="signature-loading">Buscando...</div>';
   
-  // Helper to reload session from storage if missing
-  async function ensureSession() {
-    if (!session || !session.access_token) {
-      try {
-        const stored = await chrome.storage.local.get(['session', 'user']);
-        if (stored.session) {
-          session = stored.session;
-          currentUser = stored.user || null;
-          console.log('Session reloaded from storage for signature search');
-        }
-      } catch (err) {
-        console.warn('Could not reload session:', err);
-      }
-    }
-  }
-  
   try {
-    await ensureSession();
-    
     let allSignatures = [];
     const foundNames = [];
     
     const headers = { 'apikey': SUPABASE_KEY };
-    // Always use Authorization: if session exists, use it; otherwise use anon key as fallback
     if (session && session.access_token) {
       headers['Authorization'] = `Bearer ${session.access_token}`;
-    } else {
-      headers['Authorization'] = `Bearer ${SUPABASE_KEY}`;
     }
     
     for (const term of searchTerms) {
@@ -2026,13 +1803,7 @@ async function searchSignatures() {
       
       for (const searchTerm of searchValues) {
         const query = `?select=*&name=ilike.*${encodeURIComponent(searchTerm)}*&order=name.asc`;
-        let res;
-        try {
-          res = await fetch(`${SUPABASE_URL}/rest/v1/signatures${query}`, { headers });
-        } catch (fetchErr) {
-          console.error('Network error searching signatures:', fetchErr);
-          continue;
-        }
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/signatures${query}`, { headers });
         
         if (res.ok) {
           const signatures = await res.json();
@@ -2044,26 +1815,6 @@ async function searchSignatures() {
               }
             });
           }
-        } else if (res.status === 401) {
-          // Auth expired: reload session and retry once
-          console.warn('Signature search got 401, reloading session...');
-          session = null;
-          await ensureSession();
-          if (session && session.access_token) {
-            headers['Authorization'] = `Bearer ${session.access_token}`;
-            const retryRes = await fetch(`${SUPABASE_URL}/rest/v1/signatures${query}`, { headers });
-            if (retryRes.ok) {
-              const signatures = await retryRes.json();
-              if (signatures && signatures.length > 0) {
-                signatures.forEach(sig => {
-                  if (!allSignatures.find(s => s.id === sig.id)) {
-                    allSignatures.push(sig);
-                    foundNames.push(normalizeText(sig.name).toLowerCase());
-                  }
-                });
-              }
-            }
-          }
         }
       }
     }
@@ -2073,7 +1824,7 @@ async function searchSignatures() {
     
   } catch (err) {
     console.error('Search error:', err);
-    if (signatureResults) signatureResults.innerHTML = '<div class="signature-empty">Error: ' + err.message + '</div>';
+    if (signatureResults) signatureResults.innerHTML = '<div class="signature-empty">Error: ' + escapeHtml(err.message) + '</div>';
   }
 }
 
@@ -2164,11 +1915,9 @@ async function deleteSignature(id, name) {
       'Prefer': 'return=representation'
     };
     
-    // Use anon key as fallback for Authorization
+    // Only use session token for Authorization - never anon key as Bearer (bypasses RLS)
     if (session && session.access_token) {
       headers['Authorization'] = `Bearer ${session.access_token}`;
-    } else {
-      headers['Authorization'] = `Bearer ${SUPABASE_KEY}`;
     }
     
     const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?id=eq.${id}`, {
@@ -2278,11 +2027,9 @@ async function uploadMissingSignature(name) {
         'Prefer': 'return=representation'
       };
       
-      // Use anon key as fallback for Authorization
+      // Only use session token for Authorization - never anon key as Bearer (bypasses RLS)
       if (session && session.access_token) {
         headers['Authorization'] = `Bearer ${session.access_token}`;
-      } else {
-        headers['Authorization'] = `Bearer ${SUPABASE_KEY}`;
       }
       
       const upperName = name.toUpperCase();
@@ -2373,45 +2120,22 @@ function selectSignature(url, name) {
       imgHeight = Math.round(imgHeight * ratio);
     }
     
-    // Check if there are empty signature placeholders to auto-fill
-    let filledInSlot = false;
-    for (let page = 1; page <= activeDoc.totalPages && !filledInSlot; page++) {
-      const pageEls = activeDoc.elements[page] || [];
-      for (let idx = 0; idx < pageEls.length && !filledInSlot; idx++) {
-        const el = pageEls[idx];
-        if (el.isPlaceholder && el.type === 'signature') {
-          // Fill this placeholder
-          el.isPlaceholder = false;
-          el.src = url;
-          el.width = imgWidth;
-          el.height = imgHeight;
-          el.name = name;
-          delete el.fieldGroup;
-          delete el.fieldSlotIndex;
-          delete el.fieldSlotTotal;
-          filledInSlot = true;
-        }
-      }
-    }
+    const offset = addedSignaturesCount * 15;
     
-    if (!filledInSlot) {
-      // No placeholder: place at center as before
-      const offset = addedSignaturesCount * 15;
-      pushElement(activeDoc, activeDoc.currentPage, {
-        type: 'signature',
-        src: url,
-        x: activeDoc.pageWidth / 2 - imgWidth / 2 + offset,
-        y: activeDoc.pageHeight / 2 - imgHeight / 2 + offset,
-        width: imgWidth,
-        height: imgHeight,
-        name: name
-      });
-    }
+    pushElement(activeDoc, activeDoc.currentPage, {
+      type: 'signature',
+      src: url,
+      x: activeDoc.pageWidth / 2 - imgWidth / 2 + offset,
+      y: activeDoc.pageHeight / 2 - imgHeight / 2 + offset,
+      width: imgWidth,
+      height: imgHeight,
+      name: name
+    });
     
     addedSignaturesCount++;
     updateTabModified(activeDoc.id, true);
     renderPage();
-    showStatus(filledInSlot ? `✓ Firma colocada en hueco: ${name}` : `✓ Firma añadida: ${name}`, 'success');
+    showStatus(`✓ Firma añadida: ${name}`, 'success');
     
     const countEl = $('signatureCount');
     if (countEl) {
@@ -2471,9 +2195,6 @@ async function savePdf() {
       const pageElements = activeDoc.elements[pageNum] || [];
       
       for (const el of pageElements) {
-        // Skip placeholders (they are just position guides, not real content)
-        if (el.isPlaceholder) continue;
-        
         if (el.type === 'text') {
           const fontSize = el.size || 14;
           const pdfY = height - el.y - fontSize;
@@ -2529,17 +2250,11 @@ async function savePdf() {
     
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     
-    // Ask user which elements to keep via visual selector
-    const hasElementsToKeep = Object.values(activeDoc.elements).some(arr => arr.length > 0);
-    if (hasElementsToKeep) {
-      showKeepElementsModal(activeDoc);
-    } else {
-      for (let i = 1; i <= activeDoc.totalPages; i++) {
-        activeDoc.elements[i] = [];
-      }
-      updateTabModified(activeDoc.id, false);
-      renderPage();
-    }
+    // Mark document as saved but DO NOT clear elements automatically.
+    // This prevents data loss if the download was blocked or failed.
+    // The user can explicitly clear via "Limpiar" button if desired.
+    updateTabModified(activeDoc.id, false);
+    renderPage();
     
     showStatus('PDF guardado correctamente', 'success');
     
@@ -2556,46 +2271,12 @@ async function savePdf() {
 
 function clearEditor() {
   const activeDoc = getActiveDoc();
+  if (!activeDoc) return;
   
-  if (activeDoc) {
-    // Check if there are elements to clear
-    const hasElements = Object.values(activeDoc.elements).some(arr => arr.length > 0);
-    
-    if (hasElements) {
-      if (!confirm('¿Limpiar todos los elementos añadidos del documento actual?')) return;
-      // Clear all elements from all pages
-      for (let i = 1; i <= activeDoc.totalPages; i++) {
-        activeDoc.elements[i] = [];
-      }
-      // Clear undo/redo stacks for this document
-      delete undoStacks[activeDoc.id];
-      delete redoStacks[activeDoc.id];
-      clearSelection();
-      updateMultiSelectUI();
-      updateTabModified(activeDoc.id, false);
-      renderPage();
-      showStatus('Documento limpiado', 'success');
-    } else {
-      // No elements: close this tab
-      closeTab(activeDoc.id);
-    }
-  } else {
-    // No active document at all: reset everything
-    if (documents.length > 0) {
-      if (!confirm('¿Cerrar todos los documentos abiertos?')) return;
-    }
-    documents = [];
-    activeDocIndex = -1;
-    tabCounter = 0;
-    undoStacks = {};
-    redoStacks = {};
-    clipboardElements = null;
-    const tabsList = $('documentTabsList');
-    if (tabsList) tabsList.innerHTML = '';
-    showUploadArea();
-    updateClipboardUI();
-    showStatus('Todo limpio', 'success');
-  }
+  const hasElements = Object.values(activeDoc.elements).some(arr => arr.length > 0);
+  if (hasElements && !confirm('¿Limpiar los cambios del documento actual?')) return;
+  
+  closeTab(activeDoc.id);
 }
 
 // hexToRgb moved to shared-utils.js
@@ -2792,50 +2473,30 @@ async function splitPdf() {
 // IMAGE TO PDF
 // ============================================
 
-// Shared: drag-to-reorder for workspace file cards
-function setupCardReorder(container, itemsArray, rerenderFn) {
-  let dragIdx = null;
-  container.querySelectorAll('.workspace-file-card').forEach(card => {
-    card.addEventListener('dragstart', (e) => {
-      dragIdx = parseInt(card.dataset.idx);
-      card.classList.add('dragging');
-      e.dataTransfer.effectAllowed = 'move';
-    });
-    card.addEventListener('dragend', () => {
-      card.classList.remove('dragging');
-      container.querySelectorAll('.workspace-file-card').forEach(c => c.classList.remove('drag-over-card'));
-      dragIdx = null;
-    });
-    card.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      card.classList.add('drag-over-card');
-    });
-    card.addEventListener('dragleave', () => card.classList.remove('drag-over-card'));
-    card.addEventListener('drop', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      card.classList.remove('drag-over-card');
-      const targetIdx = parseInt(card.dataset.idx);
-      if (dragIdx !== null && dragIdx !== targetIdx) {
-        const [moved] = itemsArray.splice(dragIdx, 1);
-        itemsArray.splice(targetIdx, 0, moved);
-        rerenderFn();
-      }
-    });
-  });
-}
-
 function setupImgToPdf() {
-  const dropzone = $('imgMainDropzone');
-  const fileInput = $('imgMainFileInput');
+  const dropzone = $('imgDropzone');
+  const fileInput = $('imgFileInput');
   
   if (dropzone && fileInput) {
     dropzone.addEventListener('click', () => fileInput.click());
-    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.add('drag-over'); });
-    dropzone.addEventListener('dragleave', (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('drag-over'); });
-    dropzone.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('drag-over'); handleImgFiles(e.dataTransfer.files); });
-    fileInput.addEventListener('change', (e) => { handleImgFiles(e.target.files); fileInput.value = ''; });
+    
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.classList.add('drag-over');
+    });
+    
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
+    
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('drag-over');
+      handleImgFiles(e.dataTransfer.files);
+    });
+    
+    fileInput.addEventListener('change', (e) => {
+      handleImgFiles(e.target.files);
+      fileInput.value = '';
+    });
   }
   
   document.querySelectorAll('[data-orientation]').forEach(btn => {
@@ -2862,40 +2523,23 @@ function handleImgFiles(files) {
 }
 
 function renderImgPreview() {
-  const container = $('imgMainPreview');
-  const countEl = $('imgFileCount');
-  const btn = $('btnConvertImg');
-  if (!container) return;
-  container.innerHTML = '';
-  
-  if (countEl) countEl.textContent = `${imgFiles.length} imagen${imgFiles.length !== 1 ? 'es' : ''}`;
-  if (btn) btn.disabled = imgFiles.length === 0;
-  
-  // Hide dropzone if files exist
-  const dropzone = $('imgMainDropzone');
-  if (dropzone) dropzone.style.display = imgFiles.length > 0 ? 'none' : 'flex';
+  const list = $('imgPreviewList');
+  if (!list) return;
+  list.innerHTML = '';
   
   imgFiles.forEach((img, idx) => {
-    const card = document.createElement('div');
-    card.className = 'workspace-file-card';
-    card.draggable = true;
-    card.dataset.idx = idx;
-    card.innerHTML = `
-      <span class="card-order">${idx + 1}</span>
-      <button class="card-remove" data-idx="${idx}">×</button>
-      <img src="${img.src}" alt="${img.name}" class="card-preview">
-      <span class="card-name">${img.name}</span>
-    `;
-    container.appendChild(card);
+    const item = document.createElement('div');
+    item.className = 'preview-item';
+    item.innerHTML = `<img src="${escapeHtml(img.src)}" alt=""><span class="name">${escapeHtml(img.name)}</span><button class="remove-btn" data-idx="${idx}">×</button>`;
+    list.appendChild(item);
   });
   
-  // Remove buttons
-  container.querySelectorAll('.card-remove').forEach(btn => {
-    btn.addEventListener('click', (e) => { e.stopPropagation(); imgFiles.splice(parseInt(btn.dataset.idx), 1); renderImgPreview(); });
+  list.querySelectorAll('.remove-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      imgFiles.splice(parseInt(btn.dataset.idx), 1);
+      renderImgPreview();
+    });
   });
-  
-  // Drag to reorder
-  setupCardReorder(container, imgFiles, renderImgPreview);
 }
 
 async function convertImgToPdf() {
@@ -2971,14 +2615,14 @@ async function convertImgToPdf() {
 // ============================================
 
 function setupWordToPdf() {
-  const dropzone = $('wordMainDropzone');
-  const fileInput = $('wordMainFileInput');
+  const dropzone = $('wordDropzone');
+  const fileInput = $('wordFileInput');
   
   if (dropzone && fileInput) {
     dropzone.addEventListener('click', () => fileInput.click());
-    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.add('drag-over'); });
-    dropzone.addEventListener('dragleave', (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('drag-over'); });
-    dropzone.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('drag-over'); handleWordFiles(e.dataTransfer.files); });
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('drag-over'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
+    dropzone.addEventListener('drop', (e) => { e.preventDefault(); dropzone.classList.remove('drag-over'); handleWordFiles(e.dataTransfer.files); });
     fileInput.addEventListener('change', (e) => { handleWordFiles(e.target.files); fileInput.value = ''; });
   }
   
@@ -2995,37 +2639,20 @@ function handleWordFiles(files) {
 }
 
 function renderWordPreview() {
-  const container = $('wordMainPreview');
-  const countEl = $('wordFileCount');
-  const btn = $('btnConvertWord');
-  if (!container) return;
-  container.innerHTML = '';
-  
-  if (countEl) countEl.textContent = `${wordFiles.length} documento${wordFiles.length !== 1 ? 's' : ''}`;
-  if (btn) btn.disabled = wordFiles.length === 0;
-  
-  const dropzone = $('wordMainDropzone');
-  if (dropzone) dropzone.style.display = wordFiles.length > 0 ? 'none' : 'flex';
+  const list = $('wordPreviewList');
+  if (!list) return;
+  list.innerHTML = '';
   
   wordFiles.forEach((doc, idx) => {
-    const card = document.createElement('div');
-    card.className = 'workspace-file-card';
-    card.draggable = true;
-    card.dataset.idx = idx;
-    card.innerHTML = `
-      <span class="card-order">${idx + 1}</span>
-      <button class="card-remove" data-idx="${idx}">×</button>
-      <div class="card-icon">📝</div>
-      <span class="card-name">${doc.name}</span>
-    `;
-    container.appendChild(card);
+    const item = document.createElement('div');
+    item.className = 'preview-item';
+    item.innerHTML = `<span class="name">📝 ${escapeHtml(doc.name)}</span><button class="remove-btn" data-idx="${idx}">×</button>`;
+    list.appendChild(item);
   });
   
-  container.querySelectorAll('.card-remove').forEach(btn => {
-    btn.addEventListener('click', (e) => { e.stopPropagation(); wordFiles.splice(parseInt(btn.dataset.idx), 1); renderWordPreview(); });
+  list.querySelectorAll('.remove-btn').forEach(btn => {
+    btn.addEventListener('click', () => { wordFiles.splice(parseInt(btn.dataset.idx), 1); renderWordPreview(); });
   });
-  
-  setupCardReorder(container, wordFiles, renderWordPreview);
 }
 
 async function convertWordToPdf() {
@@ -3225,14 +2852,14 @@ async function convertWordToPdf() {
 // ============================================
 
 function setupMerge() {
-  const dropzone = $('mergeMainDropzone');
-  const fileInput = $('mergeMainFileInput');
+  const dropzone = $('mergeDropzone');
+  const fileInput = $('mergeFileInput');
   
   if (dropzone && fileInput) {
     dropzone.addEventListener('click', () => fileInput.click());
-    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.add('drag-over'); });
-    dropzone.addEventListener('dragleave', (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('drag-over'); });
-    dropzone.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('drag-over'); handleMergeFiles(e.dataTransfer.files); });
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('drag-over'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
+    dropzone.addEventListener('drop', (e) => { e.preventDefault(); dropzone.classList.remove('drag-over'); handleMergeFiles(e.dataTransfer.files); });
     fileInput.addEventListener('change', (e) => { handleMergeFiles(e.target.files); fileInput.value = ''; });
   }
   
@@ -3249,37 +2876,22 @@ function handleMergeFiles(files) {
 }
 
 function renderMergePreview() {
-  const container = $('mergeMainPreview');
-  const countEl = $('mergeFileCount');
-  const btn = $('btnMergePdfs');
-  if (!container) return;
-  container.innerHTML = '';
-  
-  if (countEl) countEl.textContent = `${mergeFiles.length} PDF${mergeFiles.length !== 1 ? 's' : ''}`;
-  if (btn) btn.disabled = mergeFiles.length < 2;
-  
-  const dropzone = $('mergeMainDropzone');
-  if (dropzone) dropzone.style.display = mergeFiles.length > 0 ? 'none' : 'flex';
+  const list = $('mergePreviewList');
+  if (!list) return;
+  list.innerHTML = '';
   
   mergeFiles.forEach((pdf, idx) => {
-    const card = document.createElement('div');
-    card.className = 'workspace-file-card';
-    card.draggable = true;
-    card.dataset.idx = idx;
-    card.innerHTML = `
-      <span class="card-order">${idx + 1}</span>
-      <button class="card-remove" data-idx="${idx}">×</button>
-      <div class="card-icon">📄</div>
-      <span class="card-name">${pdf.name}</span>
-    `;
-    container.appendChild(card);
+    const item = document.createElement('div');
+    item.className = 'preview-item';
+    item.draggable = true;
+    item.dataset.idx = idx;
+    item.innerHTML = `<span class="name">📄 ${escapeHtml(pdf.name)}</span><button class="remove-btn" data-idx="${idx}">×</button>`;
+    list.appendChild(item);
   });
   
-  container.querySelectorAll('.card-remove').forEach(btn => {
-    btn.addEventListener('click', (e) => { e.stopPropagation(); mergeFiles.splice(parseInt(btn.dataset.idx), 1); renderMergePreview(); });
+  list.querySelectorAll('.remove-btn').forEach(btn => {
+    btn.addEventListener('click', () => { mergeFiles.splice(parseInt(btn.dataset.idx), 1); renderMergePreview(); });
   });
-  
-  setupCardReorder(container, mergeFiles, renderMergePreview);
 }
 
 async function mergePdfs() {
@@ -3478,742 +3090,4 @@ function updateClipboardUI() {
     if (btnPasteElements) btnPasteElements.disabled = true;
     if (btnClearClipboard) btnClearClipboard.style.display = 'none';
   }
-}
-
-// ============================================
-// KEEP ELEMENTS MODAL (after save)
-// ============================================
-function showKeepElementsModal(activeDoc) {
-  const modal = $('keepElementsModal');
-  const list = $('keepElementsList');
-  if (!modal || !list) return;
-
-  // Collect all elements across all pages
-  let allElements = [];
-  for (let page = 1; page <= activeDoc.totalPages; page++) {
-    const pageEls = activeDoc.elements[page] || [];
-    pageEls.forEach((el, idx) => {
-      let label = '';
-      if (el.isPlaceholder) {
-        label = `📍 ${el.placeholderLabel || el.type} [plantilla]`;
-      } else if (el.type === 'text') label = `T: "${el.text.substring(0, 40)}${el.text.length > 40 ? '...' : ''}"`;
-      else if (el.type === 'signature') label = `F: ${el.name || 'Sin nombre'}`;
-      else if (el.type === 'image') label = `I: Imagen (${Math.round(el.width)}x${Math.round(el.height)})`;
-      else label = el.type;
-      allElements.push({ page, idx, el, label, checked: true });
-    });
-  }
-
-  if (allElements.length === 0) {
-    for (let i = 1; i <= activeDoc.totalPages; i++) {
-      activeDoc.elements[i] = [];
-    }
-    updateTabModified(activeDoc.id, false);
-    renderPage();
-    return;
-  }
-
-  list.innerHTML = allElements.map((item, i) => {
-    const typeIcon = item.el.type === 'text' ? '📝' : item.el.type === 'signature' ? '✍️' : '🖼️';
-    const pageLabel = item.page > 1 ? ` [Pág.${item.page}]` : '';
-    return `<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;background:#1e293b;margin-bottom:4px;cursor:pointer;font-size:12px;color:#e2e8f0;">
-      <input type="checkbox" class="keep-el-cb" data-idx="${i}" checked style="width:16px;height:16px;accent-color:#2563eb;">
-      <span>${typeIcon}${item.label}${pageLabel}</span>
-    </label>`;
-  }).join('');
-
-  modal.classList.add('show');
-
-  // Handlers
-  const selectAllBtn = $('keepSelectAll');
-  const deselectAllBtn = $('keepDeselectAll');
-  const confirmBtn = $('confirmKeepElements');
-  const cancelBtn = $('cancelKeepElements');
-
-  const newSelectAll = selectAllBtn.cloneNode(true);
-  selectAllBtn.parentNode.replaceChild(newSelectAll, selectAllBtn);
-  newSelectAll.addEventListener('click', () => {
-    list.querySelectorAll('.keep-el-cb').forEach(cb => cb.checked = true);
-  });
-
-  const newDeselectAll = deselectAllBtn.cloneNode(true);
-  deselectAllBtn.parentNode.replaceChild(newDeselectAll, deselectAllBtn);
-  newDeselectAll.addEventListener('click', () => {
-    list.querySelectorAll('.keep-el-cb').forEach(cb => cb.checked = false);
-  });
-
-  const newConfirm = confirmBtn.cloneNode(true);
-  confirmBtn.parentNode.replaceChild(newConfirm, confirmBtn);
-  newConfirm.addEventListener('click', () => {
-    const checkboxes = list.querySelectorAll('.keep-el-cb');
-    const toKeep = [];
-    checkboxes.forEach((cb, i) => {
-      if (cb.checked && allElements[i]) {
-        toKeep.push({ page: allElements[i].page, el: allElements[i].el });
-      }
-    });
-
-    // Rebuild elements keeping only selected ones
-    for (let i = 1; i <= activeDoc.totalPages; i++) {
-      activeDoc.elements[i] = [];
-    }
-    toKeep.forEach(item => {
-      if (!activeDoc.elements[item.page]) activeDoc.elements[item.page] = [];
-      activeDoc.elements[item.page].push(item.el);
-    });
-
-    delete undoStacks[activeDoc.id];
-    delete redoStacks[activeDoc.id];
-    clearSelection();
-    updateMultiSelectUI();
-    updateTabModified(activeDoc.id, toKeep.length > 0);
-    modal.classList.remove('show');
-    renderPage();
-    showStatus(`Conservados ${toKeep.length} elemento(s)`, 'success');
-  });
-
-  const newCancel = cancelBtn.cloneNode(true);
-  cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
-  newCancel.addEventListener('click', () => {
-    for (let i = 1; i <= activeDoc.totalPages; i++) {
-      activeDoc.elements[i] = [];
-    }
-    delete undoStacks[activeDoc.id];
-    delete redoStacks[activeDoc.id];
-    clearSelection();
-    updateMultiSelectUI();
-    updateTabModified(activeDoc.id, false);
-    modal.classList.remove('show');
-    renderPage();
-    showStatus('Todos los elementos eliminados', 'success');
-  });
-}
-
-// ============================================
-// TEMPLATES SYSTEM (Position + field type templates)
-// ============================================
-const TEMPLATES_STORAGE_KEY = 'pdfEditorTemplates';
-
-function getElementTypeLabel(el) {
-  if (el.type === 'text') return '📝';
-  if (el.type === 'signature') return '✍️';
-  if (el.type === 'image') return '🖼️';
-  return '❓';
-}
-
-function guessFieldType(el) {
-  if (el.type === 'signature') return 'FIRMA';
-  if (el.type === 'image') return 'IMAGEN';
-  if (el.name && (el.name.toUpperCase().includes('DNI') || el.name.toUpperCase().includes('NIE'))) return 'DNI';
-  if (el.text) {
-    const t = el.text.trim().toUpperCase();
-    if (/^\d{8}[A-Z]$/.test(t)) return 'DNI';
-    if (/^\d{11}$/.test(t) || /^\d{6,8}[A-Z]?$/.test(t)) return 'DNI';
-    if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(t)) return 'FECHA';
-    if (/@/.test(t)) return 'EMAIL';
-    if (/^(\+?\d[\d\s\-]{6,})$/.test(t)) return 'TELEFONO';
-  }
-  return 'TEXTO';
-}
-
-async function loadTemplates() {
-  try {
-    // Try Supabase first (shared templates for all users)
-    await ensureSession();
-    const headers = { 'apikey': SUPABASE_KEY };
-    if (session && session.access_token) {
-      headers['Authorization'] = `Bearer ${session.access_token}`;
-    } else {
-      headers['Authorization'] = `Bearer ${SUPABASE_KEY}`;
-    }
-
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/pdf_templates?select=*&order=created_at.desc`, { headers });
-    if (res.ok) {
-      const data = await res.json();
-      if (data && Array.isArray(data)) {
-        // Transform Supabase rows to our template format
-        return data.map(row => ({
-          id: row.id,
-          name: row.name,
-          slots: row.slots,
-          user_name: row.user_name || '',
-          createdAt: new Date(row.created_at).getTime()
-        }));
-      }
-    }
-  } catch (err) {
-    console.warn('Supabase template load failed, falling back to local:', err);
-  }
-
-  // Fallback: load from chrome.storage.local
-  try {
-    const stored = await chrome.storage.local.get(TEMPLATES_STORAGE_KEY);
-    return stored[TEMPLATES_STORAGE_KEY] || [];
-  } catch {
-    return [];
-  }
-}
-
-async function saveTemplates(templates) {
-  // Templates are now saved individually to Supabase, not as a batch
-  // This function is kept for backward compatibility but does nothing for Supabase templates
-  // Local-only templates still use this
-  try {
-    const localOnly = templates.filter(t => !t.id || t.id.startsWith('local_'));
-    await chrome.storage.local.set({ [TEMPLATES_STORAGE_KEY]: localOnly });
-  } catch (err) {
-    console.error('Error saving local templates:', err);
-  }
-}
-
-async function saveTemplateToSupabase(name, slots) {
-  await ensureSession();
-  const headers = {
-    'apikey': SUPABASE_KEY,
-    'Authorization': `Bearer ${session?.access_token || SUPABASE_KEY}`,
-    'Content-Type': 'application/json',
-    'Prefer': 'return=representation'
-  };
-
-  const id = Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
-
-  const body = {
-    id: id,
-    name: name,
-    slots: slots,
-    user_id: currentUser?.id || null,
-    user_name: currentUser?.name || currentUser?.user_name || 'Anónimo'
-  };
-
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/pdf_templates`, {
-    method: 'POST',
-    headers: headers,
-    body: JSON.stringify(body)
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    console.error('Supabase template save error:', errText);
-    throw new Error('Error al guardar en Supabase');
-  }
-
-  return id;
-}
-
-async function deleteTemplateFromSupabase(templateId) {
-  await ensureSession();
-  const headers = {
-    'apikey': SUPABASE_KEY,
-    'Authorization': `Bearer ${session?.access_token || SUPABASE_KEY}`
-  };
-
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/pdf_templates?id=eq.${encodeURIComponent(templateId)}`, {
-    method: 'DELETE',
-    headers: headers
-  });
-
-  if (!res.ok) {
-    console.error('Supabase template delete error:', await res.text());
-    throw new Error('Error al eliminar de Supabase');
-  }
-}
-
-// Show/hide "Rellenar plantilla" button based on placeholder presence
-function updateFillButtonVisibility() {
-  const section = $('fillTemplateSection');
-  if (!section) return;
-  const activeDoc = getActiveDoc();
-  if (!activeDoc) { section.style.display = 'none'; return; }
-
-  let hasPlaceholders = false;
-  for (let page = 1; page <= activeDoc.totalPages; page++) {
-    const pageEls = activeDoc.elements[page] || [];
-    if (pageEls.some(el => el.isPlaceholder)) { hasPlaceholders = true; break; }
-  }
-  section.style.display = hasPlaceholders ? '' : 'none';
-}
-
-function showTemplatesModal() {
-  const modal = $('templatesModal');
-  if (!modal) return;
-  const listView = $('templateListView');
-  const saveView = $('templateSaveView');
-  if (listView) listView.style.display = '';
-  if (saveView) saveView.style.display = 'none';
-  const nameInput = $('templateNameInput');
-  if (nameInput) nameInput.value = '';
-  modal.classList.add('show');
-  renderTemplatesList();
-}
-
-function showTemplateSaveView() {
-  const listView = $('templateListView');
-  const saveView = $('templateSaveView');
-  const nameInput = $('templateNameInput');
-  if (!listView || !saveView) return;
-  listView.style.display = 'none';
-  saveView.style.display = '';
-  if (nameInput) { nameInput.value = ''; nameInput.focus(); }
-  renderTemplateSlotSelection();
-}
-
-function renderTemplateSlotSelection() {
-  const list = $('templateSlotList');
-  if (!list) return;
-
-  const activeDoc = getActiveDoc();
-  if (!activeDoc) {
-    list.innerHTML = '<div style="color:#ef4444;font-size:12px;text-align:center;padding:20px;">No hay documento activo.</div>';
-    return;
-  }
-
-  // Collect all non-placeholder elements across all pages
-  let allElements = [];
-  for (let page = 1; page <= activeDoc.totalPages; page++) {
-    const pageEls = activeDoc.elements[page] || [];
-    pageEls.forEach((el) => {
-      if (el.isPlaceholder) return;
-      let preview = '';
-      if (el.type === 'text') preview = el.text ? el.text.substring(0, 35) : '(vacío)';
-      else if (el.type === 'signature') preview = el.name || '(sin nombre)';
-      else if (el.type === 'image') preview = `${Math.round(el.width || 100)}x${Math.round(el.height || 100)}`;
-      allElements.push({ page, el, preview });
-    });
-  }
-
-  if (allElements.length === 0) {
-    list.innerHTML = '<div style="color:#64748b;font-size:12px;text-align:center;padding:20px;">No hay elementos. Añade textos, firmas o imágenes primero.</div>';
-    return;
-  }
-
-  list.innerHTML = allElements.map((item, i) => {
-    const typeIcon = getElementTypeLabel(item.el);
-    const pageLabel = item.page > 1 ? ` [Pág.${item.page}]` : '';
-    const suggested = guessFieldType(item.el);
-    return `<div style="display:flex;align-items:center;gap:5px;padding:5px 7px;background:#1e293b;border-radius:6px;margin-bottom:3px;flex-wrap:nowrap;">
-      <input type="checkbox" class="tmpl-slot-cb" data-idx="${i}" checked style="width:14px;height:14px;accent-color:#6366f1;flex-shrink:0;">
-      <span style="font-size:11px;color:#e2e8f0;flex-shrink:0;">${typeIcon}${pageLabel}</span>
-      <input type="text" list="fieldTypeSuggestions" class="tmpl-slot-field" data-idx="${i}" value="${escapeHtml(suggested)}" style="width:80px;padding:3px 5px;background:#0f172a;border:1px solid #4338ca;border-radius:4px;color:#c4b5fd;font-size:10px;min-width:0;text-transform:uppercase;" title="Tipo de dato">
-      <span style="color:#64748b;font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;" title="${escapeHtml(item.preview)}">${escapeHtml(item.preview)}</span>
-    </div>`;
-  }).join('');
-
-  // Select all / deselect all
-  const selectAllBtn = $('tmplSelectAll');
-  const deselectAllBtn = $('tmplDeselectAll');
-  if (selectAllBtn) {
-    const newBtn = selectAllBtn.cloneNode(true);
-    selectAllBtn.parentNode.replaceChild(newBtn, selectAllBtn);
-    newBtn.addEventListener('click', () => list.querySelectorAll('.tmpl-slot-cb').forEach(cb => cb.checked = true));
-  }
-  if (deselectAllBtn) {
-    const newBtn = deselectAllBtn.cloneNode(true);
-    deselectAllBtn.parentNode.replaceChild(newBtn, deselectAllBtn);
-    newBtn.addEventListener('click', () => list.querySelectorAll('.tmpl-slot-cb').forEach(cb => cb.checked = false));
-  }
-}
-
-async function confirmSaveTemplate() {
-  const nameInput = $('templateNameInput');
-  const name = nameInput ? nameInput.value.trim() : '';
-  if (!name) { showStatus('Introduce un nombre', 'error'); return; }
-
-  const activeDoc = getActiveDoc();
-  if (!activeDoc) { showStatus('No hay documento activo', 'error'); return; }
-
-  // Collect all non-placeholder elements (same order as rendered)
-  let allElements = [];
-  for (let page = 1; page <= activeDoc.totalPages; page++) {
-    (activeDoc.elements[page] || []).forEach((el) => {
-      if (!el.isPlaceholder) allElements.push({ page, el });
-    });
-  }
-  if (allElements.length === 0) { showStatus('No hay elementos', 'error'); return; }
-
-  const list = $('templateSlotList');
-  if (!list) return;
-  const checkboxes = list.querySelectorAll('.tmpl-slot-cb');
-  const fieldInputs = list.querySelectorAll('.tmpl-slot-field');
-
-  let slots = [];
-  checkboxes.forEach((cb, i) => {
-    if (cb.checked && allElements[i]) {
-      const item = allElements[i];
-      const fieldGroup = fieldInputs[i] ? fieldInputs[i].value.trim().toUpperCase() : 'TEXTO';
-
-      const slot = { type: item.el.type, x: item.el.x, y: item.el.y, page: item.page, label: fieldGroup };
-
-      if (item.el.type === 'text') {
-        slot.size = item.el.size || 14;
-        slot.color = item.el.color || '#000000';
-      } else if (item.el.type === 'signature') {
-        slot.width = item.el.width || 200;
-        slot.height = item.el.height || 80;
-      } else if (item.el.type === 'image') {
-        slot.width = item.el.width || 100;
-        slot.height = item.el.height || 100;
-      }
-      slots.push(slot);
-    }
-  });
-
-  if (slots.length === 0) { showStatus('Selecciona al menos un elemento', 'error'); return; }
-
-  try {
-    const newId = await saveTemplateToSupabase(name, slots);
-    showStatus(`Plantilla "${name}" guardada (${slots.length} hueco(s)) — visible para todos`, 'success');
-  } catch (err) {
-    // Fallback: save locally
-    const templates = await loadTemplates();
-    templates.push({ id: 'local_' + Date.now(), name, slots, createdAt: Date.now() });
-    await chrome.storage.local.set({ [TEMPLATES_STORAGE_KEY]: templates });
-    showStatus(`Plantilla "${name}" guardada localmente (sin conexión a Supabase)`, 'error');
-  }
-  showTemplatesModal(); // back to list view
-}
-
-async function renderTemplatesList() {
-  const list = $('templatesList');
-  if (!list) return;
-  const templates = await loadTemplates();
-
-  if (templates.length === 0) {
-    list.innerHTML = '<div style="color:#64748b;font-size:12px;text-align:center;padding:20px;">No hay plantillas guardadas.<br>Crea una para guardar posiciones de huecos reutilizables.</div>';
-    return;
-  }
-
-  // Summarize: group slots by label
-  list.innerHTML = templates.map((tmpl, i) => {
-    const slotCount = tmpl.slots ? tmpl.slots.length : 0;
-    const pages = new Set((tmpl.slots || []).map(s => s.page || 1));
-    const pageInfo = pages.size > 1 ? `${pages.size} págs` : `Pág.${[...pages][0]}`;
-
-    // Group by label
-    const groups = {};
-    (tmpl.slots || []).forEach(s => {
-      const lbl = s.label || 'TEXTO';
-      groups[lbl] = (groups[lbl] || 0) + 1;
-    });
-    const groupSummary = Object.entries(groups).map(([k, v]) => `${k}×${v}`).join(' · ');
-
-    // Show who created it (for shared templates)
-    const creatorInfo = tmpl.user_name ? `<span style="color:#64748b;font-size:9px;">por ${escapeHtml(tmpl.user_name)}</span>` : '';
-    const tmplId = tmpl.id || '';
-
-    return `<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#1e293b;border-radius:6px;margin-bottom:6px;">
-      <span style="flex:1;font-size:12px;color:#e2e8f0;">
-        <strong>${escapeHtml(tmpl.name)}</strong> ${creatorInfo}<br>
-        <span style="color:#818cf8;font-size:10px;">${escapeHtml(groupSummary)}</span><br>
-        <span style="color:#64748b;font-size:10px;">${slotCount} hueco(s) · ${pageInfo}</span>
-      </span>
-      <button class="sidebar-btn" data-tmpl-action="load" data-tmpl-idx="${i}" style="padding:4px 8px;font-size:10px;background:#2563eb;color:white;">Usar</button>
-      <button class="sidebar-btn" data-tmpl-action="delete" data-tmpl-idx="${i}" data-tmpl-id="${escapeHtml(tmplId)}" style="padding:4px 8px;font-size:10px;background:#7f1d1d;color:#fca5a5;">🗑️</button>
-    </div>`;
-  }).join('');
-
-  list.querySelectorAll('[data-tmpl-action="load"]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const idx = parseInt(btn.dataset.tmplIdx);
-      const templates = await loadTemplates();
-      if (templates[idx]) applyTemplate(templates[idx]);
-    });
-  });
-
-  list.querySelectorAll('[data-tmpl-action="delete"]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const idx = parseInt(btn.dataset.tmplIdx);
-      const templates = await loadTemplates();
-      const tmpl = templates[idx];
-      const name = tmpl ? tmpl.name : '';
-      if (confirm(`¿Eliminar la plantilla "${name}"?`)) {
-        const tmplId = tmpl?.id || '';
-        if (tmplId && !tmplId.startsWith('local_')) {
-          // Delete from Supabase
-          try {
-            await deleteTemplateFromSupabase(tmplId);
-            showStatus('Plantilla eliminada', 'success');
-          } catch (err) {
-            showStatus('Error al eliminar: ' + err.message, 'error');
-          }
-        } else {
-          // Delete from local storage
-          templates.splice(idx, 1);
-          await chrome.storage.local.set({ [TEMPLATES_STORAGE_KEY]: templates });
-          showStatus('Plantilla eliminada', 'success');
-        }
-        renderTemplatesList();
-      }
-    });
-  });
-}
-
-async function applyTemplate(template) {
-  const activeDoc = getActiveDoc();
-  if (!activeDoc) { showStatus('Primero carga un PDF', 'error'); return; }
-  if (!template || !template.slots || template.slots.length === 0) { showStatus('Plantilla vacía', 'error'); return; }
-
-  // Count slots per group for labeling
-  const groupCounts = {};
-  const groupIndices = {};
-  template.slots.forEach(slot => {
-    const g = slot.label || slot.placeholderLabel || 'TEXTO';
-    groupCounts[g] = (groupCounts[g] || 0) + 1;
-    groupIndices[g] = 0;
-  });
-
-  // Sort slots by page then y then x for consistent ordering
-  const sortedSlots = [...template.slots].sort((a, b) => (a.page || 1) - (b.page || 1) || a.y - b.y || a.x - b.x);
-
-  let firstPage = null;
-  sortedSlots.forEach(slot => {
-    const targetPage = Math.min(slot.page || 1, activeDoc.totalPages);
-    if (firstPage === null || targetPage < firstPage) firstPage = targetPage;
-
-    const group = slot.label || slot.placeholderLabel || 'TEXTO';
-    const idx = groupIndices[group];
-    const total = groupCounts[group];
-    groupIndices[group]++;
-
-    const placeholder = {
-      type: slot.type,
-      x: slot.x,
-      y: slot.y,
-      isPlaceholder: true,
-      placeholderLabel: `${group} (${idx + 1}/${total})`,
-      fieldGroup: group,
-      fieldSlotIndex: idx,
-      fieldSlotTotal: total
-    };
-
-    if (slot.type === 'text') {
-      placeholder.text = '';
-      placeholder.size = slot.size || 14;
-      placeholder.color = slot.color || '#000000';
-    } else if (slot.type === 'signature') {
-      placeholder.width = slot.width || 200;
-      placeholder.height = slot.height || 80;
-      placeholder.src = '';
-      placeholder.name = '';
-    } else if (slot.type === 'image') {
-      placeholder.width = slot.width || 100;
-      placeholder.height = slot.height || 100;
-      placeholder.src = '';
-    }
-
-    pushElement(activeDoc, targetPage, placeholder);
-  });
-
-  if (firstPage !== null && firstPage !== activeDoc.currentPage) {
-    activeDoc.currentPage = firstPage;
-  }
-
-  updateTabModified(activeDoc.id, true);
-  renderPage();
-
-  const modal = $('templatesModal');
-  if (modal) modal.classList.remove('show');
-
-  const groups = Object.entries(groupCounts).map(([k, v]) => `${k}×${v}`).join(', ');
-  showStatus(`Plantilla "${template.name}" aplicada: ${groups}. Botón "Rellenar plantilla" disponible.`, 'success');
-}
-
-// ============================================
-// FILL TEMPLATE SYSTEM
-// ============================================
-
-function showFillModal() {
-  const modal = $('fillTemplateModal');
-  if (!modal) return;
-
-  const activeDoc = getActiveDoc();
-  if (!activeDoc) { showStatus('No hay documento', 'error'); return; }
-
-  // Collect all placeholders grouped by fieldGroup
-  const groups = {};
-  for (let page = 1; page <= activeDoc.totalPages; page++) {
-    const pageEls = activeDoc.elements[page] || [];
-    pageEls.forEach(el => {
-      if (!el.isPlaceholder) return;
-      const group = el.fieldGroup || 'TEXTO';
-      if (!groups[group]) groups[group] = [];
-      groups[group].push({ page, el });
-    });
-  }
-
-  // Sort each group by position (top to bottom, left to right)
-  Object.values(groups).forEach(slots => {
-    slots.sort((a, b) => a.el.y - b.el.y || a.el.x - b.el.x);
-  });
-
-  const content = $('fillTemplateContent');
-  if (!content) return;
-
-  const groupNames = Object.keys(groups).sort();
-  if (groupNames.length === 0) {
-    content.innerHTML = '<div style="color:#64748b;font-size:12px;text-align:center;padding:20px;">No hay huecos de plantilla para rellenar.</div>';
-    modal.classList.add('show');
-    return;
-  }
-
-  content.innerHTML = groupNames.map(groupName => {
-    const slots = groups[groupName];
-    const totalCount = slots.length;
-    const firstType = slots[0].el.type;
-
-    if (firstType === 'text') {
-      const isDate = groupName === 'FECHA' || groupName === 'DATE';
-      return `<div style="background:#1e293b;border-radius:8px;padding:10px;margin-bottom:8px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-          <strong style="color:#e2e8f0;font-size:12px;">📝 ${escapeHtml(groupName)}</strong>
-          <span style="color:#94a3b8;font-size:10px;">${totalCount} hueco(s)</span>
-        </div>
-        ${isDate ? `
-          <button class="sidebar-btn fill-date-btn" data-group="${escapeHtml(groupName)}" style="width:100%;background:#8b5cf6;color:white;padding:6px;margin-bottom:4px;">📅 Rellenar con fecha de hoy</button>
-          <textarea class="fill-group-input" data-group="${escapeHtml(groupName)}" placeholder="O escribe fechas personalizadas (una por línea)..." rows="2" style="width:100%;padding:6px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#f1f5f9;font-size:11px;resize:vertical;margin-top:4px;"></textarea>
-        ` : `
-          <textarea class="fill-group-input" data-group="${escapeHtml(groupName)}" placeholder="Un valor por línea (${totalCount} huecos)..." rows="${Math.min(totalCount + 1, 6)}" style="width:100%;padding:6px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#f1f5f9;font-size:11px;resize:vertical;"></textarea>
-        `}
-        <button class="sidebar-btn fill-text-btn" data-group="${escapeHtml(groupName)}" style="width:100%;margin-top:4px;background:#4338ca;color:#e0e7ff;padding:5px;">Rellenar ${escapeHtml(groupName)}</button>
-      </div>`;
-    } else if (firstType === 'signature') {
-      return `<div style="background:#1e293b;border-radius:8px;padding:10px;margin-bottom:8px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-          <strong style="color:#e2e8f0;font-size:12px;">✍️ ${escapeHtml(groupName)}</strong>
-          <span style="color:#94a3b8;font-size:10px;">${totalCount} hueco(s)</span>
-        </div>
-        <p style="color:#94a3b8;font-size:10px;margin-bottom:6px;">Busca firmas y se colocarán automáticamente en estos ${totalCount} huecos.</p>
-        <button class="sidebar-btn fill-sig-btn" data-group="${escapeHtml(groupName)}" style="width:100%;background:#7c3aed;color:white;padding:6px;">🔍 Buscar firmas</button>
-      </div>`;
-    } else {
-      return `<div style="background:#1e293b;border-radius:8px;padding:10px;margin-bottom:8px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-          <strong style="color:#e2e8f0;font-size:12px;">🖼️ ${escapeHtml(groupName)}</strong>
-          <span style="color:#94a3b8;font-size:10px;">${totalCount} hueco(s)</span>
-        </div>
-        <p style="color:#94a3b8;font-size:10px;">Haz doble clic en cada hueco de imagen para rellenar.</p>
-      </div>`;
-    }
-  }).join('');
-
-  modal.classList.add('show');
-
-  // Wire up text fill buttons
-  content.querySelectorAll('.fill-text-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const groupName = btn.dataset.group;
-      const textarea = content.querySelector(`textarea[data-group="${groupName}"]`);
-      fillTextGroup(groupName, textarea ? textarea.value : '');
-    });
-  });
-
-  // Wire up date fill buttons
-  content.querySelectorAll('.fill-date-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const groupName = btn.dataset.group;
-      fillDateGroup(groupName);
-    });
-  });
-
-  // Wire up signature fill buttons
-  content.querySelectorAll('.fill-sig-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const groupName = btn.dataset.group;
-      // Open signature search; signatures will auto-fill into placeholders
-      const sigModal = $('signatureModal');
-      if (sigModal) {
-        sigModal.classList.add('show');
-        const sigInput = $('signatureSearchInput');
-        if (sigInput) { sigInput.value = ''; sigInput.focus(); }
-        const sigResults = $('signatureResults');
-        if (sigResults) sigResults.innerHTML = '<div class="signature-empty">Escribe nombres para buscar. Se colocarán en los huecos de ' + escapeHtml(groupName) + '.</div>';
-        const sigCount = $('signatureCount');
-        if (sigCount) sigCount.style.display = 'none';
-        addedSignaturesCount = 0;
-      }
-      // Close fill modal
-      modal.classList.remove('show');
-    });
-  });
-}
-
-function getEmptyPlaceholdersForGroup(groupName) {
-  const activeDoc = getActiveDoc();
-  if (!activeDoc) return [];
-
-  let slots = [];
-  for (let page = 1; page <= activeDoc.totalPages; page++) {
-    const pageEls = activeDoc.elements[page] || [];
-    pageEls.forEach((el, idx) => {
-      const g = el.fieldGroup || el.placeholderLabel || 'TEXTO';
-      if (el.isPlaceholder && g.toUpperCase() === groupName.toUpperCase()) {
-        slots.push({ page, idx, el });
-      }
-    });
-  }
-
-  // Sort by position (top to bottom, left to right)
-  slots.sort((a, b) => a.el.y - b.el.y || a.el.x - b.el.x);
-  return slots;
-}
-
-function fillTextGroup(groupName, valuesText) {
-  const activeDoc = getActiveDoc();
-  if (!activeDoc) return;
-
-  const lines = valuesText.split('\n').map(l => l.trim()).filter(Boolean);
-  if (lines.length === 0) { showStatus('Escribe al menos un valor', 'error'); return; }
-
-  const slots = getEmptyPlaceholdersForGroup(groupName);
-  if (slots.length === 0) { showStatus(`No hay huecos vacíos de ${groupName}`, 'error'); return; }
-
-  const count = Math.min(lines.length, slots.length);
-  for (let i = 0; i < count; i++) {
-    const slot = slots[i];
-    const el = activeDoc.elements[slot.page][slot.idx];
-    el.text = lines[i];
-    el.isPlaceholder = false;
-    el.placeholderLabel = '';
-    delete el.fieldGroup;
-    delete el.fieldSlotIndex;
-    delete el.fieldSlotTotal;
-  }
-
-  updateTabModified(activeDoc.id, true);
-  renderPage();
-  showStatus(`${count} "${groupName}" rellenado(s)${lines.length > slots.length ? ` (sobraron ${lines.length - slots.length})` : ''}${lines.length < slots.length ? ` (quedan ${slots.length - count} vacíos)` : ''}`, 'success');
-
-  // Refresh fill modal if open
-  const fillModal = $('fillTemplateModal');
-  if (fillModal && fillModal.classList.contains('show')) showFillModal();
-}
-
-function fillDateGroup(groupName) {
-  const activeDoc = getActiveDoc();
-  if (!activeDoc) return;
-
-  const today = new Date();
-  const day = String(today.getDate()).padStart(2, '0');
-  const month = String(today.getMonth() + 1).padStart(2, '0');
-  const year = today.getFullYear();
-  const dateStr = `${day}/${month}/${year}`;
-
-  const slots = getEmptyPlaceholdersForGroup(groupName);
-  if (slots.length === 0) { showStatus(`No hay huecos vacíos de ${groupName}`, 'error'); return; }
-
-  slots.forEach(slot => {
-    const el = activeDoc.elements[slot.page][slot.idx];
-    el.text = dateStr;
-    el.isPlaceholder = false;
-    el.placeholderLabel = '';
-    delete el.fieldGroup;
-    delete el.fieldSlotIndex;
-    delete el.fieldSlotTotal;
-  });
-
-  updateTabModified(activeDoc.id, true);
-  renderPage();
-  showStatus(`${slots.length} fecha(s) rellenada(s): ${dateStr}`, 'success');
-
-  const fillModal = $('fillTemplateModal');
-  if (fillModal && fillModal.classList.contains('show')) showFillModal();
 }
