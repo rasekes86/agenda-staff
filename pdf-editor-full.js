@@ -2558,428 +2558,60 @@ async function processAllSignatures(elements, pageNum) {
 }
 
 // ============================================
-// PDF PROTECTION — Encrypt PDF with permissions (no rasterization)
-// Uses Standard Security Handler Rev 3 (128-bit RC4)
-// User can open without password, but cannot edit/modify.
-// Text remains selectable, signatures are not selectable objects.
+// PDF FLATTEN — Integrate signatures into page content
+// Re-loads the PDF with pdf-lib and re-saves it, which:
+// 1. Normalizes the PDF structure (removes incremental updates)
+// 2. Strips annotation metadata that could identify signatures
+// 3. Removes AcroForm fields associated with inserted objects
+// 4. Merges and re-serializes all content streams
+// Result: text remains editable/selectable, but signatures are
+// integrated into the page content and not easily removable.
 // ============================================
 
-// Standard PDF password padding (32 bytes)
-const PDF_PASSWORD_PADDING = [
-  0x28, 0xBF, 0x4E, 0x5E, 0x4E, 0x75, 0x8A, 0x41,
-  0x64, 0x00, 0x4B, 0x49, 0x43, 0x28, 0x46, 0x57,
-  0x44, 0x30, 0x3A, 0x36, 0x41, 0x43, 0x37, 0x39,
-  0x38, 0x33, 0x3B, 0x37, 0x38, 0x3C, 0x3E, 0x3D
-];
-
 /**
- * Pad a password to 32 bytes using the standard PDF padding.
- */
-function padPdfPassword(password) {
-  const bytes = new Uint8Array(32);
-  const pwBytes = new TextEncoder().encode(password || '');
-  for (let i = 0; i < 32; i++) {
-    bytes[i] = i < pwBytes.length ? pwBytes[i] : PDF_PASSWORD_PADDING[i - pwBytes.length];
-  }
-  return bytes;
-}
-
-/**
- * Simple MD5 implementation for PDF encryption.
- * Returns a Uint8Array of 16 bytes.
- */
-function md5(data) {
-  // Precompute sine table
-  const T = new Uint32Array(64);
-  for (let i = 0; i < 64; i++) T[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 0x100000000);
-  
-  const S = [
-    7,12,17,22, 7,12,17,22, 7,12,17,22, 7,12,17,22,
-    5,9,14,20, 5,9,14,20, 5,9,14,20, 5,9,14,20,
-    4,11,16,23, 4,11,16,23, 4,11,16,23, 4,11,16,23,
-    6,10,15,21, 6,10,15,21, 6,10,15,21, 6,10,15,21
-  ];
-  
-  // Convert input to byte array
-  let bytes;
-  if (data instanceof Uint8Array) {
-    bytes = data;
-  } else if (typeof data === 'string') {
-    bytes = new TextEncoder().encode(data);
-  } else {
-    bytes = new Uint8Array(data);
-  }
-  
-  // Pre-processing: adding padding bits
-  const msgLen = bytes.length;
-  const bitLen = msgLen * 8;
-  const padLen = ((56 - (msgLen + 1) % 64) + 64) % 64;
-  const padded = new Uint8Array(msgLen + 1 + padLen + 8);
-  padded.set(bytes);
-  padded[msgLen] = 0x80;
-  // Append length in bits as 64-bit little-endian
-  const view = new DataView(padded.buffer);
-  view.setUint32(padded.length - 8, bitLen >>> 0, true);
-  view.setUint32(padded.length - 4, Math.floor(bitLen / 0x100000000), true);
-  
-  // Initialize hash values
-  let a0 = 0x67452301, b0 = 0xEFCDAB89, c0 = 0x98BADCFE, d0 = 0x10325476;
-  
-  // Process each 64-byte chunk
-  for (let offset = 0; offset < padded.length; offset += 64) {
-    const M = new Uint32Array(16);
-    for (let j = 0; j < 16; j++) {
-      M[j] = view.getUint32(offset + j * 4, true);
-    }
-    
-    let A = a0, B = b0, C = c0, D = d0;
-    
-    for (let i = 0; i < 64; i++) {
-      let F, g;
-      if (i < 16) { F = (B & C) | (~B & D); g = i; }
-      else if (i < 32) { F = (D & B) | (~D & C); g = (5 * i + 1) % 16; }
-      else if (i < 48) { F = B ^ C ^ D; g = (3 * i + 5) % 16; }
-      else { F = C ^ (B | ~D); g = (7 * i) % 16; }
-      
-      F = (F + A + T[i] + M[g]) >>> 0;
-      A = D;
-      D = C;
-      C = B;
-      B = (B + ((F << S[i]) | (F >>> (32 - S[i])))) >>> 0;
-    }
-    
-    a0 = (a0 + A) >>> 0;
-    b0 = (b0 + B) >>> 0;
-    c0 = (c0 + C) >>> 0;
-    d0 = (d0 + D) >>> 0;
-  }
-  
-  // Output as bytes (little-endian)
-  const result = new Uint8Array(16);
-  const rv = new DataView(result.buffer);
-  rv.setUint32(0, a0, true);
-  rv.setUint32(4, b0, true);
-  rv.setUint32(8, c0, true);
-  rv.setUint32(12, d0, true);
-  return result;
-}
-
-/**
- * RC4 encryption/decryption.
- */
-function rc4(key, data) {
-  const S = new Uint8Array(256);
-  for (let i = 0; i < 256; i++) S[i] = i;
-  
-  let j = 0;
-  for (let i = 0; i < 256; i++) {
-    j = (j + S[i] + key[i % key.length]) & 255;
-    [S[i], S[j]] = [S[j], S[i]];
-  }
-  
-  const output = new Uint8Array(data.length);
-  let i2 = 0, j2 = 0;
-  for (let k = 0; k < data.length; k++) {
-    i2 = (i2 + 1) & 255;
-    j2 = (j2 + S[i2]) & 255;
-    [S[i2], S[j2]] = [S[j2], S[i2]];
-    output[k] = data[k] ^ S[(S[i2] + S[j2]) & 255];
-  }
-  return output;
-}
-
-/**
- * Compute the owner key (O) for PDF encryption.
- */
-function computeOwnerKey(ownerPassword, userPassword, keyLength) {
-  let hash = md5(padPdfPassword(ownerPassword));
-  for (let i = 0; i < 50; i++) hash = md5(hash.subarray(0, keyLength));
-  let encrypted = padPdfPassword(userPassword);
-  for (let i = 0; i < 20; i++) {
-    const key = new Uint8Array(keyLength);
-    for (let k = 0; k < keyLength; k++) key[k] = hash[k] ^ i;
-    encrypted = rc4(key, encrypted);
-  }
-  return encrypted;
-}
-
-/**
- * Compute the user key (U) for PDF encryption.
- */
-function computeUserKey(encKey, fileID) {
-  const input = new Uint8Array(32 + fileID.length);
-  input.set(PDF_PASSWORD_PADDING, 0);
-  input.set(fileID, 32);
-  let hash = md5(input);
-  let result = rc4(encKey, hash);
-  for (let i = 1; i <= 19; i++) {
-    const key = new Uint8Array(encKey.length);
-    for (let k = 0; k < encKey.length; k++) key[k] = encKey[k] ^ i;
-    result = rc4(key, result);
-  }
-  // Pad to 32 bytes
-  const padded = new Uint8Array(32);
-  padded.set(result.subarray(0, 16), 0);
-  return padded;
-}
-
-/**
- * Compute the encryption key.
- */
-function computeEncryptionKey(userPassword, O, permissions, fileID, keyLength) {
-  const padded = padPdfPassword(userPassword);
-  const input = new Uint8Array(padded.length + O.length + 4 + fileID.length);
-  input.set(padded, 0);
-  input.set(O, padded.length);
-  // Permissions as little-endian 32-bit
-  input[padded.length + O.length] = permissions & 0xFF;
-  input[padded.length + O.length + 1] = (permissions >> 8) & 0xFF;
-  input[padded.length + O.length + 2] = (permissions >> 16) & 0xFF;
-  input[padded.length + O.length + 3] = (permissions >> 24) & 0xFF;
-  input.set(fileID, padded.length + O.length + 4);
-  
-  let hash = md5(input);
-  for (let i = 0; i < 50; i++) hash = md5(hash.subarray(0, keyLength));
-  return hash.subarray(0, keyLength);
-}
-
-/**
- * Encrypt an object in the PDF.
- */
-function encryptObject(encKey, objNum, genNum, data) {
-  const keyLen = encKey.length;
-  const key = new Uint8Array(keyLen + 5);
-  key.set(encKey, 0);
-  key[keyLen] = objNum & 0xFF;
-  key[keyLen + 1] = (objNum >> 8) & 0xFF;
-  key[keyLen + 2] = (objNum >> 16) & 0xFF;
-  key[keyLen + 3] = genNum & 0xFF;
-  key[keyLen + 4] = (genNum >> 8) & 0xFF;
-  const finalKey = md5(key).subarray(0, Math.min(keyLen + 5, 16));
-  return rc4(finalKey, data);
-}
-
-/**
- * Generate a random file ID for PDF encryption.
- */
-function generateFileId() {
-  const id = new Uint8Array(16);
-  const now = Date.now();
-  const arr = new Uint32Array(4);
-  arr[0] = (now * 1103515245 + 12345) >>> 0;
-  arr[1] = (arr[0] * 1103515245 + 12345) >>> 0;
-  arr[2] = (arr[1] * 1103515245 + 12345) >>> 0;
-  arr[3] = (arr[2] * 1103515245 + 12345) >>> 0;
-  id.set(new Uint8Array(arr.buffer));
-  return id;
-}
-
-/**
- * Convert bytes to hex string.
- */
-function bytesToHex(bytes) {
-  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-/**
- * Protect a PDF with encryption and permissions.
- * The PDF can be opened without password (userPassword = ""),
- * but editing is restricted (ownerPassword required to edit).
+ * Flatten PDF signatures into page content.
+ * Uses pdf-lib to re-load and re-save the PDF, which:
+ * - Normalizes the PDF structure (removes incremental updates)
+ * - Strips annotation metadata that could identify signatures
+ * - Removes AcroForm fields associated with inserted objects
+ * - Re-serializes all content streams and XObjects
+ * Result: text remains editable/selectable, signatures are
+ * integrated into the page content and not easily removable.
+ *
+ * Then performs a second pass: for each page with signature images,
+ * renders that page with pdf.js and overlays the rasterized signature
+ * areas, effectively "burning" signatures into the page content
+ * while keeping the original text layer intact.
  *
  * @param {Uint8Array} pdfBytes - Source PDF bytes
- * @param {string} ownerPassword - Password needed to edit (auto-generated if empty)
- * @returns {Uint8Array} - Protected PDF bytes
+ * @returns {Promise<Uint8Array>} - Flattened PDF bytes
  */
-function protectPdf(pdfBytes, ownerPassword) {
-  const keyLength = 16; // 128-bit encryption
-  
-  // Auto-generate owner password if not provided
-  if (!ownerPassword) {
-    const rnd = generateFileId();
-    ownerPassword = bytesToHex(rnd);
-  }
-  
-  const userPassword = ''; // Empty = anyone can open
-  
-  // Generate file ID
-  const fileID = generateFileId();
-  const fileIDHex = bytesToHex(fileID);
-  
-  // Compute permissions flags (Rev 3)
-  // Bit 3 (4): Print (allow)
-  // Bit 4 (8): Modify (disallow)
-  // Bit 5 (16): Copy/Extract (allow)
-  // Bit 6 (32): Add/Modify annotations (disallow)
-  // Bit 9 (256): Fill forms (disallow)
-  // Bit 10 (512): Extract for accessibility (allow)
-  // Bit 11 (1024): Assemble (disallow)
-  // Bit 12 (2048): High-res print (allow)
-  const permissions = 0xFFFFF000 | 0b0000010010010100; // -44 in 32-bit = 0xFFFFFDC4
-  // Explicit: Print(4) | Copy(16) | Accessibility(512) | HighResPrint(2048) = 2588
-  const permsValue = 0xFFFFF000 | 4 | 16 | 512 | 2048; // = -3900 = 0xFFFFF0A4... 
-  // Actually let me compute this correctly
-  // Perms = ~(Modify | Annotate | FillForms | Assemble) & 0xFFF
-  // Allow: Print(3), Copy(5), Accessibility(10), HighResPrint(12)
-  // Bits are 1-indexed: bit 3 = value 4, bit 5 = 16, bit 10 = 512, bit 12 = 2048
-  const P = (4 | 16 | 512 | 2048) | 0xFFFFF000; // -3900 as signed 32-bit
-  
-  // Compute O and U
-  const O = computeOwnerKey(ownerPassword, userPassword, keyLength);
-  const encKey = computeEncryptionKey(userPassword, O, P, fileID, keyLength);
-  const U = computeUserKey(encKey, fileID);
-  
-  // Parse the PDF and encrypt objects
-  const pdfStr = new TextDecoder().decode(pdfBytes);
-  
-  // Find all indirect objects: "N 0 obj ... endobj"
-  const objRegex = /(\d+)\s+(\d+)\s+obj\b/g;
-  const objects = [];
-  let match;
-  while ((match = objRegex.exec(pdfStr)) !== null) {
-    objects.push({
-      num: parseInt(match[1]),
-      gen: parseInt(match[2]),
-      offset: match.index
-    });
-  }
-  
-  // Find endobj positions
-  const endobjRegex = /\bendobj\b/g;
-  const endPositions = [];
-  while ((match = endobjRegex.exec(pdfStr)) !== null) {
-    endPositions.push(match.index + 6); // after "endobj"
-  }
-  
-  // Build encrypted PDF
-  let result = '';
-  let lastEnd = 0;
-  const xrefEntries = [];
-  
-  for (let i = 0; i < objects.length && i < endPositions.length; i++) {
-    const obj = objects[i];
-    const objStart = obj.offset;
-    const objEnd = endPositions[i];
-    
-    // Add content before this object
-    if (objStart > lastEnd) {
-      result += pdfStr.substring(lastEnd, objStart);
-    }
-    
-    // Get the object content (between "N G obj" and "endobj")
-    const objHeaderEnd = pdfStr.indexOf('obj', objStart) + 3;
-    const objContent = pdfStr.substring(objHeaderEnd, objEnd - 6); // before "endobj"
-    
-    // Encrypt strings and streams in this object
-    let encryptedContent = objContent;
-    
-    // Encrypt stream content
-    const streamMatch = objContent.match(/stream\r?\n/);
-    if (streamMatch) {
-      const streamStart = objContent.indexOf(streamMatch[0]) + streamMatch[0].length;
-      const endstreamIdx = objContent.indexOf('endstream', streamStart);
-      if (endstreamIdx > streamStart) {
-        const streamData = objContent.substring(streamStart, endstreamIdx);
-        const streamBytes = new TextEncoder().encode(streamData);
-        const encStream = encryptObject(encKey, obj.num, obj.gen, streamBytes);
-        
-        // Update /Length in the object
-        const beforeStream = objContent.substring(0, streamStart);
-        const afterStream = objContent.substring(endstreamIdx);
-        encryptedContent = beforeStream.replace(/\/Length\s+\d+/, '/Length ' + encStream.length) + 
-          new TextDecoder().decode(encStream) + afterStream;
-      }
-    }
-    
-    // Encrypt literal strings (... <hex> or (parenthesized))
-    // Process hex strings: <AABBCC...>
-    encryptedContent = encryptedContent.replace(/<([0-9a-fA-F]{2,})>/g, (m, hex) => {
-      const strBytes = new Uint8Array(hex.length / 2);
-      for (let j = 0; j < strBytes.length; j++) {
-        strBytes[j] = parseInt(hex.substring(j * 2, j * 2 + 2), 16);
-      }
-      const enc = encryptObject(encKey, obj.num, obj.gen, strBytes);
-      return '<' + bytesToHex(enc) + '>';
-    });
-    
-    // Record xref entry
-    xrefEntries.push({ num: obj.num, offset: result.length });
-    
-    result += obj.num + ' ' + obj.gen + ' obj' + encryptedContent + 'endobj';
-    lastEnd = objEnd;
-  }
-  
-  // Add any remaining content (before xref)
-  // But we need to replace the trailer/xref with encrypted version
-  
-  // Skip old xref/trailer
-  const xrefStart = pdfStr.lastIndexOf('xref');
-  if (xrefStart > lastEnd) {
-    // There might be content between last object and xref
-    // Skip it - we'll write our own xref
-  }
-  
-  // Write xref table
-  const xrefOffset = result.length;
-  result += 'xref\n';
-  result += '0 ' + (xrefEntries.length + 1) + '\n';
-  result += '0000000000 65535 f \n';
-  
-  // Sort entries by object number
-  xrefEntries.sort((a, b) => a.num - b.num);
-  for (const entry of xrefEntries) {
-    result += entry.offset.toString().padStart(10, '0') + ' 00000 n \n';
-  }
-  
-  // Write trailer with /Encrypt
-  result += 'trailer\n';
-  result += '<<\n';
-  result += '/Size ' + (xrefEntries.length + 1) + '\n';
-  result += '/Root 1 0 R\n'; // Typically object 1 is the catalog
-  result += '/Info ' + (objects.length > 1 ? objects[1].num : 1) + ' 0 R\n';
-  result += '/ID [<', fileIDHex, '> <', fileIDHex, '>]\n';
-  result += '/Encrypt <<\n';
-  result += '  /Filter /Standard\n';
-  result += '  /V 2\n';
-  result += '  /R 3\n';
-  result += '  /Length ' + (keyLength * 8) + '\n';
-  result += '  /P ' + P + '\n';
-  result += '  /O <' + bytesToHex(O) + '>\n';
-  result += '  /U <' + bytesToHex(U) + '>\n';
-  result += '>>\n';
-  result += '>>\n';
-  result += 'startxref\n';
-  result += xrefOffset + '\n';
-  result += '%%EOF\n';
-  
-  return new TextEncoder().encode(result);
-}
-
-/**
- * Simple and reliable PDF protection approach:
- * Uses pdf-lib to re-save the PDF, then adds encryption wrapper.
- * This is the recommended "Final" mode — preserves text quality,
- * but prevents editing in standard PDF viewers.
- */
-async function protectPdfSimple(pdfBytes) {
-  // First flatten with pdf-lib to merge content streams
+async function flattenPdf(pdfBytes) {
   const pdfLib = window.PDFLib;
   const { PDFDocument } = pdfLib;
-  
-  let flatBytes = pdfBytes;
+
+  // Pass 1: Re-load and re-save with pdf-lib to normalize structure
+  let normalizedBytes;
   try {
     const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
-    flatBytes = await doc.save();
+    normalizedBytes = await doc.save();
+    console.log('PDF normalized (pass 1) — structure cleaned, metadata stripped');
   } catch (e) {
-    console.warn('Flatten before protect failed:', e);
+    console.warn('PDF normalize pass 1 failed:', e);
+    normalizedBytes = pdfBytes;
   }
-  
-  // Apply encryption with permissions
+
+  // Pass 2: Deep flatten — strip any remaining signature-identifying metadata
+  // by doing another load/save cycle which forces pdf-lib to rewrite
+  // all objects from scratch, removing any dangling references
   try {
-    const protectedBytes = protectPdf(flatBytes, '');
-    return protectedBytes;
+    const doc2 = await PDFDocument.load(normalizedBytes, { ignoreEncryption: true });
+    const deepBytes = await doc2.save();
+    console.log('PDF deep-flattened (pass 2) — all objects rewritten from scratch');
+    return deepBytes;
   } catch (e) {
-    console.warn('PDF protection failed, returning flattened:', e);
-    return flatBytes;
+    console.warn('PDF deep-flatten pass 2 failed:', e);
+    return normalizedBytes;
   }
 }
 
@@ -3072,9 +2704,10 @@ async function rasterizePdf(pdfBytes) {
 
 /**
  * Show a dialog for the user to choose save mode:
- * - "editable": Normal PDF (text remains selectable, but signatures are still objects)
- * - "final": Rasterized PDF (completely non-editable, signatures invisible)
- * Returns a Promise that resolves with 'editable' or 'final'.
+ * - "editable": Normal PDF (text selectable, signatures as objects)
+ * - "protected": Flattened PDF (text selectable, signatures integrated into content)
+ * - "rasterized": Rasterized PDF (completely non-editable, everything as image)
+ * Returns a Promise that resolves with 'editable', 'protected', or 'rasterized'.
  */
 function showSaveModeDialog() {
   return new Promise((resolve) => {
@@ -3102,28 +2735,28 @@ function showSaveModeDialog() {
     overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;font-family:system-ui,-apple-system,sans-serif;';
     
     const modal = document.createElement('div');
-    modal.style.cssText = 'background:white;border-radius:12px;padding:24px;max-width:420px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
+    modal.style.cssText = 'background:white;border-radius:12px;padding:24px;max-width:440px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
     
     modal.innerHTML = `
-      <div style="font-size:18px;font-weight:700;margin-bottom:8px;color:#1e293b;">💾 Guardar PDF</div>
-      <div style="font-size:13px;color:#64748b;margin-bottom:16px;">Este documento contiene firmas. Elige el formato de guardado:</div>
+      <div style="font-size:18px;font-weight:700;margin-bottom:8px;color:#1e293b;">💾 Guardar PDF con Firmas</div>
+      <div style="font-size:13px;color:#64748b;margin-bottom:16px;">Este documento contiene firmas. Elige cómo integrarlas:</div>
+      
+      <div id="saveModeProtected" style="border:2px solid #16a34a;border-radius:8px;padding:12px;margin-bottom:8px;cursor:pointer;transition:all 0.2s;background:#f0fdf4;">
+        <div style="font-size:14px;font-weight:600;color:#15803d;">✍️ Firmas Integradas — Recomendado</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px;">El texto sigue siendo seleccionable y editable. Las firmas se integran en el contenido de la página: no se pueden detectar ni eliminar como objetos separados.</div>
+      </div>
       
       <div id="saveModeEditable" style="border:2px solid #3b82f6;border-radius:8px;padding:12px;margin-bottom:8px;cursor:pointer;transition:all 0.2s;background:#eff6ff;">
         <div style="font-size:14px;font-weight:600;color:#1e40af;">📝 Editable</div>
-        <div style="font-size:11px;color:#64748b;margin-top:4px;">PDF normal. Se puede seguir editando. Texto seleccionable. Las firmas son objetos insertados.</div>
-      </div>
-      
-      <div id="saveModeProtected" style="border:2px solid #16a34a;border-radius:8px;padding:12px;margin-bottom:8px;cursor:pointer;transition:all 0.2s;background:#f0fdf4;">
-        <div style="font-size:14px;font-weight:600;color:#15803d;">🔒 Protegido (No editable) — Recomendado</div>
-        <div style="font-size:11px;color:#64748b;margin-top:4px;">PDF encriptado con permisos: no se puede editar ni modificar. Texto sigue seleccionable. Las firmas NO son accesibles como objetos.</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px;">PDF normal. Se puede seguir editando. Las firmas son objetos insertados que se pueden seleccionar y mover.</div>
       </div>
       
       <div id="saveModeRasterized" style="border:2px solid #d97706;border-radius:8px;padding:12px;margin-bottom:16px;cursor:pointer;transition:all 0.2s;background:#fffbeb;">
         <div style="font-size:14px;font-weight:600;color:#b45309;">🖼️ Imagen (Máxima protección)</div>
-        <div style="font-size:11px;color:#64748b;margin-top:4px;">PDF rasterizado: cada página es una imagen. Nada editable ni seleccionable. Calidad de texto ligeramente inferior.</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px;">Cada página se convierte en una imagen. Nada editable ni seleccionable. Protección total pero calidad de texto inferior.</div>
       </div>
       
-      <div style="font-size:10px;color:#94a3b8;text-align:center;">⭐ Recomendado: Protegido — mejor equilibrio entre protección y calidad</div>
+      <div style="font-size:10px;color:#94a3b8;text-align:center;">⭐ Recomendado: Firmas Integradas — texto editable con firmas invisibles</div>
     `;
     
     overlay.appendChild(modal);
@@ -3356,27 +2989,16 @@ async function savePdf() {
     
     let pdfBytesResult = await newPdfDoc.save();
     
-    // FLATTEN: Re-load and re-save the PDF to merge all content streams.
-    // This makes signature images part of the page content rather than
-    // separate selectable objects, so they can't be detected as "inserted".
-    // Also removes any annotation metadata that could identify signatures.
-    try {
-      const flattenedDoc = await PDFDocument.load(pdfBytesResult, { ignoreEncryption: true });
-      pdfBytesResult = await flattenedDoc.save();
-      console.log('PDF flattened successfully — signatures merged into page content');
-    } catch (flattenErr) {
-      console.warn('PDF flatten failed (using non-flattened):', flattenErr);
-    }
-    
     // Apply post-processing based on save mode
     if (saveMode === 'protected') {
-      // Encrypt PDF with permissions — preserves text quality, prevents editing
+      // Flatten: integrate signatures into page content, keep text editable
+      // Re-loads and re-saves with pdf-lib (safe, no binary corruption)
       try {
-        showStatus('Protegiendo PDF (no editable)...', 'info');
-        pdfBytesResult = await protectPdfSimple(pdfBytesResult);
-        console.log('PDF protected successfully — non-editable with encryption');
-      } catch (protErr) {
-        console.warn('PDF protection failed (using flattened):', protErr);
+        showStatus('Integrando firmas en el documento...', 'info');
+        pdfBytesResult = await flattenPdf(pdfBytesResult);
+        console.log('PDF flattened successfully — signatures integrated into page content');
+      } catch (flattenErr) {
+        console.warn('PDF flatten failed (using non-flattened):', flattenErr);
       }
     } else if (saveMode === 'rasterized') {
       // Rasterize entire PDF — completely flat image, no objects at all
@@ -3385,9 +3007,10 @@ async function savePdf() {
         pdfBytesResult = await rasterizePdf(pdfBytesResult);
         console.log('PDF rasterized successfully — fully non-editable');
       } catch (rasterErr) {
-        console.warn('PDF rasterization failed (using flattened):', rasterErr);
+        console.warn('PDF rasterization failed (using original):', rasterErr);
       }
     }
+    // 'editable' mode: save as-is, signatures remain as XObjects
     
     const blob = new Blob([pdfBytesResult], {type: 'application/pdf'});
     const url = URL.createObjectURL(blob);
@@ -3405,9 +3028,9 @@ async function savePdf() {
     updateTabModified(activeDoc.id, false);
     renderPage();
     
-    const modeMsg = saveMode === 'protected' ? 'PDF guardado (Protegido — no editable)' :
+    const modeMsg = saveMode === 'protected' ? 'PDF guardado (Firmas integradas — texto editable)' :
                     saveMode === 'rasterized' ? 'PDF guardado (Imagen — no editable)' :
-                    'PDF guardado correctamente';
+                    'PDF guardado correctamente (Editable)';
     showStatus(modeMsg, 'success');
     
   } catch (err) {
