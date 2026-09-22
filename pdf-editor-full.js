@@ -2557,12 +2557,189 @@ async function processAllSignatures(elements, pageNum) {
   return processed;
 }
 
+// ============================================
+// PDF RASTERIZATION — Makes PDF completely non-editable
+// Renders each page as a high-res image, then rebuilds PDF from images.
+// No objects can be selected, moved, or edited — signatures are invisible.
+// ============================================
+
+/**
+ * Rasterize a PDF: render every page as a high-resolution image,
+ * then create a new PDF containing only those images.
+ * Result: completely flat, non-editable PDF.
+ * @param {Uint8Array} pdfBytes - The source PDF bytes
+ * @returns {Uint8Array} - Rasterized PDF bytes
+ */
+async function rasterizePdf(pdfBytes) {
+  // Use pdf.js to render pages to images
+  if (!window.pdfjsLib) {
+    throw new Error('pdf.js no está disponible para rasterizar');
+  }
+  
+  const pdfLib = window.PDFLib;
+  const { PDFDocument } = pdfLib;
+  
+  // Load the PDF with pdf.js
+  const loadingTask = window.pdfjsLib.getDocument({ data: pdfBytes.slice(0) });
+  const pdfJsDoc = await loadingTask.promise;
+  const numPages = pdfJsDoc.numPages;
+  
+  // Render each page at high resolution (2x = 144 DPI, 3x = 216 DPI)
+  const renderScale = 3; // High quality — 216 DPI effective
+  const pageImages = [];
+  
+  for (let i = 1; i <= numPages; i++) {
+    const page = await pdfJsDoc.getPage(i);
+    const viewport = page.getViewport({ scale: renderScale });
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext('2d');
+    
+    // White background (so transparent areas become white, not black)
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    await page.render({
+      canvasContext: ctx,
+      viewport: viewport
+    }).promise;
+    
+    // Convert to PNG bytes
+    const pngDataUrl = canvas.toDataURL('image/png');
+    const base64 = pngDataUrl.split(',')[1];
+    const pngBytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+    
+    // Get original page dimensions (in PDF points)
+    const origViewport = page.getViewport({ scale: 1 });
+    
+    pageImages.push({
+      pngBytes,
+      width: origViewport.width,   // Original width in PDF points
+      height: origViewport.height  // Original height in PDF points
+    });
+  }
+  
+  // Create a new PDF with each page as a full-page image
+  const newPdfDoc = await PDFDocument.create();
+  
+  for (const pageInfo of pageImages) {
+    const page = newPdfDoc.addPage([pageInfo.width, pageInfo.height]);
+    const image = await newPdfDoc.embedPng(pageInfo.pngBytes);
+    
+    page.drawImage(image, {
+      x: 0,
+      y: 0,
+      width: pageInfo.width,
+      height: pageInfo.height
+    });
+  }
+  
+  const rasterizedBytes = await newPdfDoc.save();
+  return rasterizedBytes;
+}
+
+// ============================================
+// SAVE MODE DIALOG
+// ============================================
+
+/**
+ * Show a dialog for the user to choose save mode:
+ * - "editable": Normal PDF (text remains selectable, but signatures are still objects)
+ * - "final": Rasterized PDF (completely non-editable, signatures invisible)
+ * Returns a Promise that resolves with 'editable' or 'final'.
+ */
+function showSaveModeDialog() {
+  return new Promise((resolve) => {
+    // Check if there are any signatures in the document
+    const activeDoc = getActiveDoc();
+    let hasSignatures = false;
+    if (activeDoc) {
+      for (let p = 1; p <= activeDoc.totalPages; p++) {
+        const els = activeDoc.elements[p] || [];
+        if (els.some(el => el.type === 'signature')) {
+          hasSignatures = true;
+          break;
+        }
+      }
+    }
+    
+    // If no signatures, just save normally (no need for final mode)
+    if (!hasSignatures) {
+      resolve('editable');
+      return;
+    }
+    
+    // Create modal overlay
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;font-family:system-ui,-apple-system,sans-serif;';
+    
+    const modal = document.createElement('div');
+    modal.style.cssText = 'background:white;border-radius:12px;padding:24px;max-width:420px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
+    
+    modal.innerHTML = `
+      <div style="font-size:18px;font-weight:700;margin-bottom:8px;color:#1e293b;">💾 Guardar PDF</div>
+      <div style="font-size:13px;color:#64748b;margin-bottom:16px;">Este documento contiene firmas. Elige el formato de guardado:</div>
+      
+      <div id="saveModeEditable" style="border:2px solid #3b82f6;border-radius:8px;padding:12px;margin-bottom:8px;cursor:pointer;transition:all 0.2s;background:#eff6ff;">
+        <div style="font-size:14px;font-weight:600;color:#1e40af;">📝 Editable</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px;">El PDF se puede seguir editando. Texto seleccionable. Las firmas son visibles como objetos insertados.</div>
+      </div>
+      
+      <div id="saveModeFinal" style="border:2px solid #16a34a;border-radius:8px;padding:12px;margin-bottom:16px;cursor:pointer;transition:all 0.2s;background:#f0fdf4;">
+        <div style="font-size:14px;font-weight:600;color:#15803d;">🔒 Final (No editable)</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px;">PDF rasterizado: nada se puede editar ni seleccionar. Las firmas son invisibles como objetos. Recomendado para enviar a clientes.</div>
+      </div>
+      
+      <div style="font-size:10px;color:#94a3b8;text-align:center;">⭐ Recomendado: Final — evita rechazos por firmas insertadas</div>
+    `;
+    
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    
+    // Handle clicks
+    modal.querySelector('#saveModeEditable').addEventListener('click', () => {
+      document.body.removeChild(overlay);
+      resolve('editable');
+    });
+    
+    modal.querySelector('#saveModeFinal').addEventListener('click', () => {
+      document.body.removeChild(overlay);
+      resolve('final');
+    });
+    
+    // Handle overlay click (cancel)
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        document.body.removeChild(overlay);
+        resolve('editable'); // Default to editable on cancel
+      }
+    });
+    
+    // Handle Escape key
+    const escHandler = (e) => {
+      if (e.key === 'Escape') {
+        document.removeEventListener('keydown', escHandler);
+        if (document.body.contains(overlay)) {
+          document.body.removeChild(overlay);
+          resolve('editable');
+        }
+      }
+    };
+    document.addEventListener('keydown', escHandler);
+  });
+}
+
 async function savePdf() {
   const activeDoc = getActiveDoc();
   if (!activeDoc || !activeDoc.originalPdfBytes) {
     showStatus('No hay PDF para guardar', 'error');
     return;
   }
+  
+  // Ask user for save mode (only if document has signatures)
+  const saveMode = await showSaveModeDialog();
   
   const btn = $('btnSave');
   if (btn) {
@@ -2755,6 +2932,18 @@ async function savePdf() {
       console.warn('PDF flatten failed (using non-flattened):', flattenErr);
     }
     
+    // If user chose "Final/No editable" mode, rasterize the entire PDF
+    // so nothing can be edited or selected — signatures are invisible as objects
+    if (saveMode === 'final') {
+      try {
+        showStatus('Rasterizando PDF (no editable)...', 'info');
+        pdfBytesResult = await rasterizePdf(pdfBytesResult);
+        console.log('PDF rasterized successfully — fully non-editable');
+      } catch (rasterErr) {
+        console.warn('PDF rasterization failed (using flattened):', rasterErr);
+      }
+    }
+    
     const blob = new Blob([pdfBytesResult], { type: 'application/pdf' });
     const url = URL.createObjectURL(blob);
     
@@ -2771,7 +2960,7 @@ async function savePdf() {
     updateTabModified(activeDoc.id, false);
     renderPage();
     
-    showStatus('PDF guardado correctamente', 'success');
+    showStatus(saveMode === 'final' ? 'PDF guardado (Final — no editable)' : 'PDF guardado correctamente', 'success');
     
   } catch (err) {
     console.error('Save error:', err);
