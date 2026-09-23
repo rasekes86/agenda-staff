@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AGENDA STAFF",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Agenda colaborativa con autenticaci\u00f3n, notificaciones, herramientas PDF, firmas y control de procesos",
   "permissions": [
     "sidePanel",
@@ -14,7 +14,8 @@
     "offscreen"
   ],
   "host_permissions": [
-    "https://iugutcsukxkxlgpkmzxt.supabase.co/*"
+    "https://iugutcsukxkxlgpkmzxt.supabase.co/*",
+    "https://workout-events.com/*"
   ],
   "side_panel": {
     "default_path": "sidepanel.html"

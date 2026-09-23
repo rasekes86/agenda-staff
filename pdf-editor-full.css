@@ -27,6 +27,14 @@ body {
   color: #3b82f6;
 }
 
+.editor-logo {
+  height: 36px;
+  width: auto;
+  max-width: 200px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
 .editor-toolbar {
   display: flex;
   gap: 8px;
