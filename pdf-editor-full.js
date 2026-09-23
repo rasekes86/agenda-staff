@@ -641,6 +641,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // #20 Apply initial sidebar state
   applySidebarState();
+
+  // #20b Restore clean view state if previously active
+  if (localStorage.getItem('pe_cleanView') === 'true') {
+    cleanViewActive = false; // reset so toggle will activate
+    toggleCleanView();
+  }
   
   showStatus('Carga uno o más PDFs para comenzar');
 });
@@ -722,6 +728,10 @@ function setupEventListeners() {
   // #20 Sidebar toggle
   const btnSidebarToggle = $('btnSidebarToggle');
   if (btnSidebarToggle) btnSidebarToggle.addEventListener('click', toggleSidebar);
+
+  // Vista limpia toggle
+  const btnToggleCleanView = $('btnToggleCleanView');
+  if (btnToggleCleanView) btnToggleCleanView.addEventListener('click', toggleCleanView);
   
   // #21 Drawing tool buttons
   const btnDraw = $('btnDraw');
@@ -2250,20 +2260,10 @@ function selectSignature(url, name) {
   const img = new Image();
   img.crossOrigin = 'anonymous';
   img.onload = async () => {
-    let imgWidth = img.width;
-    let imgHeight = img.height;
-    const maxSize = 100;
-    
-    if (imgWidth > maxSize || imgHeight > maxSize) {
-      const ratio = Math.min(maxSize / imgWidth, maxSize / imgHeight);
-      imgWidth = Math.round(imgWidth * ratio);
-      imgHeight = Math.round(imgHeight * ratio);
-    }
-    
     const offset = addedSignaturesCount * 15;
     
     // Process the signature image for natural appearance
-    // (remove white bg, feather edges, ink variance)
+    // (remove white bg, feather edges, ink variance, trim borders)
     let processedSrc = url;
     try {
       processedSrc = await processSignatureImage(url);
@@ -2271,30 +2271,70 @@ function selectSignature(url, name) {
       console.warn('Could not pre-process signature, using original:', err);
     }
     
-    pushElement(activeDoc, activeDoc.currentPage, {
-      type: 'signature',
-      src: processedSrc,
-      x: activeDoc.pageWidth / 2 - imgWidth / 2 + offset,
-      y: activeDoc.pageHeight / 2 - imgHeight / 2 + offset,
-      width: imgWidth,
-      height: imgHeight,
-      name: name
-    });
-    
-    addedSignaturesCount++;
-    updateTabModified(activeDoc.id, true);
-    renderPage();
-    showStatus(`✓ Firma añadida: ${name}`, 'success');
-    
-    // #19 Add to recent signatures
-    addRecentSignature(name, url);
-    
-    const countEl = $('signatureCount');
-    if (countEl) {
-      countEl.style.display = 'block';
-      countEl.textContent = `${addedSignaturesCount} firma(s) añadida(s)`;
-      countEl.style.background = '#10b981';
-    }
+    // Calculate dimensions from the processed (trimmed) image
+    let imgWidth, imgHeight;
+    const procImg = new Image();
+    procImg.onload = () => {
+      imgWidth = procImg.width;
+      imgHeight = procImg.height;
+      const maxSize = 100;
+      
+      if (imgWidth > maxSize || imgHeight > maxSize) {
+        const ratio = Math.min(maxSize / imgWidth, maxSize / imgHeight);
+        imgWidth = Math.round(imgWidth * ratio);
+        imgHeight = Math.round(imgHeight * ratio);
+      }
+      
+      pushElement(activeDoc, activeDoc.currentPage, {
+        type: 'signature',
+        src: processedSrc,
+        x: activeDoc.pageWidth / 2 - imgWidth / 2 + offset,
+        y: activeDoc.pageHeight / 2 - imgHeight / 2 + offset,
+        width: imgWidth,
+        height: imgHeight,
+        name: name
+      });
+      
+      addedSignaturesCount++;
+      updateTabModified(activeDoc.id, true);
+      renderPage();
+      showStatus(`✓ Firma añadida: ${name}`, 'success');
+      
+      // #19 Add to recent signatures
+      addRecentSignature(name, url);
+      
+      const countEl = $('signatureCount');
+      if (countEl) {
+        countEl.style.display = 'block';
+        countEl.textContent = `${addedSignaturesCount} firma(s) añadida(s)`;
+        countEl.style.background = '#10b981';
+      }
+    };
+    procImg.onerror = () => {
+      // Fallback: use original dimensions
+      imgWidth = img.width;
+      imgHeight = img.height;
+      const maxSize = 100;
+      if (imgWidth > maxSize || imgHeight > maxSize) {
+        const ratio = Math.min(maxSize / imgWidth, maxSize / imgHeight);
+        imgWidth = Math.round(imgWidth * ratio);
+        imgHeight = Math.round(imgHeight * ratio);
+      }
+      pushElement(activeDoc, activeDoc.currentPage, {
+        type: 'signature',
+        src: processedSrc,
+        x: activeDoc.pageWidth / 2 - imgWidth / 2 + offset,
+        y: activeDoc.pageHeight / 2 - imgHeight / 2 + offset,
+        width: imgWidth,
+        height: imgHeight,
+        name: name
+      });
+      addedSignaturesCount++;
+      updateTabModified(activeDoc.id, true);
+      renderPage();
+      showStatus(`✓ Firma añadida: ${name}`, 'success');
+    };
+    procImg.src = processedSrc;
   };
   img.onerror = () => showStatus('No se pudo cargar la firma', 'error');
   img.src = url;
@@ -2344,8 +2384,12 @@ async function processSignatureImage(src) {
       
       ctx.putImageData(imageData, 0, 0);
       
+      // Step 4: Trim transparent borders
+      // This removes the large transparent padding around the signature
+      const trimmedSrc = trimSignatureCanvas(canvas);
+      
       // Export as PNG (lossless, preserves transparency)
-      resolve(canvas.toDataURL('image/png'));
+      resolve(trimmedSrc);
     };
     img.onerror = () => {
       // If processing fails, return original src
@@ -2479,6 +2523,71 @@ function applyInkVariance(data, width, height) {
     const newAlpha = Math.min(255, Math.max(0, Math.round(a * variance)));
     data[i + 3] = newAlpha;
   }
+}
+
+/**
+ * Trim transparent borders from a canvas, returning a cropped data URL.
+ * Scans all pixels to find the bounding box of non-transparent content,
+ * adds padding, and returns a new trimmed canvas as PNG data URL.
+ */
+function trimSignatureCanvas(canvas) {
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  if (w === 0 || h === 0) return canvas.toDataURL('image/png');
+  
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  let top = h, bottom = 0, left = w, right = 0;
+  
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * 4;
+      if (data[idx + 3] > 20) { // alpha > 20 = non-transparent
+        if (y < top) top = y;
+        if (y > bottom) bottom = y;
+        if (x < left) left = x;
+        if (x > right) right = x;
+      }
+    }
+  }
+  
+  // If no non-transparent pixels found, return as-is
+  if (top >= bottom || left >= right) return canvas.toDataURL('image/png');
+  
+  // Add padding around the content
+  const pad = 10;
+  top = Math.max(0, top - pad);
+  left = Math.max(0, left - pad);
+  bottom = Math.min(h, bottom + pad);
+  right = Math.min(w, right + pad);
+  
+  const tw = right - left, th = bottom - top;
+  const tc = document.createElement('canvas');
+  tc.width = tw;
+  tc.height = th;
+  tc.getContext('2d').drawImage(canvas, left, top, tw, th, 0, 0, tw, th);
+  return tc.toDataURL('image/png');
+}
+
+/**
+ * Trim transparent borders from an image src (data URL or URL).
+ * Returns a Promise that resolves to a trimmed PNG data URL.
+ */
+function trimSignatureImage(src) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      resolve(trimSignatureCanvas(canvas));
+    };
+    img.onerror = () => resolve(src);
+    img.src = src;
+  });
 }
 
 /**
@@ -2984,6 +3093,51 @@ function applySidebarState() {
     } else {
       canvasArea.classList.remove('sidebar-expanded');
     }
+  }
+}
+
+// ============================================
+// #20b CLEAN VIEW (Vista limpia)
+// ============================================
+let cleanViewActive = false;
+
+function toggleCleanView() {
+  cleanViewActive = !cleanViewActive;
+  const sidebar = $('editorSidebar');
+  const canvasArea = $('canvasArea');
+  const docTabs = $('documentTabs');
+  const btn = $('btnToggleCleanView');
+
+  if (cleanViewActive) {
+    // Activate clean view: hide sidebar, doc tabs, expand canvas
+    if (sidebar) sidebar.style.display = 'none';
+    if (docTabs) docTabs.style.display = 'none';
+    if (canvasArea) {
+      canvasArea.style.marginLeft = '0';
+      canvasArea.style.padding = '40px';
+    }
+    if (btn) {
+      btn.classList.remove('secondary');
+      btn.classList.add('primary');
+      btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line><line x1="15" y1="3" x2="15" y2="21"></line></svg> Vista editor`;
+    }
+    localStorage.setItem('pe_cleanView', 'true');
+  } else {
+    // Deactivate clean view: restore sidebar, doc tabs, normal canvas
+    if (sidebar) sidebar.style.display = '';
+    if (docTabs) docTabs.style.display = '';
+    if (canvasArea) {
+      canvasArea.style.marginLeft = '';
+      canvasArea.style.padding = '';
+    }
+    if (btn) {
+      btn.classList.remove('primary');
+      btn.classList.add('secondary');
+      btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg> Vista limpia`;
+    }
+    localStorage.setItem('pe_cleanView', 'false');
+    // Re-apply sidebar state
+    applySidebarState();
   }
 }
 

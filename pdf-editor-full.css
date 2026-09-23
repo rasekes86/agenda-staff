@@ -1,4 +1,4 @@
-/* PDF Editor Full Screen - AGENDA STAFF v5.24.0 */
+/* PDF Editor Full Screen - AGENDA STAFF v1.8.0 */
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -55,13 +55,13 @@ body {
   transition: all 0.2s;
 }
 
-.toolbar-btn.primary { background: #3b82f6; color: white; }
-.toolbar-btn.primary:hover { background: #2563eb; }
+.toolbar-btn.primary { background: #4b6a9b; color: #e2e8f0; }
+.toolbar-btn.primary:hover { background: #3b82f6; }
 .toolbar-btn.secondary { background: #334155; color: #f1f5f9; }
 .toolbar-btn.secondary:hover { background: #475569; }
-.toolbar-btn.danger { background: #dc2626; color: white; }
-.toolbar-btn.danger:hover { background: #b91c1c; }
-.toolbar-btn.success { background: #10b981; color: white; }
+.toolbar-btn.danger { background: #8b3a3a; color: #fca5a5; }
+.toolbar-btn.danger:hover { background: #991b1b; }
+.toolbar-btn.success { background: #3d7a6a; color: #a7f3d0; }
 .toolbar-btn.success:hover { background: #059669; }
 .toolbar-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -245,19 +245,21 @@ body {
 }
 
 .copy-btn {
-  background: #0891b2 !important;
+  background: #2a5f6f !important;
+  color: #a5d8e0 !important;
 }
 
 .copy-btn:hover {
-  background: #0e7490 !important;
+  background: #0891b2 !important;
 }
 
 .paste-btn {
-  background: #7c3aed !important;
+  background: #5a3a9b !important;
+  color: #ddd6fe !important;
 }
 
 .paste-btn:hover:not(:disabled) {
-  background: #6d28d9 !important;
+  background: #7c3aed !important;
 }
 
 .paste-btn:disabled {
@@ -266,13 +268,14 @@ body {
 }
 
 .clear-clipboard-btn {
-  background: #dc2626 !important;
+  background: #6b2c2c !important;
+  color: #fca5a5 !important;
   font-size: 12px !important;
   padding: 6px 10px !important;
 }
 
 .clear-clipboard-btn:hover {
-  background: #b91c1c !important;
+  background: #991b1b !important;
 }
 
 .editor-main {
@@ -334,22 +337,22 @@ body {
   padding: 10px 12px;
   border: none;
   border-radius: 6px;
-  background: #334155;
-  color: #f1f5f9;
+  background: #2d3a4a;
+  color: #cbd5e1;
   font-size: 13px;
   cursor: pointer;
   transition: all 0.2s;
   margin-bottom: 6px;
 }
 
-.sidebar-btn:hover { background: #475569; }
-.sidebar-btn.active { background: #3b82f6; }
-.sidebar-btn.primary { background: #3b82f6; color: white; }
-.sidebar-btn.primary:hover { background: #2563eb; }
-.sidebar-btn.signature-btn { background: #10b981; }
-.sidebar-btn.signature-btn:hover { background: #059669; }
-.sidebar-btn.date-btn { background: #8b5cf6; }
-.sidebar-btn.date-btn:hover { background: #7c3aed; }
+.sidebar-btn:hover { background: #3d4f63; color: #f1f5f9; }
+.sidebar-btn.active { background: #4b6a9b; }
+.sidebar-btn.primary { background: #4b6a9b; color: #e2e8f0; }
+.sidebar-btn.primary:hover { background: #3b82f6; }
+.sidebar-btn.signature-btn { background: #2d6b5a; color: #a7f3d0; }
+.sidebar-btn.signature-btn:hover { background: #10b981; }
+.sidebar-btn.date-btn { background: #5b4a8a; color: #ddd6fe; }
+.sidebar-btn.date-btn:hover { background: #8b5cf6; }
 
 .sidebar-info {
   font-size: 13px;
@@ -432,8 +435,8 @@ body {
   text-align: left;
 }
 
-.tool-tab:hover { background: #475569; }
-.tool-tab.active { background: #3b82f6; color: white; }
+.tool-tab:hover { background: #3d4f63; }
+.tool-tab.active { background: #4b6a9b; color: #e2e8f0; }
 
 .tool-content {
   display: none;

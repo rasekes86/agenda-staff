@@ -1,20 +1,9 @@
 // ============================================
-// AGENDA STAFF v8.0.0 - FIXED AUTH
+// AGENDA STAFF v5.23.20 - STICKY SIDEBAR
 // ============================================
 
-// SUPABASE_URL and SUPABASE_KEY are loaded from supabase-config.js (loaded before this script)
-// Do NOT redefine them here.
-
-// ============================================
-// CONSTANTS
-// ============================================
-const HIGHLIGHT_DURATION_MS = 2000;
-const SCROLL_DELAY_MS = 100;
-const SIDEPANEL_EDITOR_SCALE_MAX_WIDTH = 280;
-const SIDEPANEL_EDITOR_SCALE_MAX_HEIGHT = 400;
-const DEFAULT_FONT_SIZE = 14;
-const DEFAULT_MINUTES_BEFORE = 5;
-const VISIBLE_DAYS = 30;
+const SUPABASE_URL = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1Z3V0Y3N1a3hreGxncGttenh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzc5OTExMjksImV4cCI6MjA1MzU2NzEyOX0.PpolAzqqXNBOhRlUVzplqkKeGQxzfed4gH377CidVJE';
 
 // State
 let currentUser = null;
@@ -28,11 +17,12 @@ let dragId = null;
 let dragDate = null;
 let calDate = new Date();
 let viewStartDate = new Date();
+const VISIBLE_DAYS = 30;
 
 // Notification settings
 let notificationSettings = {
   enabled: true,
-  minutesBefore: DEFAULT_MINUTES_BEFORE,
+  minutesBefore: 5,
   sound: 'bell'
 };
 
@@ -47,6 +37,17 @@ let splitPdfFile = null;
 
 // Word to PDF state
 let wordFile = null;
+
+// PDF Editor state
+let editorPdfBytes = null;
+let editorPdfDoc = null;
+let editorCurrentPage = 1;
+let editorTotalPages = 0;
+let editorElements = {}; // Elements per page: { pageNum: [elements] }
+let editorScale = 1;
+let editorCanvas = null;
+let selectedElement = null;
+
 
 // Processes state
 let processes = [];
@@ -184,12 +185,6 @@ async function clearSession() {
 function showAuthScreen() {
   $('authScreen').style.display = 'flex';
   $('mainScreen').style.display = 'none';
-  hideResendConfirmation();
-  // Clear any previous auth errors
-  const loginErr = $('loginError');
-  const registerErr = $('registerError');
-  if (loginErr) { loginErr.classList.remove('show'); loginErr.textContent = ''; }
-  if (registerErr) { registerErr.classList.remove('show'); registerErr.textContent = ''; }
 }
 
 async function showMainScreen() {
@@ -268,7 +263,6 @@ async function handleLogin(e) {
   btn.querySelector('.btn-text').textContent = 'Entrando...';
   btn.querySelector('.btn-loader').style.display = 'block';
   errorEl.classList.remove('show');
-  hideResendConfirmation();
   
   try {
     const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
@@ -283,25 +277,7 @@ async function handleLogin(e) {
     const data = await res.json();
     
     if (!res.ok) {
-      // Handle specific Supabase auth errors with clear Spanish messages
-      const errorMsg = data.error_description || data.msg || data.message || '';
-      const errorCode = data.error_code || data.code || '';
-      
-      if (errorMsg.includes('Email not confirmed') || errorMsg.includes('email_not_confirmed') || errorCode === 'email_not_confirmed') {
-        showAuthError(errorEl, 'Tu email aún no está confirmado. Revisa tu bandeja de entrada (y spam) y haz clic en el enlace de confirmación.');
-        showResendConfirmation(email);
-        throw new Error('__skip__');
-      }
-      
-      if (errorMsg.includes('Invalid login credentials') || errorMsg.includes('invalid_credentials') || errorCode === 'invalid_credentials') {
-        throw new Error('Email o contraseña incorrectos');
-      }
-      
-      if (errorMsg.includes('Too many requests') || errorMsg.includes('rate_limit')) {
-        throw new Error('Demasiados intentos. Espera unos segundos e inténtalo de nuevo.');
-      }
-      
-      throw new Error(errorMsg || 'Error al iniciar sesión');
+      throw new Error(data.error_description || data.message || 'Error al iniciar sesión');
     }
     
     session = data;
@@ -315,9 +291,7 @@ async function handleLogin(e) {
     showMainScreen();
     
   } catch (err) {
-    if (err.message !== '__skip__') {
-      showAuthError(errorEl, err.message);
-    }
+    showAuthError(errorEl, err.message);
   } finally {
     btn.disabled = false;
     btn.querySelector('.btn-text').textContent = 'Entrar';
@@ -349,7 +323,6 @@ async function handleRegister(e) {
   btn.querySelector('.btn-text').textContent = 'Creando cuenta...';
   btn.querySelector('.btn-loader').style.display = 'block';
   errorEl.classList.remove('show');
-  hideResendConfirmation();
   
   try {
     const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
@@ -368,25 +341,12 @@ async function handleRegister(e) {
     const data = await res.json();
     
     if (!res.ok) {
-      const errorMsg = data.error_description || data.msg || data.message || '';
-      const errorCode = data.error_code || data.code || '';
-      
-      if (errorMsg.includes('already registered') || errorMsg.includes('User already registered')) {
-        throw new Error('Este email ya está registrado. Intenta iniciar sesión.');
+      if (data.message?.includes('already registered')) {
+        throw new Error('Este email ya está registrado');
       }
-      
-      if (errorMsg.includes('Too many requests') || errorMsg.includes('rate_limit')) {
-        throw new Error('Demasiados intentos de registro. Espera unos segundos e inténtalo de nuevo.');
-      }
-      
-      if (errorMsg.includes('Password should be') || errorMsg.includes('password')) {
-        throw new Error('La contraseña no cumple los requisitos. Usa al menos 6 caracteres.');
-      }
-      
-      throw new Error(errorMsg || 'Error al registrar');
+      throw new Error(data.error_description || data.message || 'Error al registrar');
     }
     
-    // Case 1: Supabase auto-confirms email — we get session + user immediately
     if (data.session && data.user) {
       session = data.session;
       currentUser = {
@@ -398,69 +358,18 @@ async function handleRegister(e) {
       await saveSession(session, currentUser);
       showMainScreen();
       showToast('¡Cuenta creada correctamente!');
-      
-    // Case 2: Email confirmation required — try auto-login, then guide the user
-    } else if (data.user || data.id) {
-      // Try to login immediately — if Supabase has auto-confirm OFF,
-      // this will fail with "Email not confirmed" but we handle it gracefully
-      try {
-        const loginRes = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
-          method: 'POST',
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ email, password })
-        });
-        
-        if (loginRes.ok) {
-          // Auto-login succeeded! (maybe confirmation was auto-accepted)
-          const loginData = await loginRes.json();
-          session = loginData;
-          currentUser = {
-            id: loginData.user.id,
-            email: loginData.user.email,
-            name: loginData.user.user_metadata?.name || name
-          };
-          await saveSession(session, currentUser);
-          showMainScreen();
-          showToast('¡Cuenta creada y sesión iniciada!');
-        } else {
-          // Login failed — likely needs email confirmation
-          // Switch to login tab and show helpful message
-          document.querySelector('[data-tab="login"]').click();
-          $('loginEmail').value = email;
-          $('loginPassword').value = '';
-          
-          const loginErrorData = await loginRes.json();
-          const loginErrorMsg = loginErrorData.error_description || loginErrorData.msg || loginErrorData.message || '';
-          
-          if (loginErrorMsg.includes('Email not confirmed') || loginErrorMsg.includes('email_not_confirmed')) {
-            const loginErrorEl = $('loginError');
-            showAuthError(loginErrorEl, 'Cuenta creada. Necesitas confirmar tu email: revisa tu bandeja de entrada (y spam) y haz clic en el enlace.');
-            showResendConfirmation(email);
-          } else {
-            const loginErrorEl = $('loginError');
-            showAuthError(loginErrorEl, 'Cuenta creada. Ahora inicia sesión con tu email y contraseña.');
-          }
-        }
-      } catch (loginErr) {
-        // Auto-login attempt failed — fall back to manual login
+    } else if (data.user) {
+      showAuthError(errorEl, '✓ Cuenta creada. Revisa tu email para confirmarla y luego inicia sesión.');
+      setTimeout(() => {
         document.querySelector('[data-tab="login"]').click();
         $('loginEmail').value = email;
-        $('loginPassword').value = '';
-        const loginErrorEl = $('loginError');
-        showAuthError(loginErrorEl, 'Cuenta creada. Revisa tu email para confirmarla y luego inicia sesión.');
-        showResendConfirmation(email);
-      }
+      }, 2000);
     } else {
       throw new Error('Respuesta inesperada del servidor');
     }
     
   } catch (err) {
-    if (err.message !== '__skip__') {
-      showAuthError(errorEl, err.message);
-    }
+    showAuthError(errorEl, err.message);
   } finally {
     btn.disabled = false;
     btn.querySelector('.btn-text').textContent = 'Crear Cuenta';
@@ -493,81 +402,6 @@ async function handleLogout() {
 function showAuthError(el, msg) {
   el.textContent = msg;
   el.classList.add('show');
-}
-
-// ============================================
-// RESEND EMAIL CONFIRMATION
-// ============================================
-
-let pendingConfirmationEmail = null;
-
-function showResendConfirmation(email) {
-  pendingConfirmationEmail = email;
-  const resendEl = $('resendConfirmation');
-  if (resendEl) {
-    resendEl.style.display = 'block';
-    const btn = $('btnResendConfirmation');
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = 'Reenviar email de confirmación';
-    }
-  }
-}
-
-function hideResendConfirmation() {
-  pendingConfirmationEmail = null;
-  const resendEl = $('resendConfirmation');
-  if (resendEl) {
-    resendEl.style.display = 'none';
-  }
-}
-
-async function handleResendConfirmation() {
-  const email = pendingConfirmationEmail || $('loginEmail')?.value?.trim();
-  if (!email) {
-    showToast('No hay email para reenviar confirmación');
-    return;
-  }
-  
-  const btn = $('btnResendConfirmation');
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = 'Enviando...';
-  }
-  
-  try {
-    const res = await fetch(`${SUPABASE_URL}/auth/v1/resend`, {
-      method: 'POST',
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ 
-        type: 'signup',
-        email: email
-      })
-    });
-    
-    if (res.ok) {
-      showToast('Email de confirmación reenviado a ' + email);
-    } else {
-      const data = await res.json();
-      const errorMsg = data.error_description || data.message || '';
-      
-      if (errorMsg.includes('already confirmed') || errorMsg.includes('rate_limit')) {
-        showToast('El email ya fue confirmado o se envió recientemente. Intenta iniciar sesión.');
-      } else {
-        showToast('Error al reenviar: ' + (errorMsg || 'intenta de nuevo'));
-      }
-    }
-  } catch (err) {
-    showToast('Error de conexión al reenviar confirmación');
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = 'Reenviar email de confirmación';
-    }
-  }
 }
 
 // ============================================
@@ -605,22 +439,18 @@ async function api(method, body, query = '') {
     const errText = await res.text();
     console.error('API Error:', errText);
     if (res.status === 401 || res.status === 403) {
-      try {
-        if (session.refresh_token) {
-          const refreshed = await refreshSession(session.refresh_token);
-          if (refreshed) {
-            const newStored = await chrome.storage.local.get(['session']);
-            session = newStored.session;
-            opts.headers.Authorization = `Bearer ${session.access_token}`;
-            const retryRes = await fetch(url, opts);
-            if (retryRes.ok) {
-              if (method === 'DELETE') return {};
-              return retryRes.json();
-            }
+      if (session.refresh_token) {
+        const refreshed = await refreshSession(session.refresh_token);
+        if (refreshed) {
+          const newStored = await chrome.storage.local.get(['session']);
+          session = newStored.session;
+          opts.headers.Authorization = `Bearer ${session.access_token}`;
+          const retryRes = await fetch(url, opts);
+          if (retryRes.ok) {
+            if (method === 'DELETE') return {};
+            return retryRes.json();
           }
         }
-      } catch (refreshErr) {
-        console.error('Session refresh failed:', refreshErr);
       }
       await handleLogout();
       throw new Error('Sesión expirada. Por favor, inicia sesión de nuevo.');
@@ -664,7 +494,6 @@ function setupListeners() {
       } else {
         $('loginForm').style.display = 'none';
         $('registerForm').style.display = 'block';
-        hideResendConfirmation();
       }
     });
   });
@@ -672,12 +501,6 @@ function setupListeners() {
   // Auth forms
   $('loginForm').addEventListener('submit', handleLogin);
   $('registerForm').addEventListener('submit', handleRegister);
-  
-  // Resend confirmation email
-  const btnResend = $('btnResendConfirmation');
-  if (btnResend) {
-    btnResend.addEventListener('click', handleResendConfirmation);
-  }
   
   // User menu
   $('btnUser').addEventListener('click', (e) => {
@@ -885,9 +708,9 @@ function navigateToDate(targetDate) {
       
       setTimeout(() => {
         dayRow.classList.remove('highlighted');
-      }, HIGHLIGHT_DURATION_MS);
+      }, 2000);
     }
-  }, SCROLL_DELAY_MS);
+  }, 100);
 }
 
 function handleDaysClick(e) {
@@ -1464,17 +1287,50 @@ function snoozeReminder(minutes) {
 // ============================================
 
 function setupPdfListeners() {
-  // Open full-screen PDF editor directly in a new tab
-  $('btnPdf').addEventListener('click', () => {
-    chrome.tabs.create({
-      url: chrome.runtime.getURL('pdf-editor-full.html')
-    });
-  });
+  // Open PDF modal
+  $('btnPdf').addEventListener('click', openPdfModal);
+  $('closePdfModal').addEventListener('click', closePdfModal);
+  
+  // PDF Editor (simplified - no tabs)
+  $('pdfEditorUpload').addEventListener('click', () => $('editorFileInput').click());
+  $('editorFileInput').addEventListener('change', handleEditorFileSelect);
+  $('pdfEditorUpload').addEventListener('dragover', (e) => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); });
+  $('pdfEditorUpload').addEventListener('dragleave', (e) => e.currentTarget.classList.remove('drag-over'));
+  $('pdfEditorUpload').addEventListener('drop', handleEditorDrop);
+  $('btnAddText').addEventListener('click', () => addTextToPdf());
+  $('btnAddImage').addEventListener('click', () => addImageToPdf());
+  $('btnAddSignature').addEventListener('click', () => addSignatureToPdf());
+  $('btnClearEditor').addEventListener('click', clearPdfEditor);
+  $('btnPrevPage').addEventListener('click', () => navigateEditorPage(-1));
+  $('btnNextPage').addEventListener('click', () => navigateEditorPage(1));
+  $('btnSavePdf').addEventListener('click', saveEditedPdf);
+  $('btnOpenFullEditor').addEventListener('click', openFullPdfEditor);
 }
 
-// ============================================
-// SIGNATURES MANAGER
-// ============================================
+function openPdfModal() {
+  // Show the modal in fullscreen mode (occupy entire sidepanel)
+  $('pdfModal').classList.add('show', 'fullscreen');
+  
+  // Hide header, calendar and days list when modal is open
+  document.querySelector('.header').style.display = 'none';
+  document.querySelector('.days-section').style.display = 'none';
+  document.querySelector('.mini-calendar').style.display = 'none';
+}
+
+function closePdfModal() {
+  $('pdfModal').classList.remove('show', 'fullscreen');
+  
+  // Restore header and days list when modal is closed
+  document.querySelector('.header').style.display = '';
+  document.querySelector('.days-section').style.display = '';
+  
+  // Only show mini-calendar if it was NOT hidden before (respect the hidden class)
+  const miniCal = document.querySelector('.mini-calendar');
+  if (miniCal) {
+    // Remove any inline display style, let the CSS class control visibility
+    miniCal.style.display = '';
+  }
+}
 
 // Image to PDF functions
 function handlePdfDragOver(e) {
@@ -1524,8 +1380,8 @@ function renderPdfPreview() {
   $('pdfPreviewArea').style.display = 'block';
   $('pdfPreviewList').innerHTML = pdfImages.map((img, i) => `
     <div class="pdf-preview-item">
-      <img src="${esc(img.dataUrl)}" alt="${esc(img.name)}">
-      <span class="pdf-preview-name">${esc(img.name)}</span>
+      <img src="${img.dataUrl}" alt="${img.name}">
+      <span class="pdf-preview-name">${img.name}</span>
       <button class="pdf-remove-btn" data-index="${i}">✕</button>
     </div>
   `).join('');
@@ -1632,6 +1488,7 @@ async function convertToPdf() {
     
     pdf.save('documento.pdf');
     showToast('PDF creado correctamente');
+    closePdfModal();
     clearPdfFiles();
     
   } catch (err) {
@@ -1688,7 +1545,7 @@ function renderMergePreview() {
   $('mergePreviewList').innerHTML = mergePdfs.map((pdf, i) => `
     <div class="pdf-preview-item" draggable="true" data-index="${i}">
       <span class="pdf-icon">📄</span>
-      <span class="pdf-preview-name">${esc(pdf.name)}</span>
+      <span class="pdf-preview-name">${pdf.name}</span>
       <button class="pdf-remove-btn" data-index="${i}">✕</button>
     </div>
   `).join('');
@@ -1745,6 +1602,7 @@ async function mergePdfsAction() {
     URL.revokeObjectURL(url);
     
     showToast('PDFs combinados correctamente');
+    closePdfModal();
     clearMergeFiles();
     
   } catch (err) {
@@ -1790,7 +1648,7 @@ async function setSplitFile(file) {
   $('splitPreviewArea').style.display = 'block';
   $('splitFileInfo').innerHTML = `
     <span class="pdf-icon">📄</span>
-    <span>${esc(file.name)}</span>
+    <span>${file.name}</span>
   `;
 }
 
@@ -1840,6 +1698,7 @@ async function splitPdfAction() {
     }
     
     showToast(`${pageCount} PDFs creados correctamente`);
+    closePdfModal();
     clearSplitFile();
     
   } catch (err) {
@@ -1887,7 +1746,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 async function startScreenshot() {
   const btn = $('btnScreenshot');
   btn.classList.add('capturing');
-  _lastScreenshotDataUrl = null; // Reset duplicate guard for new capture
   
   try {
     await chrome.runtime.sendMessage({ type: 'START_SCREENSHOT' });
@@ -1898,9 +1756,6 @@ async function startScreenshot() {
   }
 }
 
-let _lastScreenshotTime = 0;
-let _lastScreenshotDataUrl = null;
-
 async function handleScreenshotResult(dataUrl) {
   const btn = $('btnScreenshot');
   btn.classList.remove('capturing');
@@ -1909,15 +1764,6 @@ async function handleScreenshotResult(dataUrl) {
     showToast('Error: No se recibió la imagen');
     return;
   }
-  
-  // Prevent duplicate processing (same result arriving twice)
-  const now = Date.now();
-  if (dataUrl === _lastScreenshotDataUrl && now - _lastScreenshotTime < 2000) {
-    console.log('Screenshot result ignored (duplicate within 2s)');
-    return;
-  }
-  _lastScreenshotDataUrl = dataUrl;
-  _lastScreenshotTime = now;
   
   try {
     const response = await fetch(dataUrl);
@@ -2058,7 +1904,7 @@ function processWordFile(file) {
   }
   
   wordFile = file;
-  $('wordFileInfo').innerHTML = `<span style="font-size:16px">📝</span> ${esc(file.name)}`;
+  $('wordFileInfo').innerHTML = `<span style="font-size:16px">📝</span> ${file.name}`;
   $('wordPreviewArea').style.display = 'block';
   $('wordDropzone').style.display = 'none';
 }
@@ -2150,6 +1996,739 @@ async function loadMammoth() {
   }
   // If not loaded, show error - we can't load external scripts in Chrome extension
   return Promise.reject(new Error('mammoth.js no está disponible. Recarga la extensión.'));
+}
+
+// ============================================
+// PDF EDITOR
+// ============================================
+
+function handleEditorDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  const files = e.dataTransfer.files;
+  if (files.length > 0) {
+    loadPdfForEditor(files[0]);
+  }
+}
+
+function handleEditorFileSelect(e) {
+  const file = e.target.files[0];
+  if (file) loadPdfForEditor(file);
+}
+
+async function loadPdfForEditor(file) {
+  if (file.type !== 'application/pdf' && !file.name.endsWith('.pdf')) {
+    showToast('Por favor, selecciona un archivo PDF');
+    return;
+  }
+  
+  // Check if PDFLib is available (use window.PDFLib for global access)
+  const pdfLib = window.PDFLib;
+  if (!pdfLib) {
+    showToast('Error: La librería PDFLib no está cargada. Recarga la extensión.');
+    return;
+  }
+  
+  // Ensure modal is open
+  const pdfModal = $('pdfModal');
+  if (pdfModal && !pdfModal.classList.contains('show')) {
+    openPdfModal();
+  }
+  
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    editorPdfBytes = new Uint8Array(arrayBuffer);
+    
+    // Load with pdf-lib
+    const { PDFDocument } = pdfLib;
+    editorPdfDoc = await PDFDocument.load(editorPdfBytes);
+    editorTotalPages = editorPdfDoc.getPageCount();
+    editorCurrentPage = 1;
+    
+    // Initialize elements for each page
+    editorElements = {};
+    for (let i = 1; i <= editorTotalPages; i++) {
+      editorElements[i] = [];
+    }
+    
+    // Render first page
+    await renderEditorPage();
+    
+    // Show UI (with null checks)
+    const uploadEl = $('pdfEditorUpload');
+    const navEl = $('pdfEditorNav');
+    const saveBtn = $('btnSavePdf');
+    
+    if (uploadEl) uploadEl.style.display = 'none';
+    if (navEl) navEl.style.display = 'flex';
+    if (saveBtn) saveBtn.style.display = 'flex';
+    
+    showToast(`PDF cargado: ${editorTotalPages} páginas`);
+    
+  } catch (err) {
+    console.error('Error loading PDF:', err);
+    showToast('Error al cargar el PDF');
+  }
+}
+
+async function renderEditorPage() {
+  if (!editorPdfDoc) {
+    console.error('renderEditorPage: No PDF document loaded');
+    return;
+  }
+  
+  const container = $('pdfEditorPages');
+  
+  // Ensure elements array exists for current page
+  if (!editorElements[editorCurrentPage]) {
+    editorElements[editorCurrentPage] = [];
+  }
+  
+  try {
+    // Get page dimensions first (before clearing container)
+    const page = editorPdfDoc.getPage(editorCurrentPage - 1);
+    const { width, height } = page.getSize();
+    
+    // Calculate scale to fit container (max width ~280px)
+    editorScale = Math.min(280 / width, 400 / height, 1);
+    
+    // Create canvas for rendering
+    const canvasContainer = document.createElement('div');
+    canvasContainer.className = 'pdf-canvas-container';
+    canvasContainer.style.position = 'relative';
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = width * editorScale;
+    canvas.height = height * editorScale;
+    editorCanvas = canvas;
+    
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Try to render with pdf.js if available, otherwise show placeholder
+    let renderSuccess = false;
+    if (typeof pdfjsLib !== 'undefined') {
+      try {
+        const pdfJsDoc = await pdfjsLib.getDocument(editorPdfBytes).promise;
+        const pdfJsPage = await pdfJsDoc.getPage(editorCurrentPage);
+        const viewport = pdfJsPage.getViewport({ scale: editorScale });
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        await pdfJsPage.render({ canvasContext: ctx, viewport }).promise;
+        renderSuccess = true;
+      } catch (e) {
+        console.log('pdf.js render failed, using placeholder:', e);
+      }
+    }
+    
+    // If pdf.js failed, draw placeholder
+    if (!renderSuccess) {
+      drawPlaceholder(ctx, canvas.width, canvas.height);
+    }
+    
+    canvasContainer.appendChild(canvas);
+    
+    // Create overlay for elements
+    const overlay = document.createElement('div');
+    overlay.className = 'pdf-editor-overlay';
+    overlay.id = 'editorOverlay';
+    overlay.style.width = canvas.width + 'px';
+    overlay.style.height = canvas.height + 'px';
+    
+    // Render existing elements for this page
+    const pageElements = editorElements[editorCurrentPage] || [];
+    pageElements.forEach((el, idx) => {
+      const elDiv = createEditorElement(el, idx);
+      overlay.appendChild(elDiv);
+    });
+    
+    canvasContainer.appendChild(overlay);
+    
+    // Only clear container AFTER canvas is fully prepared
+    container.innerHTML = '';
+    container.appendChild(canvasContainer);
+    
+    // Update page info
+    $('currentPageNum').textContent = editorCurrentPage;
+    $('totalPages').textContent = editorTotalPages;
+    
+  } catch (err) {
+    console.error('Error rendering PDF page:', err);
+    // Show error message in container instead of leaving it empty
+    container.innerHTML = `<div class="pdf-error" style="padding: 20px; text-align: center; color: #dc2626;">
+      <p>Error al renderizar la página</p>
+      <p style="font-size: 12px; color: #666;">${err.message}</p>
+      <button onclick="renderEditorPage()" style="margin-top: 10px; padding: 8px 16px; cursor: pointer;">Reintentar</button>
+    </div>`;
+  }
+}
+
+function drawPlaceholder(ctx, width, height) {
+  ctx.fillStyle = '#f0f0f0';
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = '#999';
+  ctx.font = '14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(`Página ${editorCurrentPage}`, width / 2, height / 2);
+}
+
+function createEditorElement(el, idx) {
+  const div = document.createElement('div');
+  div.className = `pdf-element pdf-element-${el.type}`;
+  div.dataset.idx = idx;
+  div.style.left = (el.x * editorScale) + 'px';
+  div.style.top = (el.y * editorScale) + 'px';
+  
+  if (el.type === 'text') {
+    // Create text span (to allow child elements like name label)
+    const textSpan = document.createElement('span');
+    textSpan.textContent = el.text;
+    div.appendChild(textSpan);
+    div.style.fontSize = (el.size || 14) * editorScale + 'px';
+    div.style.color = el.color || '#000';
+    
+    // Show name label for DNI/NIE texts
+    if (el.name) {
+      const nameLabel = document.createElement('div');
+      nameLabel.className = 'text-name-label';
+      nameLabel.textContent = el.name;
+      div.appendChild(nameLabel);
+      div.title = `DNI de: ${el.name}`;
+    }
+  } else if (el.type === 'image' || el.type === 'signature') {
+    const img = document.createElement('img');
+    img.src = el.src;
+    img.style.width = (el.width * editorScale) + 'px';
+    img.style.height = 'auto';
+    img.draggable = false;
+    div.appendChild(img);
+    div.style.background = 'transparent';
+  }
+  
+  // Delete button
+  const deleteBtn = document.createElement('button');
+  deleteBtn.className = 'pdf-element-delete';
+  deleteBtn.textContent = '✕';
+  deleteBtn.onclick = (e) => {
+    e.stopPropagation();
+    // Ensure the page array exists
+    if (editorElements[editorCurrentPage]) {
+      editorElements[editorCurrentPage].splice(idx, 1);
+      renderEditorPage();
+    }
+  };
+  div.appendChild(deleteBtn);
+  
+  // Make draggable
+  makeElementDraggable(div, el);
+  
+  return div;
+}
+
+function makeElementDraggable(div, el) {
+  let isDragging = false;
+  let startX, startY, origX, origY;
+  
+  div.addEventListener('mousedown', (e) => {
+    if (e.target.classList.contains('pdf-element-delete')) return;
+    isDragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    origX = el.x * editorScale;
+    origY = el.y * editorScale;
+    div.classList.add('selected');
+    selectedElement = { div, el };
+  });
+  
+  document.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    div.style.left = (origX + dx) + 'px';
+    div.style.top = (origY + dy) + 'px';
+  });
+  
+  document.addEventListener('mouseup', (e) => {
+    if (!isDragging) return;
+    isDragging = false;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    el.x = Math.max(0, (origX + dx) / editorScale);
+    el.y = Math.max(0, (origY + dy) / editorScale);
+    div.classList.remove('selected');
+  });
+}
+
+function addTextToPdf() {
+  if (!editorPdfDoc) {
+    showToast('Primero carga un PDF');
+    return;
+  }
+  
+  // Create text input modal
+  const modal = document.createElement('div');
+  modal.className = 'pdf-text-input-modal';
+  modal.innerHTML = `
+    <h4>📝 Añadir texto</h4>
+    <textarea id="textInputText" placeholder="Escribe el texto...&#10;&#10;Puedes añadir múltiples líneas:&#10;NOMBRE APELLIDOS 12345678A&#10;OTRO NOMBRE X1234567B" style="min-height: 120px;"></textarea>
+    <input type="number" id="textInputSize" placeholder="Tamaño de fuente" value="14" min="8" max="72">
+    <input type="color" id="textInputColor" value="#000000" title="Color del texto">
+    <div class="pdf-text-input-actions">
+      <button class="btn-cancel" id="cancelTextBtn">Cancelar</button>
+      <button class="btn-add" id="addTextBtn">Añadir</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  
+  const closeModal = () => modal.remove();
+  
+  modal.querySelector('#cancelTextBtn').onclick = closeModal;
+  modal.querySelector('#addTextBtn').onclick = () => {
+    const text = modal.querySelector('#textInputText').value.trim();
+    const size = parseInt(modal.querySelector('#textInputSize').value) || 14;
+    const color = modal.querySelector('#textInputColor').value;
+    
+    if (!text) {
+      showToast('Escribe un texto');
+      return;
+    }
+    
+    // Ensure the elements array for current page exists
+    if (!editorElements[editorCurrentPage]) {
+      editorElements[editorCurrentPage] = [];
+    }
+    
+    // DNI/NIE patterns
+    const dniPatterns = [
+      /\b\d{8}[A-Za-z]\b/g,           // DNI: 12345678A
+      /\b[XYZ]\d{7}[A-Za-z]\b/g,      // NIE: X1234567A
+      /\b\d{8}-[A-Za-z]\b/g,          // DNI con guión: 12345678-A
+      /\b[XYZ]\d{7}-[A-Za-z]\b/g      // NIE con guión: X1234567-A
+    ];
+    
+    // Check if text has multiple lines
+    const lines = text.split(/\n|\r\n|\r/).map(l => l.trim()).filter(l => l);
+    
+    let startX = 50;
+    let startY = 50;
+    
+    if (lines.length > 1) {
+      // Multi-line mode: process each line
+      let currentY = startY;
+      let totalCreated = 0;
+      
+      lines.forEach(line => {
+        let foundDni = null;
+        let textWithoutDni = line;
+        
+        // Search for DNI/NIE in line
+        for (const pattern of dniPatterns) {
+          const match = line.match(pattern);
+          if (match) {
+            foundDni = match[0];
+            textWithoutDni = line.replace(pattern, '').replace(/\s+/g, ' ').trim();
+            break;
+          }
+        }
+        
+        if (foundDni && textWithoutDni) {
+          // Create name text
+          editorElements[editorCurrentPage].push({
+            type: 'text',
+            text: textWithoutDni,
+            x: startX,
+            y: currentY,
+            size,
+            color
+          });
+          
+          // Create DNI text with name reference
+          editorElements[editorCurrentPage].push({
+            type: 'text',
+            text: foundDni,
+            x: startX,
+            y: currentY + size + 3,
+            size,
+            color,
+            name: textWithoutDni  // Store name for tooltip
+          });
+          
+          currentY += (size * 2) + 15; // Space between pairs
+          totalCreated += 2;
+        } else if (line) {
+          // No DNI found, add as single text
+          editorElements[editorCurrentPage].push({
+            type: 'text',
+            text: line,
+            x: startX,
+            y: currentY,
+            size,
+            color
+          });
+          currentY += size + 10;
+          totalCreated++;
+        }
+      });
+      
+      showToast(`${totalCreated} textos creados (${lines.length} líneas)`);
+    } else {
+      // Single line mode
+      let foundDni = null;
+      let textWithoutDni = text;
+      
+      for (const pattern of dniPatterns) {
+        const match = text.match(pattern);
+        if (match) {
+          foundDni = match[0];
+          textWithoutDni = text.replace(pattern, '').replace(/\s+/g, ' ').trim();
+          break;
+        }
+      }
+      
+      if (foundDni && textWithoutDni) {
+        // Create two separate text elements
+        editorElements[editorCurrentPage].push({
+          type: 'text',
+          text: textWithoutDni,
+          x: startX,
+          y: startY,
+          size,
+          color
+        });
+        
+        editorElements[editorCurrentPage].push({
+          type: 'text',
+          text: foundDni,
+          x: startX,
+          y: startY + size + 3,
+          size,
+          color,
+          name: textWithoutDni  // Store name for tooltip
+        });
+        
+        showToast('Texto separado: Nombre + DNI/NIE');
+      } else {
+        // Single text element
+        editorElements[editorCurrentPage].push({
+          type: 'text',
+          text,
+          x: startX,
+          y: startY,
+          size,
+          color
+        });
+      }
+    }
+    
+    closeModal();
+    renderEditorPage();
+  };
+}
+
+function addImageToPdf() {
+  if (!editorPdfDoc) {
+    showToast('Primero carga un PDF');
+    return;
+  }
+  
+  // Ensure the elements array for current page exists
+  if (!editorElements[editorCurrentPage]) {
+    editorElements[editorCurrentPage] = [];
+  }
+  
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        // Scale image to fit
+        let width = img.width;
+        let height = img.height;
+        const maxSize = 150;
+        if (width > maxSize || height > maxSize) {
+          const ratio = Math.min(maxSize / width, maxSize / height);
+          width *= ratio;
+          height *= ratio;
+        }
+        
+        editorElements[editorCurrentPage].push({
+          type: 'image',
+          src: ev.target.result,
+          x: 50,
+          y: 50,
+          width,
+          height
+        });
+        renderEditorPage();
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+  input.click();
+}
+
+async function addSignatureToPdf() {
+  if (!editorPdfDoc) {
+    showToast('Primero carga un PDF');
+    return;
+  }
+  
+  // Ensure the elements array for current page exists
+  if (!editorElements[editorCurrentPage]) {
+    editorElements[editorCurrentPage] = [];
+  }
+  
+  // Open signature search modal
+  $('signaturesModal').classList.add('show');
+  resetSignatureState();
+  
+  // Override the download function temporarily
+  window.selectSignatureForEditor = (url, name) => {
+    const img = new Image();
+    img.onload = () => {
+      let width = img.width;
+      let height = img.height;
+      const maxSize = 120;
+      if (width > maxSize || height > maxSize) {
+        const ratio = Math.min(maxSize / width, maxSize / height);
+        width *= ratio;
+        height *= ratio;
+      }
+      
+      // Ensure the page array exists
+      if (!editorElements[editorCurrentPage]) {
+        editorElements[editorCurrentPage] = [];
+      }
+      
+      editorElements[editorCurrentPage].push({
+        type: 'signature',
+        src: url,
+        x: 50,
+        y: 50,
+        width,
+        height,
+        name
+      });
+      
+      $('signaturesModal').classList.remove('show');
+      renderEditorPage();
+      showToast('Firma añadida');
+    };
+    img.src = url;
+  };
+}
+
+function openFullPdfEditor() {
+  // Open the full-screen PDF editor in a new tab
+  chrome.tabs.create({
+    url: chrome.runtime.getURL('pdf-editor-full.html')
+  });
+}
+
+function clearPdfEditor() {
+  if (!editorPdfDoc) return;
+  
+  if (confirm('¿Eliminar todos los elementos añadidos?')) {
+    for (let i = 1; i <= editorTotalPages; i++) {
+      editorElements[i] = [];
+    }
+    renderEditorPage();
+  }
+}
+
+function navigateEditorPage(delta) {
+  const newPage = editorCurrentPage + delta;
+  if (newPage >= 1 && newPage <= editorTotalPages) {
+    editorCurrentPage = newPage;
+    renderEditorPage();
+  }
+}
+
+async function saveEditedPdf() {
+  if (!editorPdfDoc) return;
+  
+  const btn = $('btnSavePdf');
+  btn.disabled = true;
+  btn.querySelector('.btn-text').textContent = 'Guardando...';
+  btn.querySelector('.btn-loader').style.display = 'inline-block';
+  
+  try {
+    // Get PDFLib from window
+    const pdfLib = window.PDFLib;
+    const { PDFDocument, rgb, StandardFonts } = pdfLib;
+    
+    // Load fonts
+    const helveticaFont = await editorPdfDoc.embedFont(StandardFonts.Helvetica);
+    
+    // Process each page
+    for (let pageNum = 1; pageNum <= editorTotalPages; pageNum++) {
+      const page = editorPdfDoc.getPage(pageNum - 1);
+      const { width, height } = page.getSize();
+      const elements = editorElements[pageNum] || [];
+      
+      for (const el of elements) {
+        // Convert from display coordinates to PDF coordinates
+        const pdfX = el.x;
+        const pdfY = height - el.y - (el.size || 20); // PDF Y is from bottom
+        
+        if (el.type === 'text') {
+          // Draw text
+          const color = hexToRgb(el.color || '#000000');
+          page.drawText(el.text, {
+            x: pdfX,
+            y: pdfY,
+            size: el.size || 14,
+            font: helveticaFont,
+            color: rgb(color.r / 255, color.g / 255, color.b / 255)
+          });
+        } else if (el.type === 'image' || el.type === 'signature') {
+          // Embed image
+          try {
+            const imageBytes = await fetch(el.src).then(r => r.arrayBuffer());
+            let image;
+            
+            if (el.src.includes('image/png')) {
+              image = await editorPdfDoc.embedPng(imageBytes);
+            } else {
+              image = await editorPdfDoc.embedJpg(imageBytes);
+            }
+            
+            page.drawImage(image, {
+              x: pdfX,
+              y: height - el.y - el.height,
+              width: el.width,
+              height: el.height
+            });
+          } catch (imgErr) {
+            console.error('Error embedding image:', imgErr);
+          }
+        }
+      }
+    }
+    
+    // Save and download
+    const pdfBytes = await editorPdfDoc.save();
+    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'documento-editado.pdf';
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    showToast('✅ PDF guardado correctamente');
+    
+    // Reset editor
+    editorPdfDoc = await PDFDocument.load(editorPdfBytes);
+    for (let i = 1; i <= editorTotalPages; i++) {
+      editorElements[i] = [];
+    }
+    renderEditorPage();
+    
+  } catch (err) {
+    console.error('Save error:', err);
+    showToast('Error al guardar: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.querySelector('.btn-text').textContent = 'Guardar PDF →';
+    btn.querySelector('.btn-loader').style.display = 'none';
+  }
+}
+
+function hexToRgb(hex) {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result ? {
+    r: parseInt(result[1], 16),
+    g: parseInt(result[2], 16),
+    b: parseInt(result[3], 16)
+  } : { r: 0, g: 0, b: 0 };
+}
+
+// ============================================
+// SIGNATURE IMAGE PROCESSING
+// Removes white backgrounds, trims transparent borders
+// so signatures look clean and are properly cropped.
+// ============================================
+
+/**
+ * Process a signature image: remove white bg + trim transparent borders.
+ * Returns a PNG data URL of the cleaned, trimmed signature.
+ */
+async function processAndTrimSignature(src) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+      const w = canvas.width, h = canvas.height;
+      
+      // Step 1: Remove white/near-white background
+      const threshold = 230;
+      const thresholdRange = 255 - threshold;
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+        if (a === 0) continue;
+        const minChannel = Math.min(r, g, b);
+        if (minChannel >= threshold) {
+          const whiteness = (minChannel - threshold) / thresholdRange;
+          data[i + 3] = Math.round(a * (1 - whiteness));
+        }
+      }
+      
+      ctx.putImageData(imageData, 0, 0);
+      
+      // Step 2: Trim transparent borders
+      const trimmedSrc = (function trimCanvas(cv) {
+        const c = cv.getContext('2d');
+        const cw = cv.width, ch = cv.height;
+        if (cw === 0 || ch === 0) return cv.toDataURL('image/png');
+        const id = c.getImageData(0, 0, cw, ch);
+        const d = id.data;
+        let top = ch, bottom = 0, left = cw, right = 0;
+        for (let y = 0; y < ch; y++) {
+          for (let x = 0; x < cw; x++) {
+            const idx = (y * cw + x) * 4;
+            if (d[idx + 3] > 20) {
+              if (y < top) top = y;
+              if (y > bottom) bottom = y;
+              if (x < left) left = x;
+              if (x > right) right = x;
+            }
+          }
+        }
+        if (top >= bottom || left >= right) return cv.toDataURL('image/png');
+        const pad = 10;
+        top = Math.max(0, top - pad);
+        left = Math.max(0, left - pad);
+        bottom = Math.min(ch, bottom + pad);
+        right = Math.min(cw, right + pad);
+        const tw = right - left, th = bottom - top;
+        const tc = document.createElement('canvas');
+        tc.width = tw; tc.height = th;
+        tc.getContext('2d').drawImage(cv, left, top, tw, th, 0, 0, tw, th);
+        return tc.toDataURL('image/png');
+      })(canvas);
+      
+      resolve(trimmedSrc);
+    };
+    img.onerror = () => resolve(src);
+    img.src = src;
+  });
 }
 
 // ============================================
@@ -2298,7 +2877,18 @@ function resetSignatureState() {
   $('newSignatureName').value = '';
 }
 
-// removeDniNie and normalizeText moved to shared-utils.js
+// Helper function to remove DNI/NIE from a string
+// DNI format: 8 digits + 1 letter (e.g., 12345678A)
+// NIE format: X/Y/Z + 7 digits + 1 letter (e.g., X1234567A)
+function removeDniNie(text) {
+  // Remove DNI pattern: 8 digits followed by a letter
+  // Remove NIE pattern: X, Y, or Z followed by 7 digits and a letter
+  return text
+    .replace(/\s*\d{8}[A-Za-z]\s*/gi, ' ')  // DNI: 8 digits + letter
+    .replace(/\s*[XYZ]\d{7}[A-Za-z]\s*/gi, ' ')  // NIE: X/Y/Z + 7 digits + letter
+    .replace(/\s+/g, ' ')  // Normalize multiple spaces to single space
+    .trim();
+}
 
 // Search signatures in Supabase (one name per line - commas are part of the name)
 async function searchSignatures() {
@@ -2332,35 +2922,28 @@ async function searchSignatures() {
 
     // Search for each term
     for (const term of searchTerms) {
-      // Search with original term AND normalized (no accents) term for better matching
-      const normalizedTerm = normalizeText(term);
-      const searchValues = [term];
-      if (normalizedTerm !== term) searchValues.push(normalizedTerm);
-      
-      for (const searchTerm of searchValues) {
-        // Query signatures table - search for exact or partial match
-        const query = `?select=*&name=ilike.*${encodeURIComponent(searchTerm)}*&order=name.asc`;
-        const url = `${SUPABASE_URL}/rest/v1/signatures${query}`;
+      // Query signatures table - search for exact or partial match
+      const query = `?select=*&name=ilike.*${encodeURIComponent(term)}*&order=name.asc`;
+      const url = `${SUPABASE_URL}/rest/v1/signatures${query}`;
 
-        const res = await fetch(url, {
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Authorization': `Bearer ${session.access_token}`
-          }
-        });
+      const res = await fetch(url, {
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${session.access_token}`
+        }
+      });
 
-        if (res.ok) {
-          const signatures = await res.json();
-          if (signatures && signatures.length > 0) {
-            // Add to results, avoiding duplicates by id
-            signatures.forEach(sig => {
-              if (!allSignatures.find(s => s.id === sig.id)) {
-                allSignatures.push(sig);
-                // Store normalized for accent-insensitive comparison
-                foundNames.push(normalizeText(sig.name).toUpperCase());
-              }
-            });
-          }
+      if (res.ok) {
+        const signatures = await res.json();
+        if (signatures && signatures.length > 0) {
+          // Add to results, avoiding duplicates by id
+          signatures.forEach(sig => {
+            if (!allSignatures.find(s => s.id === sig.id)) {
+              allSignatures.push(sig);
+              // Store in uppercase for comparison
+              foundNames.push(sig.name.toUpperCase());
+            }
+          });
         }
       }
     }
@@ -2383,8 +2966,9 @@ function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames
   // Determine which searched terms were NOT found
   const normalizedFoundNames = foundNames.map(n => n.toUpperCase());
   const missingNames = searchedTerms.filter(term => {
-    // Normalize term (remove accents) and uppercase for comparison
-    const normalizedTerm = normalizeText(term).toUpperCase();
+    // Normalize term to uppercase for comparison
+    const normalizedTerm = term.toUpperCase();
+    // Check if term matches any found name (partial match)
     return !normalizedFoundNames.some(found => found.includes(normalizedTerm) || normalizedTerm.includes(found));
   });
   
@@ -2580,6 +3164,14 @@ async function quickUploadMissingSignature(name) {
         reader.readAsDataURL(file);
       });
       
+      // Process signature: remove white background and trim transparent borders
+      let processedImage = base64;
+      try {
+        processedImage = await processAndTrimSignature(base64);
+      } catch (err) {
+        console.warn('Signature processing failed, using original:', err);
+      }
+      
       // Upload to Supabase
       const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
       const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures`, {
@@ -2593,7 +3185,7 @@ async function quickUploadMissingSignature(name) {
         body: JSON.stringify({
           id,
           name: name.toUpperCase(),
-          image_url: base64,
+          image_url: processedImage,
           user_id: currentUser.id,
           user_name: currentUser.name
         })
@@ -2780,7 +3372,7 @@ async function previewAllSignatures() {
       html += `
         <div class="signature-preview-card" data-id="${sig.id}" data-name="${esc(displayName)}">
           <div class="signature-preview-image-container">
-            <img src="${sig.image_url}" alt="${esc(displayName)}" class="signature-preview-image" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 50%22><text x=%2250%%22 y=%2250%%22 text-anchor=%22middle%22 fill=%22%23999%22>Sin imagen</text></svg>'">
+            <img src="${sig.image_url}" alt="${esc(displayName)}" class="signature-preview-image"image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 50%22><text x=%2250%%22 y=%2250%%22 text-anchor=%22middle%22 fill=%22%23999%22>Sin imagen</text></svg>'">
           </div>
           <div class="signature-preview-name">${esc(displayName)}</div>
           <button class="signature-preview-delete" data-id="${sig.id}" data-name="${esc(displayName)}" title="Eliminar firma">🗑️</button>
@@ -2940,6 +3532,14 @@ async function uploadSignature() {
       reader.readAsDataURL(signatureFile);
     });
 
+    // Process signature: remove white background and trim transparent borders
+    let processedImage = base64Image;
+    try {
+      processedImage = await processAndTrimSignature(base64Image);
+    } catch (err) {
+      console.warn('Signature processing failed, using original:', err);
+    }
+
     console.log('Subiendo firma:', name);
     console.log('User ID:', currentUser?.id);
 
@@ -2957,7 +3557,7 @@ async function uploadSignature() {
       body: JSON.stringify({
         id,
         name: name.toUpperCase(),
-        image_url: base64Image,
+        image_url: processedImage,
         user_id: currentUser.id,
         user_name: currentUser.name
       })
@@ -3147,6 +3747,14 @@ async function handleBulkUpload(files) {
         reader.readAsDataURL(file);
       });
 
+      // Process signature: remove white background and trim transparent borders
+      let processedImage = base64;
+      try {
+        processedImage = await processAndTrimSignature(base64);
+      } catch (err) {
+        console.warn('Bulk signature processing failed for', fileName, ':', err);
+      }
+
       // Generate unique ID
       const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
 
@@ -3162,7 +3770,7 @@ async function handleBulkUpload(files) {
         body: JSON.stringify({
           id,
           name: fileName.toUpperCase(),
-          image_url: base64,
+          image_url: processedImage,
           user_id: currentUser.id,
           user_name: currentUser.name
         })
@@ -3343,9 +3951,6 @@ function setupProcessesListeners() {
       renderGlobalStats();
     });
   });
-
-  // CSV Import listeners
-  setupImportListeners();
 }
 
 function openProcessesModal() {
@@ -3927,529 +4532,5 @@ async function finalizeProcess(id) {
   } catch (err) {
     console.error('Error finalizing:', err);
     showToast('Error al finalizar');
-  }
-}
-
-// ============================================
-// CSV IMPORT MODULE
-// ============================================
-
-let importParsedRows = []; // Stores parsed rows pending import
-
-const VALID_POSITIONS = [
-  'Auxiliar de Seguridad', 'Azafat@s', 'Conductor', 'Camarero', 'Cocinero',
-  'Carga y Descarga', 'Aux. Audiovisual', 'Limpieza', 'Oficina', 'Runner'
-];
-
-const VALID_PROVINCES = [
-  'A Coruña','Álava','Albacete','Alicante','Almería','Asturias','Ávila','Badajoz',
-  'Barcelona','Burgos','Cáceres','Cádiz','Cantabria','Castellón','Ceuta',
-  'Ciudad Real','Córdoba','Cuenca','Girona','Granada','Guadalajara','Gipuzkoa',
-  'Huelva','Huesca','Illes Balears','Jaén','La Rioja','Las Palmas','León','Lleida',
-  'Lugo','Madrid','Málaga','Melilla','Murcia','Navarra','Ourense','Palencia',
-  'Pontevedra','Salamanca','Santa Cruz de Tenerife','Segovia','Sevilla','Soria',
-  'Tarragona','Teruel','Toledo','Valencia','Valladolid','Bizkaia','Zamora','Zaragoza'
-];
-
-// Expected CSV columns (all lowercase, stripped)
-const CSV_COLUMNS = [
-  'nombre', 'puesto', 'provincia', 'fecha',
-  'objetivo', 'bd_ofertas', 'citados_ofertas', 'entrevistados_ofertas', 'seleccionados_ofertas',
-  'bd_erp', 'citados_erp', 'entrevistados_erp', 'seleccionados_erp'
-];
-
-const CSV_TEMPLATE = `nombre,puesto,provincia,fecha,objetivo,bd_ofertas,citados_ofertas,entrevistados_ofertas,seleccionados_ofertas,bd_erp,citados_erp,entrevistados_erp,seleccionados_erp
-Selección Operarios Madrid,Auxiliar de Seguridad,Madrid,2026-01-15,10,50,30,20,8,5,3,2,1
-Azafatas Evento Valencia,Azafat@s,Valencia,2026-01-20,5,40,25,15,5,0,0,0,0
-Conductores Sevilla,Conductor,Sevilla,2026-02-10,8,30,20,10,6,10,8,5,3
-Camareros Evento BCN,Camarero,Barcelona,2026-02-18,0,60,40,25,12,0,0,0,0
-Limpizas Nacional,Limpieza,Madrid,2026-03-05,15,80,50,30,20,20,15,10,8`;
-
-function setupImportListeners() {
-  $('btnImportCsv').addEventListener('click', openImportModal);
-  $('closeImportModal').addEventListener('click', closeImportModal);
-  $('btnDownloadTemplate').addEventListener('click', downloadCsvTemplate);
-  $('btnImportCancel').addEventListener('click', resetImportModal);
-
-  const dropzone = $('importDropzone');
-  const fileInput = $('importFileInput');
-
-  dropzone.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', (e) => {
-    if (e.target.files.length > 0) handleImportFile(e.target.files[0]);
-  });
-
-  dropzone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dropzone.classList.add('drag-over');
-  });
-  dropzone.addEventListener('dragleave', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dropzone.classList.remove('drag-over');
-  });
-  dropzone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dropzone.classList.remove('drag-over');
-    if (e.dataTransfer.files.length > 0) handleImportFile(e.dataTransfer.files[0]);
-  });
-
-  $('btnImportConfirm').addEventListener('click', executeImport);
-}
-
-function openImportModal() {
-  $('importModal').classList.add('show');
-  resetImportModal();
-}
-
-function closeImportModal() {
-  $('importModal').classList.remove('show');
-  importParsedRows = [];
-}
-
-function resetImportModal() {
-  importParsedRows = [];
-  $('importPreview').style.display = 'none';
-  $('importPreviewErrors').style.display = 'none';
-  $('importDropzone').style.display = 'flex';
-  $('importFileInput').value = '';
-  $('importAsFinalized').checked = false;
-}
-
-function downloadCsvTemplate() {
-  const blob = new Blob([CSV_TEMPLATE], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'plantilla_procesos.csv';
-  a.click();
-  URL.revokeObjectURL(url);
-  showToast('Plantilla descargada');
-}
-
-// Robust CSV parser — handles quoted fields with commas/newlines inside
-function parseCsvLine(line, separator = ',') {
-  const fields = [];
-  let current = '';
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (i + 1 < line.length && line[i + 1] === '"') {
-          current += '"';
-          i++; // skip escaped quote
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        current += ch;
-      }
-    } else {
-      if (ch === '"') {
-        inQuotes = true;
-      } else if (ch === separator) {
-        fields.push(current.trim());
-        current = '';
-      } else {
-        current += ch;
-      }
-    }
-  }
-  fields.push(current.trim());
-  return fields;
-}
-
-function detectSeparator(firstLine) {
-  const semicolons = (firstLine.match(/;/g) || []).length;
-  const commas = (firstLine.match(/,/g) || []).length;
-  const tabs = (firstLine.match(/\t/g) || []).length;
-  if (semicolons > commas && semicolons > tabs) return ';';
-  if (tabs > commas && tabs > semicolons) return '\t';
-  return ',';
-}
-
-// Remove diacritics for accent-insensitive matching (e.g. "Alava" matches "Álava")
-function normalizeAccents(str) {
-  return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-}
-
-function parseCsvText(text) {
-  // Strip BOM if still present
-  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-
-  const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
-  if (lines.length < 2) return { rows: [], errors: ['El archivo debe tener al menos una fila de datos (además de la cabecera).'] };
-
-  // Autodetect separator from first line
-  const csvSeparator = detectSeparator(lines[0]);
-
-  // Parse header
-  const header = parseCsvLine(lines[0], csvSeparator).map(h => h.toLowerCase().trim().replace(/\s+/g, '_'));
-
-  // Validate required columns
-  const missingCols = [];
-  const requiredCols = ['nombre', 'puesto', 'provincia', 'fecha'];
-  requiredCols.forEach(col => {
-    if (!header.includes(col)) missingCols.push(col);
-  });
-  if (missingCols.length > 0) {
-    return { rows: [], errors: [`Columnas obligatorias faltantes: ${missingCols.join(', ')}. Usa el botón "Plantilla" para ver el formato correcto.`] };
-  }
-
-  // Column index mapping
-  const colIdx = {};
-  CSV_COLUMNS.forEach(col => {
-    const idx = header.indexOf(col);
-    if (idx !== -1) colIdx[col] = idx;
-  });
-
-  const rows = [];
-  const errors = [];
-
-  for (let i = 1; i < lines.length; i++) {
-    const fields = parseCsvLine(lines[i], csvSeparator);
-    const rowNum = i + 1;
-    const row = { _rowNum: rowNum, _valid: true, _errors: [] };
-
-    // nombre
-    const nombre = (colIdx.nombre !== undefined) ? fields[colIdx.nombre] || '' : '';
-    if (!nombre) {
-      row._valid = false;
-      row._errors.push('Nombre vacío');
-    }
-
-    // puesto
-    const puesto = (colIdx.puesto !== undefined) ? fields[colIdx.puesto] || '' : '';
-    const puestoMatch = VALID_POSITIONS.find(p => normalizeAccents(p.toLowerCase()) === normalizeAccents(puesto.toLowerCase()));
-    if (!puesto) {
-      row._valid = false;
-      row._errors.push('Puesto vacío');
-    } else if (!puestoMatch) {
-      row._valid = false;
-      row._errors.push(`Puesto no reconocido: "${puesto}"`);
-    }
-
-    // provincia
-    const provincia = (colIdx.provincia !== undefined) ? fields[colIdx.provincia] || '' : '';
-    const provMatch = VALID_PROVINCES.find(p => normalizeAccents(p.toLowerCase()) === normalizeAccents(provincia.toLowerCase()));
-    if (!provincia) {
-      row._valid = false;
-      row._errors.push('Provincia vacía');
-    } else if (!provMatch) {
-      row._valid = false;
-      row._errors.push(`Provincia no reconocida: "${provincia}"`);
-    }
-
-    // fecha
-    const fechaRaw = (colIdx.fecha !== undefined) ? (fields[colIdx.fecha] || '').trim() : '';
-    let fechaParsed = null;
-    if (!fechaRaw) {
-      row._valid = false;
-      row._errors.push('Fecha vacía');
-    } else {
-      // Accept formats: 2026-01-15, 15/01/2026, 15-01-2026, 2026/01/15, DD/MM/AAAA, Excel serial number
-      const d1 = fechaRaw.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/);
-      const d2 = fechaRaw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
-      const dExcel = fechaRaw.match(/^(\d{4,5})$/);
-      if (d1) {
-        fechaParsed = new Date(parseInt(d1[1]), parseInt(d1[2]) - 1, parseInt(d1[3]));
-      } else if (d2) {
-        fechaParsed = new Date(parseInt(d2[3]), parseInt(d2[2]) - 1, parseInt(d2[1]));
-      } else if (dExcel) {
-        // Excel serial date: days since 1900-01-01 (with the 1900 leap year bug)
-        const serial = parseInt(dExcel[1]);
-        if (serial > 30000 && serial < 60000) {
-          // Excel epoch is 1899-12-30 (due to the Lotus 1-2-3 leap year bug)
-          const epoch = new Date(1899, 11, 30);
-          fechaParsed = new Date(epoch.getTime() + serial * 86400000);
-        }
-      }
-      if (!fechaParsed || isNaN(fechaParsed.getTime())) {
-        row._valid = false;
-        row._errors.push(`Fecha no válida: "${fechaRaw}" (usa DD/MM/AAAA o AAAA-MM-DD)`);
-      }
-    }
-
-    // Numeric fields with defaults
-    const numField = (col) => {
-      if (colIdx[col] === undefined) return 0;
-      const raw = (fields[colIdx[col]] || '0').replace(/[.,\s]/g, '').trim();
-      const val = parseInt(raw) || 0;
-      if (val < 0) return 0;
-      return val;
-    };
-
-    row.data = {
-      name: nombre,
-      position: puestoMatch || puesto,
-      province: provMatch || provincia,
-      fecha: fechaParsed,
-      objetivo: numField('objetivo'),
-      added: numField('bd_ofertas'),
-      called: numField('citados_ofertas'),
-      interviewed: numField('entrevistados_ofertas'),
-      selected: numField('seleccionados_ofertas'),
-      added_erp: numField('bd_erp'),
-      called_erp: numField('citados_erp'),
-      interviewed_erp: numField('entrevistados_erp'),
-      selected_erp: numField('seleccionados_erp')
-    };
-
-    if (row._errors.length > 0) {
-      errors.push(`Fila ${rowNum}: ${row._errors.join('; ')}`);
-    }
-
-    rows.push(row);
-  }
-
-  return { rows, errors };
-}
-
-function handleImportFile(file) {
-  const ext = file.name.toLowerCase();
-  if (!ext.endsWith('.csv') && !ext.endsWith('.xls') && !ext.endsWith('.xlsx')) {
-    showToast('Por favor selecciona un archivo .csv, .xls o .xlsx');
-    return;
-  }
-
-  // XLS/XLSX → read as ArrayBuffer and convert via TextDecoder (fallback for simple text-based spreadsheets)
-  if (ext.endsWith('.xls') || ext.endsWith('.xlsx')) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      let text;
-      try {
-        // Try UTF-8 first
-        text = new TextDecoder('utf-8', { fatal: false }).decode(e.target.result);
-      } catch (_) {
-        try {
-          text = new TextDecoder('windows-1252', { fatal: false }).decode(e.target.result);
-        } catch (_2) {
-          text = '';
-        }
-      }
-      if (!text || text.trim().length === 0) {
-        showToast('No se pudo leer el archivo. Guarda como .csv desde Excel (CSV UTF-8).');
-        return;
-      }
-      const result = parseCsvText(text);
-      showImportResult(result);
-    };
-    reader.readAsArrayBuffer(file);
-    return;
-  }
-
-  // CSV — try UTF-8 first, fall back to windows-1252
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    let text = e.target.result;
-    // Remove BOM if present
-    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-    const result = parseCsvText(text);
-    showImportResult(result);
-  };
-  reader.readAsText(file, 'UTF-8');
-
-  // If UTF-8 fails (mojibake check), retry with windows-1252
-  reader.onerror = () => {
-    const reader2 = new FileReader();
-    reader2.onload = (e2) => {
-      let text = e2.target.result;
-      if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-      const result = parseCsvText(text);
-      showImportResult(result);
-    };
-    reader2.readAsText(file, 'windows-1252');
-  };
-}
-
-function showImportResult(result) {
-  importParsedRows = result.rows;
-
-  // Show preview
-  $('importDropzone').style.display = 'none';
-  $('importPreview').style.display = 'block';
-
-  const validRows = importParsedRows.filter(r => r._valid);
-  $('importRowCount').textContent = importParsedRows.length;
-  $('importValidCount').textContent = validRows.length;
-
-  // Render preview table
-  renderImportPreview(importParsedRows);
-
-  // Show errors if any
-  if (result.errors.length > 0) {
-    $('importPreviewErrors').style.display = 'block';
-    $('importPreviewErrors').innerHTML = result.errors.map(e => `<div class="import-error-line">${esc(e)}</div>`).join('');
-  } else {
-    $('importPreviewErrors').style.display = 'none';
-  }
-}
-
-function renderImportPreview(rows) {
-  const wrap = $('importPreviewTable');
-  if (rows.length === 0) {
-    wrap.innerHTML = '<div class="import-no-data">No se encontraron filas válidas</div>';
-    return;
-  }
-
-  let html = `<table class="import-table">
-    <thead>
-      <tr>
-        <th>#</th>
-        <th>Nombre</th>
-        <th>Puesto</th>
-        <th>Provincia</th>
-        <th>Fecha</th>
-        <th>Obj.</th>
-        <th>🌐 BD</th>
-        <th>🌐 Sel.</th>
-        <th>🏢 BD</th>
-        <th>🏢 Sel.</th>
-        <th>Estado</th>
-      </tr>
-    </thead>
-    <tbody>`;
-
-  rows.forEach((row, i) => {
-    const d = row.data;
-    const fechaStr = d.fecha ? d.fecha.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '?';
-    const statusIcon = row._valid ? '<span class="import-status-ok">OK</span>' : '<span class="import-status-err">ERROR</span>';
-    const rowClass = row._valid ? '' : ' import-row-error';
-
-    html += `<tr class="${rowClass}">
-      <td>${i + 1}</td>
-      <td title="${esc(d.name)}">${esc(d.name.length > 25 ? d.name.slice(0, 25) + '...' : d.name)}</td>
-      <td>${esc(d.position)}</td>
-      <td>${esc(d.province)}</td>
-      <td>${fechaStr}</td>
-      <td>${d.objetivo || '—'}</td>
-      <td>${d.added}</td>
-      <td>${d.selected}</td>
-      <td>${d.added_erp}</td>
-      <td>${d.selected_erp}</td>
-      <td>${statusIcon}</td>
-    </tr>`;
-  });
-
-  html += '</tbody></table>';
-  wrap.innerHTML = html;
-}
-
-async function executeImport() {
-  const validRows = importParsedRows.filter(r => r._valid);
-  if (validRows.length === 0) {
-    showToast('No hay filas válidas para importar');
-    return;
-  }
-
-  const markFinalized = $('importAsFinalized').checked;
-  const confirmBtn = $('btnImportConfirm');
-  confirmBtn.disabled = true;
-  confirmBtn.innerHTML = '<span class="import-spinner"></span> Importando...';
-
-  let imported = 0;
-  let failed = 0;
-
-  for (const row of validRows) {
-    try {
-      const id = Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
-      const proc = {
-        id,
-        user_id: currentUser.id,
-        user_name: currentUser.name,
-        name: row.data.name,
-        position: row.data.position,
-        province: row.data.province,
-        objetivo: row.data.objetivo,
-        added: row.data.added,
-        called: row.data.called,
-        interviewed: row.data.interviewed,
-        selected: row.data.selected,
-        added_erp: row.data.added_erp,
-        called_erp: row.data.called_erp,
-        interviewed_erp: row.data.interviewed_erp,
-        selected_erp: row.data.selected_erp,
-        is_active: markFinalized ? false : true
-      };
-
-      // Supabase supports created_at override via header
-      const url = `${SUPABASE_URL}/rest/v1/recruitment_processes`;
-      const opts = {
-        method: 'POST',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=representation'
-        }
-      };
-
-      // Format fecha as ISO for created_at override
-      const fechaISO = row.data.fecha.toISOString();
-      // We send created_at to set the historical date
-      proc.created_at = fechaISO;
-
-      opts.body = JSON.stringify(proc);
-
-      // Check auth
-      if (!session || !session.access_token) {
-        const stored = await chrome.storage.local.get(['session']);
-        if (stored.session && stored.session.access_token) {
-          session = stored.session;
-          opts.headers.Authorization = `Bearer ${session.access_token}`;
-        }
-      }
-
-      const res = await fetch(url, opts);
-      if (res.ok) {
-        const returned = await res.json();
-        if (returned && returned.length > 0) {
-          processes.unshift(returned[0]);
-        } else {
-          // Fallback: use local object
-          processes.unshift(proc);
-        }
-        imported++;
-      } else {
-        // Try token refresh
-        if (session.refresh_token) {
-          const refreshed = await refreshSession(session.refresh_token);
-          if (refreshed) {
-            const newStored = await chrome.storage.local.get(['session']);
-            session = newStored.session;
-            opts.headers.Authorization = `Bearer ${session.access_token}`;
-            const retryRes = await fetch(url, opts);
-            if (retryRes.ok) {
-              const returned = await retryRes.json();
-              processes.unshift(returned && returned.length > 0 ? returned[0] : proc);
-              imported++;
-            } else {
-              failed++;
-            }
-          } else {
-            failed++;
-          }
-        } else {
-          failed++;
-        }
-      }
-    } catch (err) {
-      failed++;
-    }
-  }
-
-  // Update UI
-  populateMonthFilter();
-  renderProcesses();
-  renderGlobalStats();
-  closeImportModal();
-
-  if (failed > 0) {
-    showToast(`${imported} importados, ${failed} con error`);
-  } else {
-    showToast(`${imported} procesos importados correctamente`);
   }
 }
