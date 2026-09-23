@@ -1287,24 +1287,30 @@ function snoozeReminder(minutes) {
 // ============================================
 
 function setupPdfListeners() {
+  // Null-safe helper: add event listener only if element exists
+  const on = (id, evt, fn) => { const el = $(id); if (el) el.addEventListener(evt, fn); };
+  
   // Open PDF modal
-  $('btnPdf').addEventListener('click', openPdfModal);
-  $('closePdfModal').addEventListener('click', closePdfModal);
+  on('btnPdf', 'click', openPdfModal);
+  on('closePdfModal', 'click', closePdfModal);
   
   // PDF Editor (simplified - no tabs)
-  $('pdfEditorUpload').addEventListener('click', () => $('editorFileInput').click());
-  $('editorFileInput').addEventListener('change', handleEditorFileSelect);
-  $('pdfEditorUpload').addEventListener('dragover', (e) => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); });
-  $('pdfEditorUpload').addEventListener('dragleave', (e) => e.currentTarget.classList.remove('drag-over'));
-  $('pdfEditorUpload').addEventListener('drop', handleEditorDrop);
-  $('btnAddText').addEventListener('click', () => addTextToPdf());
-  $('btnAddImage').addEventListener('click', () => addImageToPdf());
-  $('btnAddSignature').addEventListener('click', () => addSignatureToPdf());
-  $('btnClearEditor').addEventListener('click', clearPdfEditor);
-  $('btnPrevPage').addEventListener('click', () => navigateEditorPage(-1));
-  $('btnNextPage').addEventListener('click', () => navigateEditorPage(1));
-  $('btnSavePdf').addEventListener('click', saveEditedPdf);
-  $('btnOpenFullEditor').addEventListener('click', openFullPdfEditor);
+  on('pdfEditorUpload', 'click', () => { const f = $('editorFileInput'); if (f) f.click(); });
+  on('editorFileInput', 'change', handleEditorFileSelect);
+  const upload = $('pdfEditorUpload');
+  if (upload) {
+    upload.addEventListener('dragover', (e) => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); });
+    upload.addEventListener('dragleave', (e) => e.currentTarget.classList.remove('drag-over'));
+    upload.addEventListener('drop', handleEditorDrop);
+  }
+  on('btnAddText', 'click', () => addTextToPdf());
+  on('btnAddImage', 'click', () => addImageToPdf());
+  on('btnAddSignature', 'click', () => addSignatureToPdf());
+  on('btnClearEditor', 'click', clearPdfEditor);
+  on('btnPrevPage', 'click', () => navigateEditorPage(-1));
+  on('btnNextPage', 'click', () => navigateEditorPage(1));
+  on('btnSavePdf', 'click', saveEditedPdf);
+  on('btnOpenFullEditor', 'click', openFullPdfEditor);
 }
 
 function openPdfModal() {
@@ -2742,109 +2748,123 @@ let signaturePreviewUrl = null;
 
 // Setup signature listeners
 function setupSignatureListeners() {
+  // Null-safe helper
+  const on = (id, evt, fn) => { const el = $(id); if (el) el.addEventListener(evt, fn); };
+
   // Open signatures modal - fullscreen in sidepanel
-  $('btnSignatures').addEventListener('click', () => {
+  on('btnSignatures', 'click', () => {
     // Show modal in fullscreen mode
-    $('signaturesModal').classList.add('show', 'fullscreen');
+    $('signaturesModal')?.classList.add('show', 'fullscreen');
     
     // Hide header, calendar and days list
-    document.querySelector('.header').style.display = 'none';
-    document.querySelector('.days-section').style.display = 'none';
-    document.querySelector('.mini-calendar').style.display = 'none';
+    const header = document.querySelector('.header');
+    const days = document.querySelector('.days-section');
+    const miniCal = document.querySelector('.mini-calendar');
+    if (header) header.style.display = 'none';
+    if (days) days.style.display = 'none';
+    if (miniCal) miniCal.style.display = 'none';
     
-    $('signatureSearchInput').focus();
+    const searchInput = $('signatureSearchInput');
+    if (searchInput) searchInput.focus();
     // Reset state
     resetSignatureState();
   });
 
   // Close signatures modal
-  $('closeSignaturesModal').addEventListener('click', closeSignaturesModal);
+  on('closeSignaturesModal', 'click', closeSignaturesModal);
   
   // Close on click outside
-  $('signaturesModal').addEventListener('click', (e) => {
-    if (e.target === $('signaturesModal')) closeSignaturesModal();
+  const sigModal = $('signaturesModal');
+  if (sigModal) sigModal.addEventListener('click', (e) => {
+    if (e.target === sigModal) closeSignaturesModal();
   });
 
   // Search button
-  $('btnSearchSignature').addEventListener('click', searchSignatures);
+  on('btnSearchSignature', 'click', searchSignatures);
 
   // View all signatures button
-  $('btnViewAllSignatures').addEventListener('click', loadAllSignatures);
+  on('btnViewAllSignatures', 'click', loadAllSignatures);
 
   // Preview all signatures button
-  $('btnPreviewSignatures').addEventListener('click', previewAllSignatures);
+  on('btnPreviewSignatures', 'click', previewAllSignatures);
 
   // Dropzone click
-  $('signatureDropzone').addEventListener('click', () => {
-    $('signatureFileInput').click();
+  on('signatureDropzone', 'click', () => {
+    const fi = $('signatureFileInput');
+    if (fi) fi.click();
   });
 
   // File input change
-  $('signatureFileInput').addEventListener('change', handleSignatureFileSelect);
+  on('signatureFileInput', 'change', handleSignatureFileSelect);
 
   // Drag and drop
-  $('signatureDropzone').addEventListener('dragover', (e) => {
-    e.preventDefault();
-    $('signatureDropzone').classList.add('drag-over');
-  });
-
-  $('signatureDropzone').addEventListener('dragleave', () => {
-    $('signatureDropzone').classList.remove('drag-over');
-  });
-
-  $('signatureDropzone').addEventListener('drop', (e) => {
-    e.preventDefault();
-    $('signatureDropzone').classList.remove('drag-over');
-    const files = e.dataTransfer.files;
-    if (files.length > 0) {
-      handleSignatureFile(files[0]);
-    }
-  });
+  const dropzone = $('signatureDropzone');
+  if (dropzone) {
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.classList.add('drag-over');
+    });
+    dropzone.addEventListener('dragleave', () => {
+      dropzone.classList.remove('drag-over');
+    });
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('drag-over');
+      const files = e.dataTransfer.files;
+      if (files.length > 0) {
+        handleSignatureFile(files[0]);
+      }
+    });
+  }
 
   // Clear signature preview
-  $('btnClearSignature').addEventListener('click', () => {
+  on('btnClearSignature', 'click', () => {
     clearSignaturePreview();
   });
 
   // Upload signature
-  $('btnUploadSignature').addEventListener('click', uploadSignature);
+  on('btnUploadSignature', 'click', uploadSignature);
 
   // Bulk upload toggle
-  $('btnToggleBulk').addEventListener('click', () => {
+  on('btnToggleBulk', 'click', () => {
     const content = $('signaturesBulkContent');
-    const isVisible = content.style.display !== 'none';
-    content.style.display = isVisible ? 'none' : 'block';
+    if (content) {
+      const isVisible = content.style.display !== 'none';
+      content.style.display = isVisible ? 'none' : 'block';
+    }
   });
 
   // Bulk dropzone click
-  $('bulkDropzone').addEventListener('click', () => {
-    $('bulkFileInput').click();
+  on('bulkDropzone', 'click', () => {
+    const fi = $('bulkFileInput');
+    if (fi) fi.click();
   });
 
   // Bulk file input change
-  $('bulkFileInput').addEventListener('change', (e) => {
+  on('bulkFileInput', 'change', (e) => {
     if (e.target.files && e.target.files.length > 0) {
       handleBulkUpload(e.target.files);
     }
   });
 
   // Bulk drag and drop
-  $('bulkDropzone').addEventListener('dragover', (e) => {
-    e.preventDefault();
-    $('bulkDropzone').classList.add('drag-over');
-  });
-
-  $('bulkDropzone').addEventListener('dragleave', () => {
-    $('bulkDropzone').classList.remove('drag-over');
-  });
-
-  $('bulkDropzone').addEventListener('drop', (e) => {
-    e.preventDefault();
-    $('bulkDropzone').classList.remove('drag-over');
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      handleBulkUpload(e.dataTransfer.files);
-    }
-  });
+  const bulkZone = $('bulkDropzone');
+  if (bulkZone) {
+    bulkZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      bulkZone.classList.add('drag-over');
+    });
+    bulkZone.addEventListener('dragleave', () => {
+      bulkZone.classList.remove('drag-over');
+    });
+    bulkZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      bulkZone.classList.remove('drag-over');
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        handleBulkUpload(e.dataTransfer.files);
+      }
+    });
+  }
 }
 
 function closeSignaturesModal() {
@@ -3917,28 +3937,32 @@ async function askDuplicateAction(duplicates, existingSignatures) {
 // ============================================
 
 function setupProcessesListeners() {
-  $('btnCandidates').addEventListener('click', openProcessesModal);
-  $('closeProcessesModal').addEventListener('click', closeProcessesModal);
-  $('processForm').addEventListener('submit', handleCreateProcess);
-  $('processesList').addEventListener('click', handleProcessActions);
-  $('processMonthFilter').addEventListener('change', (e) => {
+  // Null-safe helper
+  const on = (id, evt, fn) => { const el = $(id); if (el) el.addEventListener(evt, fn); };
+
+  on('btnCandidates', 'click', openProcessesModal);
+  on('closeProcessesModal', 'click', closeProcessesModal);
+  on('processForm', 'submit', handleCreateProcess);
+  on('processesList', 'click', handleProcessActions);
+  on('processMonthFilter', 'change', (e) => {
     processMonthFilter = e.target.value;
     renderProcesses();
     renderGlobalStats();
   });
-  $('processDelegationFilter').addEventListener('change', (e) => {
+  on('processDelegationFilter', 'change', (e) => {
     processDelegationFilter = e.target.value;
     renderProcesses();
     renderGlobalStats();
   });
-  $('processPositionFilter').addEventListener('change', (e) => {
+  on('processPositionFilter', 'change', (e) => {
     processPositionFilter = e.target.value;
     renderProcesses();
     renderGlobalStats();
   });
-  $('btnCompactView').addEventListener('click', () => {
+  on('btnCompactView', 'click', () => {
     processCompactView = !processCompactView;
-    $('btnCompactView').classList.toggle('active', processCompactView);
+    const btn = $('btnCompactView');
+    if (btn) btn.classList.toggle('active', processCompactView);
     if (processCompactView) collapsedProcesses.clear(); // Clear individual states
     renderProcesses();
   });
