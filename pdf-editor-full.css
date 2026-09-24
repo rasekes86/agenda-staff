@@ -534,6 +534,42 @@ body.multiple-documents .editor-sidebar { padding-top: 44px; }
   transition: opacity 0.2s;
 }
 
+/* Recent signatures: names only, compact and easy to scan. */
+.recent-sigs {
+  margin-bottom: 14px;
+  padding: 10px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+}
+
+.recent-sigs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.recent-sig-btn {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  background: #1e293b;
+  color: #e2e8f0;
+  font-size: 12px;
+  line-height: 1.25;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.recent-sig-btn:hover { background: #334155; border-color: #3b82f6; }
+body.light-mode .recent-sigs { background: #f8fafc; border-color: #cbd5e1; }
+body.light-mode .recent-sig-btn { background: #ffffff; color: #1e293b; border-color: #cbd5e1; }
+body.light-mode .recent-sig-btn:hover { background: #dbeafe; border-color: #2563eb; }
+
 .pdf-element:hover .signature-name-label,
 .pdf-element.selected .signature-name-label {
   opacity: 1;

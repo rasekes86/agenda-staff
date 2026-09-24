@@ -18,6 +18,7 @@ const ZOOM_MIN = 0.25;
 const ZOOM_MAX = 2.5;
 const MAX_UNDO_STATES = 30;
 const PASTE_OFFSET = 30;
+const MAX_RECENT_SIGNATURES = 5;
 
 // Signature processing settings
 const SIG_WHITE_THRESHOLD = 248;   // Near-white paper is removed without erasing pale strokes
@@ -2982,7 +2983,16 @@ function toggleLightMode() {
 // ============================================
 function getRecentSignatures() {
   try {
-    return JSON.parse(localStorage.getItem('pe_recentSignatures') || '[]');
+    const stored = JSON.parse(localStorage.getItem('pe_recentSignatures') || '[]');
+    const recents = Array.isArray(stored)
+      ? stored.filter(sig => sig && sig.name && sig.imageUrl).slice(0, MAX_RECENT_SIGNATURES)
+      : [];
+
+    // Migrate older caches that may contain more than five entries.
+    if (!Array.isArray(stored) || stored.length !== recents.length) {
+      localStorage.setItem('pe_recentSignatures', JSON.stringify(recents));
+    }
+    return recents;
   } catch (e) {
     return [];
   }
@@ -2995,8 +3005,8 @@ function addRecentSignature(name, imageUrl) {
   recents = recents.filter(s => s.name !== name);
   // Add to front
   recents.unshift({ name: name, imageUrl: imageUrl });
-  // Keep max 5
-  if (recents.length > 5) recents = recents.slice(0, 5);
+  // Keep only the five most recently used signatures.
+  recents = recents.slice(0, MAX_RECENT_SIGNATURES);
   localStorage.setItem('pe_recentSignatures', JSON.stringify(recents));
   renderRecentSignatures();
 }
@@ -3018,16 +3028,9 @@ function renderRecentSignatures() {
   recents.forEach(sig => {
     const btn = document.createElement('button');
     btn.className = 'recent-sig-btn';
-    btn.title = sig.name;
-    
-    const img = document.createElement('img');
-    img.src = sig.imageUrl;
-    img.alt = sig.name;
-    btn.appendChild(img);
-    
-    const span = document.createElement('span');
-    span.textContent = sig.name;
-    btn.appendChild(span);
+    btn.type = 'button';
+    btn.title = `Insertar firma de ${sig.name}`;
+    btn.textContent = sig.name;
     
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
