@@ -511,6 +511,21 @@
       </div>
     </div>
   </div>
+
+  <!-- Draw and save a missing signature -->
+  <div class="modal-overlay" id="drawSignatureModal">
+    <div class="modal draw-signature-modal">
+      <h3>✍️ Dibujar firma</h3>
+      <p class="draw-signature-name" id="drawSignatureName"></p>
+      <p class="draw-signature-help">Dibuja dentro del recuadro con el ratón, lápiz o pantalla táctil.</p>
+      <canvas id="drawSignatureCanvas" width="900" height="300"></canvas>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="btnClearDrawSignature">Limpiar</button>
+        <button class="btn-cancel" id="btnCancelDrawSignature">Cancelar</button>
+        <button class="btn-add" id="btnSaveDrawSignature">Guardar firma</button>
+      </div>
+    </div>
+  </div>
   
   <!-- Keep Elements Modal (shown after save) -->
   <div class="modal-overlay" id="keepElementsModal">

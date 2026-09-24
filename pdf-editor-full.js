@@ -58,6 +58,10 @@ let currentTool = 'editor';
 
 // State for multiple signatures
 let addedSignaturesCount = 0;
+let signatureDrawName = '';
+let signatureDrawing = false;
+let signatureDrawHasInk = false;
+let signatureDrawLastPoint = null;
 
 // Session for authentication
 let session = null;
@@ -773,6 +777,8 @@ function setupEventListeners() {
       if (e.key === 'Enter') searchSignatures();
     });
   }
+
+  setupSignatureDrawing();
   
   // Clipboard buttons
   const btnCopyElements = $('btnCopyElements');
@@ -812,6 +818,10 @@ function setupEventListeners() {
 
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && $('drawSignatureModal')?.classList.contains('show')) {
+      closeDrawSignatureModal();
+      return;
+    }
     // #21 Enter in draw mode = confirm drawing
     if (e.key === 'Enter' && isDrawMode && !e.target.closest('input, textarea, select')) {
       e.preventDefault();
@@ -2021,7 +2031,10 @@ function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames
     missingNames.forEach(name => {
       html += `<div class="signature-item signature-missing">
         <span class="signature-missing-name">${escapeHtml(name)}</span>
-        <button class="signature-upload-btn" data-name="${escapeHtml(name)}">📤 Subir</button>
+        <div class="signature-missing-actions">
+          <button class="signature-draw-btn" data-name="${escapeHtml(name)}">✍️ Dibujar</button>
+          <button class="signature-upload-btn" data-name="${escapeHtml(name)}">📤 Subir</button>
+        </div>
       </div>`;
     });
   }
@@ -2048,6 +2061,13 @@ function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       uploadMissingSignature(btn.dataset.name);
+    });
+  });
+
+  document.querySelectorAll('.signature-draw-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openDrawSignatureModal(btn.dataset.name);
     });
   });
   
@@ -2122,86 +2142,7 @@ async function uploadMissingSignature(name) {
       
       // Process image to make signature dark and clear
       const processedBase64 = await processSignatureImage(originalBase64);
-      
-      const headers = {
-        'apikey': SUPABASE_KEY,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=representation'
-      };
-      
-      // Only use session token for Authorization - never anon key as Bearer (bypasses RLS)
-      if (session && session.access_token) {
-        headers['Authorization'] = `Bearer ${session.access_token}`;
-      }
-      
-      const upperName = name.toUpperCase();
-      console.log('Uploading signature for:', upperName);
-      
-      // First check if signature with this name already exists
-      const checkResponse = await fetch(`${SUPABASE_URL}/rest/v1/signatures?name=eq.${encodeURIComponent(upperName)}&select=id`, {
-        method: 'GET',
-        headers
-      });
-      
-      console.log('Check existing response:', checkResponse.status);
-      
-      if (checkResponse.ok) {
-        const existing = await checkResponse.json();
-        console.log('Existing signatures:', existing);
-        
-        if (existing && existing.length > 0) {
-          // Signature exists - delete it first (replace)
-          const existingId = existing[0].id;
-          console.log('Deleting existing signature:', existingId);
-          
-          const deleteResponse = await fetch(`${SUPABASE_URL}/rest/v1/signatures?id=eq.${existingId}`, {
-            method: 'DELETE',
-            headers
-          });
-          
-          console.log('Delete response:', deleteResponse.status);
-          
-          if (!deleteResponse.ok) {
-            const errorText = await deleteResponse.text();
-            console.error('Delete error:', errorText);
-            throw new Error('Error al eliminar firma existente: ' + errorText);
-          }
-          
-          console.log('Existing signature deleted');
-        }
-      }
-      
-      // Now upload the new signature to Supabase
-      const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
-      const bodyData = { id, name: upperName, image_url: processedBase64 };
-      if (currentUser) {
-        bodyData.user_id = currentUser.id;
-        bodyData.user_name = currentUser.name;
-      }
-      
-      console.log('Uploading new signature with id:', id);
-      
-      const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(bodyData)
-      });
-      
-      console.log('Upload response:', response.status);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Upload error:', errorText);
-        throw new Error('Error al subir: ' + errorText);
-      }
-      
-      showStatus('✓ Firma guardada en Supabase: ' + name, 'success');
-      
-      // Also place the signature on the PDF (same as selectSignature flow)
-      selectSignature(processedBase64, name);
-      
-      // Refresh search results
-      searchSignatures();
+      await saveMissingSignature(name, processedBase64);
     } catch (err) {
       console.error('Upload signature error:', err);
       showStatus('Error: ' + err.message, 'error');
@@ -2209,6 +2150,139 @@ async function uploadMissingSignature(name) {
   };
   
   input.click();
+}
+
+async function saveMissingSignature(name, processedBase64) {
+  const headers = {
+    'apikey': SUPABASE_KEY,
+    'Content-Type': 'application/json',
+    'Prefer': 'return=representation'
+  };
+  if (session && session.access_token) headers.Authorization = `Bearer ${session.access_token}`;
+
+  const upperName = name.toUpperCase();
+  const checkResponse = await fetch(`${SUPABASE_URL}/rest/v1/signatures?name=eq.${encodeURIComponent(upperName)}&select=id`, {
+    method: 'GET', headers
+  });
+
+  if (checkResponse.ok) {
+    const existing = await checkResponse.json();
+    if (existing?.length) {
+      const deleteResponse = await fetch(`${SUPABASE_URL}/rest/v1/signatures?id=eq.${existing[0].id}`, {
+        method: 'DELETE', headers
+      });
+      if (!deleteResponse.ok) throw new Error('No se pudo reemplazar la firma existente');
+    }
+  }
+
+  const bodyData = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+    name: upperName,
+    image_url: processedBase64
+  };
+  if (currentUser) {
+    bodyData.user_id = currentUser.id;
+    bodyData.user_name = currentUser.name;
+  }
+
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures`, {
+    method: 'POST', headers, body: JSON.stringify(bodyData)
+  });
+  if (!response.ok) throw new Error('Error al guardar: ' + await response.text());
+
+  showStatus('✓ Firma guardada: ' + name, 'success');
+  selectSignature(processedBase64, name);
+  searchSignatures();
+}
+
+function setupSignatureDrawing() {
+  const canvas = $('drawSignatureCanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = 7;
+
+  const pointFromEvent = (e) => {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (e.clientX - rect.left) * (canvas.width / rect.width),
+      y: (e.clientY - rect.top) * (canvas.height / rect.height)
+    };
+  };
+
+  canvas.addEventListener('pointerdown', (e) => {
+    signatureDrawing = true;
+    signatureDrawLastPoint = pointFromEvent(e);
+    ctx.beginPath();
+    ctx.arc(signatureDrawLastPoint.x, signatureDrawLastPoint.y, ctx.lineWidth / 2, 0, Math.PI * 2);
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.fill();
+    signatureDrawHasInk = true;
+    canvas.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!signatureDrawing) return;
+    const point = pointFromEvent(e);
+    ctx.beginPath();
+    ctx.moveTo(signatureDrawLastPoint.x, signatureDrawLastPoint.y);
+    ctx.lineTo(point.x, point.y);
+    ctx.stroke();
+    signatureDrawLastPoint = point;
+    signatureDrawHasInk = true;
+    e.preventDefault();
+  });
+  const stopDrawing = () => { signatureDrawing = false; signatureDrawLastPoint = null; };
+  canvas.addEventListener('pointerup', stopDrawing);
+  canvas.addEventListener('pointercancel', stopDrawing);
+
+  $('btnClearDrawSignature')?.addEventListener('click', clearDrawSignatureCanvas);
+  $('btnCancelDrawSignature')?.addEventListener('click', closeDrawSignatureModal);
+  $('btnSaveDrawSignature')?.addEventListener('click', saveDrawnSignature);
+}
+
+function openDrawSignatureModal(name) {
+  signatureDrawName = name;
+  clearDrawSignatureCanvas();
+  const nameEl = $('drawSignatureName');
+  if (nameEl) nameEl.textContent = name;
+  $('drawSignatureModal')?.classList.add('show');
+}
+
+function clearDrawSignatureCanvas() {
+  const canvas = $('drawSignatureCanvas');
+  canvas?.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  signatureDrawHasInk = false;
+}
+
+function closeDrawSignatureModal() {
+  $('drawSignatureModal')?.classList.remove('show');
+  signatureDrawing = false;
+  signatureDrawName = '';
+}
+
+async function saveDrawnSignature() {
+  const canvas = $('drawSignatureCanvas');
+  if (!canvas || !signatureDrawHasInk || !signatureDrawName) {
+    showStatus('Dibuja la firma antes de guardarla', 'error');
+    return;
+  }
+
+  const button = $('btnSaveDrawSignature');
+  if (button) button.disabled = true;
+  const name = signatureDrawName;
+  try {
+    const processedBase64 = await processSignatureImage(canvas.toDataURL('image/png'));
+    await saveMissingSignature(name, processedBase64);
+    closeDrawSignatureModal();
+  } catch (err) {
+    console.error('Draw signature save error:', err);
+    showStatus('Error: ' + err.message, 'error');
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 function selectSignature(url, name) {
