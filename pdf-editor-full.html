@@ -579,16 +579,8 @@
         <div style="display:flex;gap:6px;margin-bottom:10px;">
           <input type="text" id="templateNameInput" placeholder="Nombre (ej: Ficha empleado)" style="flex:1;padding:8px 10px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#f1f5f9;font-size:12px;">
         </div>
-        <p style="margin-bottom:8px;color:#94a3b8;font-size:11px;">Elige el tipo de hueco, ponle un nombre y colócalo directamente sobre el PDF vacío.</p>
-        <div class="template-slot-builder">
-          <select id="templateSlotType" title="Tipo de hueco">
-            <option value="text">📝 Texto</option>
-            <option value="signature">✍️ Firma</option>
-            <option value="image">🖼️ Imagen</option>
-          </select>
-          <input type="text" id="templateSlotLabel" list="fieldTypeSuggestions" value="TEXTO" placeholder="Campo (ej: NOMBRE)">
-          <button class="sidebar-btn" id="btnPlaceTemplateSlot">＋ Colocar en PDF</button>
-        </div>
+        <p style="margin-bottom:8px;color:#94a3b8;font-size:11px;">Pulsa el botón, marca un hueco del PDF y después indica si corresponde a Nombre, DNI, Fecha o Firma.</p>
+        <button class="sidebar-btn" id="btnPlaceTemplateSlot" style="width:100%;margin-bottom:10px;background:#7c3aed;color:white;justify-content:center;">＋ Marcar hueco en el PDF</button>
         <div id="templateSlotList" style="max-height:250px;overflow-y:auto;"></div>
         <button class="sidebar-btn" id="btnAdjustTemplateSlots" style="width:100%;margin-top:8px;background:#334155;color:#e2e8f0;">↔ Ajustar huecos sobre el PDF</button>
         <div style="display:flex;gap:8px;margin-top:12px;">

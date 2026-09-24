@@ -1067,6 +1067,18 @@ body.light-mode .draw-signature-help { color: #475569; }
   pointer-events: none;
   z-index: 20;
 }
+.template-field-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.template-field-picker button {
+  border: 1px solid #4f46e5;
+  border-radius: 8px;
+  padding: 13px 8px;
+  background: #1e293b;
+  color: #e2e8f0;
+  cursor: pointer;
+  font-weight: 700;
+}
+.template-field-picker button:hover { background: #3730a3; color: white; }
+body.light-mode .template-field-picker button { background: #fff; color: #1e293b; }
 .pdf-element-placeholder {
   min-width: 70px;
   min-height: 28px;

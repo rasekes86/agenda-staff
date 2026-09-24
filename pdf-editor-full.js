@@ -788,7 +788,6 @@ function setupEventListeners() {
   $('btnCancelSaveTemplate')?.addEventListener('click', cancelTemplateDraft);
   $('btnPlaceTemplateSlot')?.addEventListener('click', beginTemplateSlotPlacement);
   $('btnAdjustTemplateSlots')?.addEventListener('click', adjustTemplateDraftOnPdf);
-  $('templateSlotType')?.addEventListener('change', syncTemplateSlotLabel);
   $('closeTemplatesModal')?.addEventListener('click', () => $('templatesModal')?.classList.remove('show'));
   $('closeFillTemplateModal')?.addEventListener('click', () => $('fillTemplateModal')?.classList.remove('show'));
   $('templateNameInput')?.addEventListener('keydown', (e) => {
@@ -3266,8 +3265,6 @@ function showTemplateSaveView() {
     $('templateNameInput').value = '';
     $('templateNameInput').focus();
   }
-  if ($('templateSlotType')) $('templateSlotType').value = 'text';
-  if ($('templateSlotLabel')) $('templateSlotLabel').value = 'TEXTO';
   renderTemplateSlotSelection();
 }
 
@@ -3310,22 +3307,14 @@ function renderTemplateSlotSelection() {
   });
 }
 
-function syncTemplateSlotLabel() {
-  const type = $('templateSlotType')?.value || 'text';
-  const defaults = { text: 'TEXTO', signature: 'FIRMA', image: 'IMAGEN' };
-  if ($('templateSlotLabel')) $('templateSlotLabel').value = defaults[type];
-}
-
 function beginTemplateSlotPlacement() {
   const activeDoc = getActiveDoc();
-  const type = $('templateSlotType')?.value || 'text';
-  const label = $('templateSlotLabel')?.value.trim().toUpperCase();
-  if (!activeDoc || !label) { showStatus('Indica el nombre del campo', 'error'); return; }
-  pendingTemplateSlot = { type, label };
+  if (!activeDoc) { showStatus('Primero carga un PDF', 'error'); return; }
+  pendingTemplateSlot = { waitingForPosition: true };
   templatePlacementMode = true;
   $('templatesModal')?.classList.remove('show');
   renderPage();
-  showStatus(`Pulsa en el PDF para colocar ${label}`, 'success');
+  showStatus('Pulsa en el hueco del PDF que quieres marcar', 'success');
 }
 
 function adjustTemplateDraftOnPdf() {
@@ -3341,28 +3330,56 @@ function placeTemplateSlotAtEvent(event, overlay, scale, activeDoc) {
   const rect = overlay.getBoundingClientRect();
   const x = Math.max(0, (event.clientX - rect.left) / scale);
   const y = Math.max(0, (event.clientY - rect.top) / scale);
-  const type = pendingTemplateSlot.type;
-  const dimensions = type === 'text' ? { width: 150, height: 32 } : type === 'signature' ? { width: 180, height: 70 } : { width: 120, height: 90 };
-  (activeDoc.elements[activeDoc.currentPage] ||= []).push({
-    type,
-    x: Math.min(x, Math.max(0, activeDoc.pageWidth - dimensions.width)),
-    y: Math.min(y, Math.max(0, activeDoc.pageHeight - dimensions.height)),
-    ...dimensions,
-    size: DEFAULT_FONT_SIZE,
-    color: '#000000',
-    text: '', src: '', name: '',
-    isPlaceholder: true,
-    templateDraft: true,
-    fieldGroup: pendingTemplateSlot.label,
-    placeholderLabel: pendingTemplateSlot.label
-  });
+  const position = { page: activeDoc.currentPage, x, y };
   templatePlacementMode = false;
   pendingTemplateSlot = null;
-  updateTabModified(activeDoc.id, true);
   renderPage();
-  renderTemplateSlotSelection();
-  $('templatesModal')?.classList.add('show');
-  showStatus('Hueco añadido; puedes moverlo o cambiar su tamaño', 'success');
+  showTemplateFieldPicker(position);
+}
+
+function showTemplateFieldPicker(position) {
+  const picker = document.createElement('div');
+  picker.className = 'modal-overlay show';
+  picker.innerHTML = `<div class="modal" style="max-width:390px;">
+    <h3>¿Qué dato irá en este hueco?</h3>
+    <p style="color:#94a3b8;font-size:12px;margin-bottom:12px;">La numeración se calculará automáticamente por el orden de los huecos en el PDF.</p>
+    <div class="template-field-picker">
+      <button data-field="NOMBRE" data-type="text">👤 Nombre</button>
+      <button data-field="DNI" data-type="text">🪪 DNI / NIE</button>
+      <button data-field="FECHA" data-type="text">📅 Fecha</button>
+      <button data-field="FIRMA" data-type="signature">✍️ Firma</button>
+    </div>
+    <div class="modal-actions"><button class="btn-cancel" data-cancel>Cancelar</button></div>
+  </div>`;
+  document.body.appendChild(picker);
+  const close = () => { picker.remove(); $('templatesModal')?.classList.add('show'); };
+  picker.querySelector('[data-cancel]').onclick = close;
+  picker.addEventListener('click', event => { if (event.target === picker) close(); });
+  picker.querySelectorAll('[data-field]').forEach(button => {
+    button.onclick = () => {
+      const activeDoc = getActiveDoc();
+      if (!activeDoc) { close(); return; }
+      const type = button.dataset.type;
+      const label = button.dataset.field;
+      const dimensions = type === 'signature' ? { width: 180, height: 70 } : { width: label === 'NOMBRE' ? 220 : 110, height: 32 };
+      (activeDoc.elements[position.page] ||= []).push({
+        type,
+        x: Math.min(position.x, Math.max(0, activeDoc.pageWidth - dimensions.width)),
+        y: Math.min(position.y, Math.max(0, activeDoc.pageHeight - dimensions.height)),
+        ...dimensions,
+        size: DEFAULT_FONT_SIZE,
+        color: '#000000', text: '', src: '', name: '',
+        isPlaceholder: true, templateDraft: true,
+        fieldGroup: label, placeholderLabel: label
+      });
+      updateTabModified(activeDoc.id, true);
+      picker.remove();
+      renderTemplateSlotSelection();
+      renderPage();
+      $('templatesModal')?.classList.add('show');
+      showStatus(`Hueco ${label} añadido`, 'success');
+    };
+  });
 }
 
 function removeTemplateDraftSlots() {
@@ -3529,13 +3546,23 @@ function showFillTemplateModal() {
   if (!modal || !content) return;
   const names = Object.keys(groups).sort();
   if (!names.length) { showStatus('No quedan huecos por rellenar', 'error'); return; }
-  content.innerHTML = names.map(name => {
+  const hasPeopleFields = groups.NOMBRE?.length || groups.DNI?.length || groups.FIRMA?.length;
+  const peopleFill = hasPeopleFields ? `<div style="background:#172554;border:1px solid #3b82f6;border-radius:8px;padding:10px;margin-bottom:12px;">
+    <strong>👥 Rellenar listado de personal</strong>
+    <p style="font-size:10px;color:#bfdbfe;margin:5px 0 7px;">Una persona por línea: APELLIDO 1 APELLIDO 2, NOMBRE&nbsp;&nbsp;&nbsp;DNI</p>
+    <textarea id="templatePeopleInput" rows="6" placeholder="GARCÍA LÓPEZ, ANA    12345678A&#10;PÉREZ MARTÍN, LUIS    87654321B" style="width:100%;padding:7px;background:#0f172a;border:1px solid #3b82f6;border-radius:6px;color:#f1f5f9;resize:vertical;"></textarea>
+    <button class="sidebar-btn fill-template-people" style="width:100%;margin-top:6px;background:#2563eb;color:white;justify-content:center;">Rellenar nombres, DNI y firmas</button>
+  </div>` : '';
+  content.innerHTML = peopleFill + names.map(name => {
     const items = groups[name];
     const type = items[0].el.type;
     if (type === 'text') return `<div style="background:#1e293b;border-radius:8px;padding:10px;margin-bottom:8px;"><strong>📝 ${escapeHtml(name)}</strong> <small>(${items.length})</small><textarea class="fill-template-values" data-group="${escapeHtml(name)}" rows="${Math.min(5, items.length + 1)}" placeholder="Un valor por línea" style="width:100%;margin-top:7px;padding:7px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#f1f5f9;"></textarea><button class="sidebar-btn fill-template-text" data-group="${escapeHtml(name)}" style="width:100%;margin-top:5px;background:#4338ca;color:white;">Rellenar</button>${['FECHA','DATE'].includes(name) ? `<button class="sidebar-btn fill-template-date" data-group="${escapeHtml(name)}" style="width:100%;margin-top:5px;background:#8b5cf6;color:white;">Usar fecha de hoy</button>` : ''}</div>`;
     if (type === 'signature') return `<div style="background:#1e293b;border-radius:8px;padding:10px;margin-bottom:8px;"><strong>✍️ ${escapeHtml(name)}</strong> <small>(${items.length})</small><button class="sidebar-btn fill-template-signature" style="width:100%;margin-top:7px;background:#7c3aed;color:white;">Buscar firmas</button></div>`;
     return `<div style="background:#1e293b;border-radius:8px;padding:10px;margin-bottom:8px;"><strong>🖼️ ${escapeHtml(name)}</strong> <small>(${items.length})</small><p style="font-size:10px;color:#94a3b8;margin-top:5px;">Haz doble clic sobre cada hueco para elegir su imagen.</p></div>`;
   }).join('');
+  content.querySelector('.fill-template-people')?.addEventListener('click', () => {
+    fillTemplatePeople($('templatePeopleInput')?.value || '');
+  });
   content.querySelectorAll('.fill-template-text').forEach(button => {
     button.onclick = () => {
       const input = content.querySelector(`.fill-template-values[data-group="${CSS.escape(button.dataset.group)}"]`);
@@ -3579,6 +3606,80 @@ function fillTemplateDateGroup(groupName) {
   const value = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
   const slots = getTemplateGroups()[groupName] || [];
   fillTemplateTextGroup(groupName, slots.map(() => value).join('\n'));
+}
+
+async function findSignatureForPerson(name) {
+  const headers = { apikey: SUPABASE_KEY };
+  if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
+  const searchValues = [...new Set([name, normalizeText(name)])];
+  const signatures = [];
+  for (const value of searchValues) {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=*&name=ilike.*${encodeURIComponent(value)}*&order=name.asc`, { headers });
+    if (!response.ok) continue;
+    const matches = await response.json();
+    matches.forEach(match => {
+      if (!signatures.some(signature => signature.id === match.id)) signatures.push(match);
+    });
+  }
+  if (!signatures.length) return null;
+  const normalizedName = normalizeText(name).toUpperCase().replace(/\s+/g, ' ').trim();
+  return signatures.find(signature => normalizeText(signature.name).toUpperCase().replace(/\s+/g, ' ').trim() === normalizedName) || signatures[0];
+}
+
+async function fillTemplatePeople(rawText) {
+  const activeDoc = getActiveDoc();
+  const lines = rawText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (!activeDoc || !lines.length) { showStatus('Pega al menos una persona', 'error'); return; }
+  const people = lines.map(line => {
+    const { foundDni, textWithoutDni } = extractDniFromLine(line);
+    return { name: textWithoutDni.replace(/\s+/g, ' ').trim(), dni: foundDni || '' };
+  }).filter(person => person.name);
+  if (!people.length) { showStatus('No se han podido interpretar los nombres', 'error'); return; }
+
+  const groups = getTemplateGroups();
+  const nameSlots = groups.NOMBRE || [];
+  const dniSlots = groups.DNI || [];
+  const signatureSlots = groups.FIRMA || [];
+  let namesFilled = 0;
+  let dniFilled = 0;
+  let signaturesFilled = 0;
+  const missingSignatures = [];
+
+  for (let index = 0; index < people.length; index++) {
+    const person = people[index];
+    if (nameSlots[index]) {
+      nameSlots[index].el.text = person.name;
+      clearPlaceholderMetadata(nameSlots[index].el);
+      namesFilled++;
+    }
+    if (dniSlots[index] && person.dni) {
+      dniSlots[index].el.text = person.dni.toUpperCase();
+      dniSlots[index].el.name = person.name;
+      clearPlaceholderMetadata(dniSlots[index].el);
+      dniFilled++;
+    }
+    if (signatureSlots[index]) {
+      try {
+        const signature = await findSignatureForPerson(person.name);
+        if (signature?.image_url) {
+          signatureSlots[index].el.src = signature.image_url;
+          signatureSlots[index].el.name = person.name;
+          clearPlaceholderMetadata(signatureSlots[index].el);
+          signaturesFilled++;
+        } else {
+          missingSignatures.push(person.name);
+        }
+      } catch (err) {
+        missingSignatures.push(person.name);
+      }
+    }
+  }
+
+  updateTabModified(activeDoc.id, true);
+  renderPage();
+  $('fillTemplateModal')?.classList.remove('show');
+  const missingText = missingSignatures.length ? ` · Sin firma: ${missingSignatures.join(', ')}` : '';
+  showStatus(`${namesFilled} nombres · ${dniFilled} DNI · ${signaturesFilled} firmas${missingText}`, missingSignatures.length ? 'error' : 'success');
 }
 
 function fillImagePlaceholder(page, index) {
