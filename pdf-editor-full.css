@@ -33,9 +33,8 @@ body {
   max-width: 190px;
   object-fit: contain;
   flex-shrink: 0;
-  padding: 2px 5px;
-  background: #ffffff;
-  border-radius: 5px;
+  background: transparent;
+  filter: drop-shadow(0 1px 1px rgba(255, 255, 255, 0.12));
 }
 
 .editor-toolbar {
