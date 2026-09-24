@@ -3245,6 +3245,43 @@ async function loadTemplates() {
     console.warn('Supabase template load failed; using local templates:', err);
   }
 
+  // Versions prior to 3.0.1 stored templates locally when the shared table was
+  // unavailable. Move those pending templates to Supabase as soon as the user
+  // opens the editor with a valid session, so they become visible to the team.
+  if (local.length && session?.access_token) {
+    const remoteNames = new Set(remote.map(t => String(t.name || '').trim().toLocaleLowerCase()));
+    const pending = [];
+    let migrated = 0;
+
+    for (const template of local) {
+      const normalizedName = String(template.name || '').trim().toLocaleLowerCase();
+      if (!normalizedName || remoteNames.has(normalizedName)) continue;
+
+      try {
+        const id = await saveTemplateToSupabase(template.name, template.slots || []);
+        remote.unshift({
+          ...template,
+          id,
+          user_id: currentUser?.id || null,
+          user_name: currentUser?.name || currentUser?.user_name || 'Usuario',
+          createdAt: Date.now(),
+          shared: true
+        });
+        remoteNames.add(normalizedName);
+        migrated++;
+      } catch (err) {
+        console.warn(`Could not migrate local template “${template.name}”:`, err);
+        pending.push(template);
+      }
+    }
+
+    if (pending.length !== local.length) {
+      await chrome.storage.local.set({ [TEMPLATES_STORAGE_KEY]: pending });
+      local = pending;
+    }
+    if (migrated) showStatus(`${migrated} plantilla(s) local(es) compartida(s) con el equipo`, 'success');
+  }
+
   const remoteIds = new Set(remote.map(t => String(t.id)));
   templateCache = [...remote, ...local.filter(t => !remoteIds.has(String(t.id)))];
   return templateCache;
@@ -3548,7 +3585,7 @@ async function confirmSaveTemplate() {
     showStatus(`Plantilla “${name}” compartida (${slots.length} huecos)`, 'success');
   } catch (err) {
     await saveTemplateLocally({ id: `local_${Date.now()}`, name, slots, createdAt: Date.now(), shared: false });
-    showStatus(`Plantilla “${name}” guardada en este equipo`, 'success');
+    showStatus(`No se pudo compartir “${name}”. Queda pendiente de sincronizar`, 'error');
   }
   removeTemplateDraftSlots();
   templateEditorActive = false;
