@@ -62,6 +62,7 @@ let signatureDrawName = '';
 let signatureDrawing = false;
 let signatureDrawHasInk = false;
 let signatureDrawLastPoint = null;
+let targetTemplateSignature = null;
 
 // Session for authentication
 let session = null;
@@ -484,7 +485,10 @@ async function autoSave() {
     }
   });
 
-  if (!hasElements) return;
+  if (!hasElements) {
+    await chrome.storage.local.remove(['pdfEditorAutoSave', 'pdfEditorAutoSaveTime']);
+    return;
+  }
 
   isAutoSaving = true;
   try {
@@ -1398,7 +1402,9 @@ function createElementDiv(el, idx, scale, activeDoc) {
       div.style.width = ((el.width || 100) * scale) + 'px';
       div.style.height = ((el.height || 60) * scale) + 'px';
     }
-    div.title = el.type === 'image' ? 'Doble clic para elegir una imagen' : `Hueco ${el.fieldGroup || ''}`;
+    div.title = el.expectedSignatureName
+      ? `Doble clic para subir o dibujar la firma de ${el.expectedSignatureName}`
+      : el.type === 'image' ? 'Doble clic para elegir una imagen' : `Hueco ${el.fieldGroup || ''}`;
   } else if (el.type === 'text') {
     // Create text span (not using textContent to allow child elements)
     const textSpan = document.createElement('span');
@@ -1467,6 +1473,11 @@ function createElementDiv(el, idx, scale, activeDoc) {
     div.addEventListener('dblclick', (e) => {
       e.stopPropagation();
       fillImagePlaceholder(activeDoc.currentPage, idx);
+    });
+  } else if (el.type === 'signature' && el.isPlaceholder && el.expectedSignatureName && !el.templateDraft) {
+    div.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      openMissingTemplateSignature(activeDoc.currentPage, idx, el.expectedSignatureName);
     });
   }
 
@@ -2342,10 +2353,11 @@ function clearDrawSignatureCanvas() {
   signatureDrawHasInk = false;
 }
 
-function closeDrawSignatureModal() {
+function closeDrawSignatureModal(clearTarget = true) {
   $('drawSignatureModal')?.classList.remove('show');
   signatureDrawing = false;
   signatureDrawName = '';
+  if (clearTarget) targetTemplateSignature = null;
 }
 
 async function saveDrawnSignature() {
@@ -2361,7 +2373,7 @@ async function saveDrawnSignature() {
   try {
     const processedBase64 = await processSignatureImage(canvas.toDataURL('image/png'));
     await saveMissingSignature(name, processedBase64);
-    closeDrawSignatureModal();
+    closeDrawSignatureModal(false);
   } catch (err) {
     console.error('Draw signature save error:', err);
     showStatus('Error: ' + err.message, 'error');
@@ -2442,6 +2454,21 @@ function selectSignature(url, name) {
 }
 
 function placeSignatureInTemplateOrPage(activeDoc, src, name, width, height, offset = 0) {
+  if (targetTemplateSignature?.docId === activeDoc.id) {
+    const target = activeDoc.elements[targetTemplateSignature.page]?.[targetTemplateSignature.index];
+    if (target?.isPlaceholder && target.type === 'signature') {
+      target.src = src;
+      target.name = name;
+      const ratio = Math.min((target.width || width) / width, (target.height || height) / height);
+      target.width = Math.max(1, width * ratio);
+      target.height = Math.max(1, height * ratio);
+      clearPlaceholderMetadata(target);
+      activeDoc.currentPage = targetTemplateSignature.page;
+      targetTemplateSignature = null;
+      return true;
+    }
+    targetTemplateSignature = null;
+  }
   for (let page = 1; page <= activeDoc.totalPages; page++) {
     const elements = activeDoc.elements[page] || [];
     const placeholder = elements.find(el => el.isPlaceholder && !el.templateDraft && el.type === 'signature');
@@ -3095,11 +3122,9 @@ async function savePdf() {
     
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     
-    // Mark document as saved but DO NOT clear elements automatically.
-    // This prevents data loss if the download was blocked or failed.
-    // The user can explicitly clear via "Limpiar" button if desired.
-    updateTabModified(activeDoc.id, false);
-    renderPage();
+    // Leave the same source PDF ready for the next edit. If a template was
+    // used, restore its empty fields instead of forcing the user to load it again.
+    resetDocumentAfterSave(activeDoc);
     
     const modeMsg = saveMode === 'protected' ? 'PDF guardado (Firmas integradas — texto editable)' :
                     saveMode === 'rasterized' ? 'PDF guardado (Imagen — no editable)' :
@@ -3115,6 +3140,22 @@ async function savePdf() {
       btn.innerHTML = '💾 Guardar';
     }
   }
+}
+
+function resetDocumentAfterSave(activeDoc) {
+  for (let page = 1; page <= activeDoc.totalPages; page++) activeDoc.elements[page] = [];
+  undoStacks[activeDoc.id] = [];
+  redoStacks[activeDoc.id] = [];
+  addedSignaturesCount = 0;
+  clearSelection();
+
+  if (activeDoc.activeTemplate) {
+    applyTemplate(activeDoc.activeTemplate, { silent: true });
+  } else {
+    renderPage();
+  }
+  updateTabModified(activeDoc.id, false);
+  scheduleAutoSave();
 }
 
 function clearEditor() {
@@ -3562,7 +3603,7 @@ async function renderTemplatesList() {
   });
 }
 
-function applyTemplate(template) {
+function applyTemplate(template, options = {}) {
   const activeDoc = getActiveDoc();
   if (!activeDoc || !template?.slots?.length) { showStatus('La plantilla no contiene huecos', 'error'); return; }
   const requiredPages = Math.max(...template.slots.map(slot => slot.page || 1));
@@ -3598,11 +3639,12 @@ function applyTemplate(template) {
     added++;
   });
   if (!added) { showStatus('No hay huecos compatibles con este PDF', 'error'); return; }
+  activeDoc.activeTemplate = JSON.parse(JSON.stringify(template));
   activeDoc.currentPage = Math.min(...template.slots.map(slot => slot.page || 1).filter(page => page <= activeDoc.totalPages));
   updateTabModified(activeDoc.id, true);
-  $('templatesModal')?.classList.remove('show');
+  if (!options.silent) $('templatesModal')?.classList.remove('show');
   renderPage();
-  showStatus(`Plantilla “${template.name}” aplicada: ${added} huecos`, 'success');
+  if (!options.silent) showStatus(`Plantilla “${template.name}” aplicada: ${added} huecos`, 'success');
 }
 
 function updateFillTemplateVisibility() {
@@ -3670,6 +3712,7 @@ function clearPlaceholderMetadata(el) {
   delete el.placeholderLabel;
   delete el.fieldGroup;
   delete el.templateDraft;
+  delete el.expectedSignatureName;
 }
 
 function fillTemplateTextGroup(groupName, rawValues) {
@@ -3756,9 +3799,13 @@ async function fillTemplatePeople(rawText) {
           clearPlaceholderMetadata(signatureSlots[index].el);
           signaturesFilled++;
         } else {
+          signatureSlots[index].el.expectedSignatureName = person.name;
+          signatureSlots[index].el.placeholderLabel = `FIRMA · ${person.name}`;
           missingSignatures.push(person.name);
         }
       } catch (err) {
+        signatureSlots[index].el.expectedSignatureName = person.name;
+        signatureSlots[index].el.placeholderLabel = `FIRMA · ${person.name}`;
         missingSignatures.push(person.name);
       }
     }
@@ -3788,6 +3835,61 @@ function fillImagePlaceholder(page, index) {
       updateTabModified(activeDoc.id, true);
       renderPage();
       showStatus('Imagen colocada en la plantilla', 'success');
+    };
+    reader.readAsDataURL(file);
+  };
+  input.click();
+}
+
+function openMissingTemplateSignature(page, index, name) {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc || !name) return;
+  const chooser = document.createElement('div');
+  chooser.className = 'modal-overlay show';
+  chooser.innerHTML = `<div class="modal" style="max-width:390px;">
+    <h3>Firma no disponible</h3>
+    <p style="color:#94a3b8;font-size:12px;margin-bottom:12px;">${escapeHtml(name)}</p>
+    <p style="color:#cbd5e1;font-size:11px;margin-bottom:12px;">La firma se guardará con este nombre y se colocará en el hueco seleccionado.</p>
+    <div style="display:flex;gap:8px;">
+      <button class="sidebar-btn" data-upload style="flex:1;background:#2563eb;color:white;justify-content:center;">📤 Subir</button>
+      <button class="sidebar-btn" data-draw style="flex:1;background:#0f766e;color:white;justify-content:center;">✍️ Dibujar</button>
+    </div>
+    <div class="modal-actions"><button class="btn-cancel" data-cancel>Cancelar</button></div>
+  </div>`;
+  document.body.appendChild(chooser);
+  const close = () => chooser.remove();
+  chooser.querySelector('[data-cancel]').onclick = close;
+  chooser.addEventListener('click', event => { if (event.target === chooser) close(); });
+  chooser.querySelector('[data-draw]').onclick = () => {
+    targetTemplateSignature = { docId: activeDoc.id, page, index, name };
+    close();
+    openDrawSignatureModal(name);
+  };
+  chooser.querySelector('[data-upload]').onclick = () => {
+    close();
+    uploadTemplateSignature(page, index, name);
+  };
+}
+
+function uploadTemplateSignature(page, index, name) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const activeDoc = getActiveDoc();
+      if (!activeDoc) return;
+      targetTemplateSignature = { docId: activeDoc.id, page, index, name };
+      try {
+        const processed = await processSignatureImage(reader.result);
+        await saveMissingSignature(name, processed);
+      } catch (err) {
+        targetTemplateSignature = null;
+        showStatus('Error al guardar la firma: ' + err.message, 'error');
+      }
     };
     reader.readAsDataURL(file);
   };
