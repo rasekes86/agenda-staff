@@ -779,6 +779,24 @@ function setupEventListeners() {
   }
 
   setupSignatureDrawing();
+
+  // Position templates
+  $('btnOpenTemplates')?.addEventListener('click', showTemplatesModal);
+  $('btnFillTemplate')?.addEventListener('click', showFillTemplateModal);
+  $('btnShowSaveView')?.addEventListener('click', showTemplateSaveView);
+  $('btnConfirmSaveTemplate')?.addEventListener('click', confirmSaveTemplate);
+  $('btnCancelSaveTemplate')?.addEventListener('click', showTemplateListView);
+  $('closeTemplatesModal')?.addEventListener('click', () => $('templatesModal')?.classList.remove('show'));
+  $('closeFillTemplateModal')?.addEventListener('click', () => $('fillTemplateModal')?.classList.remove('show'));
+  $('templateNameInput')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') confirmSaveTemplate();
+  });
+  $('templatesModal')?.addEventListener('click', (e) => {
+    if (e.target === $('templatesModal')) $('templatesModal').classList.remove('show');
+  });
+  $('fillTemplateModal')?.addEventListener('click', (e) => {
+    if (e.target === $('fillTemplateModal')) $('fillTemplateModal').classList.remove('show');
+  });
   
   // Clipboard buttons
   const btnCopyElements = $('btnCopyElements');
@@ -818,6 +836,14 @@ function setupEventListeners() {
 
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && $('fillTemplateModal')?.classList.contains('show')) {
+      $('fillTemplateModal').classList.remove('show');
+      return;
+    }
+    if (e.key === 'Escape' && $('templatesModal')?.classList.contains('show')) {
+      $('templatesModal').classList.remove('show');
+      return;
+    }
     if (e.key === 'Escape' && $('drawSignatureModal')?.classList.contains('show')) {
       closeDrawSignatureModal();
       return;
@@ -1312,6 +1338,7 @@ async function renderPage() {
     if (totalPagesNum) totalPagesNum.textContent = activeDoc.totalPages;
     if (btnPrevPage) btnPrevPage.disabled = activeDoc.currentPage <= 1;
     if (btnNextPage) btnNextPage.disabled = activeDoc.currentPage >= activeDoc.totalPages;
+    updateFillTemplateVisibility();
     
   } catch (err) {
     console.error('Error rendering page:', err);
@@ -1321,11 +1348,25 @@ async function renderPage() {
 function createElementDiv(el, idx, scale, activeDoc) {
   const div = document.createElement('div');
   div.className = 'pdf-element pdf-element-' + el.type;
+  if (el.isPlaceholder) div.classList.add('pdf-element-placeholder');
   div.dataset.idx = idx;
   div.style.left = (el.x * scale) + 'px';
   div.style.top = (el.y * scale) + 'px';
   
-  if (el.type === 'text') {
+  if (el.isPlaceholder) {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'placeholder-label';
+    placeholder.textContent = el.placeholderLabel || el.fieldGroup || 'HUECO';
+    div.appendChild(placeholder);
+    if (el.type === 'text') {
+      div.style.width = ((el.width || 150) * scale) + 'px';
+      div.style.height = ((el.height || Math.max(28, (el.size || 14) + 12)) * scale) + 'px';
+    } else {
+      div.style.width = ((el.width || 100) * scale) + 'px';
+      div.style.height = ((el.height || 60) * scale) + 'px';
+    }
+    div.title = el.type === 'image' ? 'Doble clic para elegir una imagen' : `Hueco ${el.fieldGroup || ''}`;
+  } else if (el.type === 'text') {
     // Create text span (not using textContent to allow child elements)
     const textSpan = document.createElement('span');
     textSpan.textContent = el.text;
@@ -1387,6 +1428,11 @@ function createElementDiv(el, idx, scale, activeDoc) {
     div.addEventListener('dblclick', (e) => {
       e.stopPropagation();
       openEditTextModal(idx, activeDoc, scale);
+    });
+  } else if (el.type === 'image' && el.isPlaceholder) {
+    div.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      fillImagePlaceholder(activeDoc.currentPage, idx);
     });
   }
 
@@ -1593,6 +1639,7 @@ function confirmTextWithPosition() {
       el.bold = richState.bold;
       el.italic = richState.italic;
       el.underline = richState.underline;
+      if (el.isPlaceholder) clearPlaceholderMetadata(el);
       if (textModal) textModal.classList.remove('show');
       editingIdxEl.value = '';
       updateTabModified(activeDoc.id, true);
@@ -2317,15 +2364,7 @@ function selectSignature(url, name) {
         imgHeight = Math.round(imgHeight * ratio);
       }
       
-      pushElement(activeDoc, activeDoc.currentPage, {
-        type: 'signature',
-        src: processedSrc,
-        x: activeDoc.pageWidth / 2 - imgWidth / 2 + offset,
-        y: activeDoc.pageHeight / 2 - imgHeight / 2 + offset,
-        width: imgWidth,
-        height: imgHeight,
-        name: name
-      });
+      placeSignatureInTemplateOrPage(activeDoc, processedSrc, name, imgWidth, imgHeight, offset);
       
       addedSignaturesCount++;
       updateTabModified(activeDoc.id, true);
@@ -2352,15 +2391,7 @@ function selectSignature(url, name) {
         imgWidth = Math.round(imgWidth * ratio);
         imgHeight = Math.round(imgHeight * ratio);
       }
-      pushElement(activeDoc, activeDoc.currentPage, {
-        type: 'signature',
-        src: processedSrc,
-        x: activeDoc.pageWidth / 2 - imgWidth / 2 + offset,
-        y: activeDoc.pageHeight / 2 - imgHeight / 2 + offset,
-        width: imgWidth,
-        height: imgHeight,
-        name: name
-      });
+      placeSignatureInTemplateOrPage(activeDoc, processedSrc, name, imgWidth, imgHeight, offset);
       addedSignaturesCount++;
       updateTabModified(activeDoc.id, true);
       renderPage();
@@ -2370,6 +2401,34 @@ function selectSignature(url, name) {
   };
   img.onerror = () => showStatus('No se pudo cargar la firma', 'error');
   img.src = url;
+}
+
+function placeSignatureInTemplateOrPage(activeDoc, src, name, width, height, offset = 0) {
+  for (let page = 1; page <= activeDoc.totalPages; page++) {
+    const elements = activeDoc.elements[page] || [];
+    const placeholder = elements.find(el => el.isPlaceholder && el.type === 'signature');
+    if (!placeholder) continue;
+
+    placeholder.src = src;
+    placeholder.name = name;
+    // The template dimensions are intentional; fit the signature inside them.
+    const boxWidth = placeholder.width || width;
+    const boxHeight = placeholder.height || height;
+    const ratio = Math.min(boxWidth / width, boxHeight / height);
+    placeholder.width = Math.max(1, width * ratio);
+    placeholder.height = Math.max(1, height * ratio);
+    clearPlaceholderMetadata(placeholder);
+    if (activeDoc.currentPage !== page) activeDoc.currentPage = page;
+    return true;
+  }
+
+  pushElement(activeDoc, activeDoc.currentPage, {
+    type: 'signature', src,
+    x: activeDoc.pageWidth / 2 - width / 2 + offset,
+    y: activeDoc.pageHeight / 2 - height / 2 + offset,
+    width, height, name
+  });
+  return false;
 }
 
 // escapeHtml moved to shared-utils.js
@@ -2881,6 +2940,8 @@ async function savePdf() {
       const pageElements = activeDoc.elements[pageNum] || [];
       
       for (const el of pageElements) {
+        // Empty template slots are visual guides only and must never be exported.
+        if (el.isPlaceholder) continue;
         if (el.type === 'text') {
           const fontSize = el.size || 14;
           const pdfY = height - el.y - fontSize;
@@ -3038,6 +3099,404 @@ function clearEditor() {
   // Show upload area
   showUploadArea();
   showStatus('Documentos limpiados', 'success');
+}
+
+// ============================================
+// POSITION TEMPLATES
+// ============================================
+const TEMPLATES_STORAGE_KEY = 'pdfEditorTemplates';
+let templateCache = [];
+
+async function ensureSession() {
+  if (session?.access_token) return session;
+  try {
+    const stored = await chrome.storage.local.get(['session', 'user']);
+    session = stored.session || null;
+    currentUser = stored.user || currentUser;
+  } catch (err) {
+    console.warn('Could not refresh the current session:', err);
+  }
+  return session;
+}
+
+function getTemplateHeaders(write = false) {
+  const headers = { apikey: SUPABASE_KEY };
+  if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
+  if (write) {
+    headers['Content-Type'] = 'application/json';
+    headers.Prefer = 'return=representation';
+  }
+  return headers;
+}
+
+async function loadTemplates() {
+  let remote = [];
+  let local = [];
+  try {
+    const stored = await chrome.storage.local.get(TEMPLATES_STORAGE_KEY);
+    local = Array.isArray(stored[TEMPLATES_STORAGE_KEY]) ? stored[TEMPLATES_STORAGE_KEY] : [];
+  } catch (err) {
+    console.warn('Could not load local templates:', err);
+  }
+
+  try {
+    await ensureSession();
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/pdf_templates?select=*&order=created_at.desc`, {
+      headers: getTemplateHeaders()
+    });
+    if (response.ok) {
+      const rows = await response.json();
+      remote = rows.map(row => ({
+        id: row.id,
+        name: row.name,
+        slots: Array.isArray(row.slots) ? row.slots : [],
+        user_id: row.user_id || null,
+        user_name: row.user_name || '',
+        createdAt: row.created_at ? new Date(row.created_at).getTime() : 0,
+        shared: true
+      }));
+    } else {
+      console.warn('Template load failed:', response.status);
+    }
+  } catch (err) {
+    console.warn('Supabase template load failed; using local templates:', err);
+  }
+
+  const remoteIds = new Set(remote.map(t => String(t.id)));
+  templateCache = [...remote, ...local.filter(t => !remoteIds.has(String(t.id)))];
+  return templateCache;
+}
+
+async function saveTemplateToSupabase(name, slots) {
+  await ensureSession();
+  if (!session?.access_token) throw new Error('No hay una sesión activa');
+  const body = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+    name,
+    slots,
+    user_id: currentUser?.id || null,
+    user_name: currentUser?.name || currentUser?.user_name || 'Usuario'
+  };
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/pdf_templates`, {
+    method: 'POST', headers: getTemplateHeaders(true), body: JSON.stringify(body)
+  });
+  if (!response.ok) throw new Error(await response.text() || 'No se pudo guardar la plantilla');
+  return body.id;
+}
+
+async function saveTemplateLocally(template) {
+  const stored = await chrome.storage.local.get(TEMPLATES_STORAGE_KEY);
+  const templates = Array.isArray(stored[TEMPLATES_STORAGE_KEY]) ? stored[TEMPLATES_STORAGE_KEY] : [];
+  templates.unshift(template);
+  await chrome.storage.local.set({ [TEMPLATES_STORAGE_KEY]: templates });
+}
+
+async function deleteTemplate(template) {
+  if (String(template.id).startsWith('local_')) {
+    const stored = await chrome.storage.local.get(TEMPLATES_STORAGE_KEY);
+    const templates = (stored[TEMPLATES_STORAGE_KEY] || []).filter(t => t.id !== template.id);
+    await chrome.storage.local.set({ [TEMPLATES_STORAGE_KEY]: templates });
+    return;
+  }
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/pdf_templates?id=eq.${encodeURIComponent(template.id)}`, {
+    method: 'DELETE', headers: getTemplateHeaders()
+  });
+  if (!response.ok) throw new Error('No tienes permiso para eliminar esta plantilla');
+}
+
+function guessTemplateField(el) {
+  if (el.type === 'signature') return 'FIRMA';
+  if (el.type === 'image') return 'IMAGEN';
+  const value = `${el.name || ''} ${el.text || ''}`.trim().toUpperCase();
+  if (/\b(DNI|NIE)\b/.test(value) || /^[XYZ]?\d{7,8}[A-Z]$/.test(value)) return 'DNI';
+  if (/\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}/.test(value)) return 'FECHA';
+  if (value.includes('@')) return 'EMAIL';
+  if (/^\+?[\d\s-]{7,}$/.test(value)) return 'TELEFONO';
+  return 'TEXTO';
+}
+
+function showTemplatesModal() {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) { showStatus('Primero carga un PDF', 'error'); return; }
+  showTemplateListView();
+  $('templatesModal')?.classList.add('show');
+}
+
+function showTemplateListView() {
+  if ($('templateListView')) $('templateListView').style.display = '';
+  if ($('templateSaveView')) $('templateSaveView').style.display = 'none';
+  if ($('templateNameInput')) $('templateNameInput').value = '';
+  renderTemplatesList();
+}
+
+function showTemplateSaveView() {
+  if ($('templateListView')) $('templateListView').style.display = 'none';
+  if ($('templateSaveView')) $('templateSaveView').style.display = '';
+  if ($('templateNameInput')) {
+    $('templateNameInput').value = '';
+    $('templateNameInput').focus();
+  }
+  renderTemplateSlotSelection();
+}
+
+function collectTemplateSourceElements() {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) return [];
+  const result = [];
+  for (let page = 1; page <= activeDoc.totalPages; page++) {
+    (activeDoc.elements[page] || []).forEach(el => {
+      if (!el.isPlaceholder && ['text', 'signature', 'image'].includes(el.type)) result.push({ page, el });
+    });
+  }
+  return result;
+}
+
+function renderTemplateSlotSelection() {
+  const list = $('templateSlotList');
+  if (!list) return;
+  const items = collectTemplateSourceElements();
+  if (!items.length) {
+    list.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:18px;font-size:12px;">Añade y coloca textos, firmas o imágenes antes de crear la plantilla.</div>';
+    return;
+  }
+  const icons = { text: '📝', signature: '✍️', image: '🖼️' };
+  list.innerHTML = items.map((item, index) => {
+    const preview = item.el.text || item.el.name || `${Math.round(item.el.width || 0)}×${Math.round(item.el.height || 0)}`;
+    return `<div style="display:flex;align-items:center;gap:6px;padding:6px;background:#1e293b;border-radius:6px;margin-bottom:4px;">
+      <input type="checkbox" class="tmpl-slot-cb" data-idx="${index}" checked>
+      <span title="Página ${item.page}">${icons[item.el.type]} P${item.page}</span>
+      <input type="text" list="fieldTypeSuggestions" class="tmpl-slot-field" data-idx="${index}" value="${escapeHtml(guessTemplateField(item.el))}" style="width:92px;padding:4px;background:#0f172a;border:1px solid #4338ca;border-radius:4px;color:#c4b5fd;text-transform:uppercase;">
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#94a3b8;font-size:10px;" title="${escapeHtml(preview)}">${escapeHtml(preview)}</span>
+    </div>`;
+  }).join('');
+  const selectAll = $('tmplSelectAll');
+  const deselectAll = $('tmplDeselectAll');
+  if (selectAll) selectAll.onclick = () => list.querySelectorAll('.tmpl-slot-cb').forEach(cb => { cb.checked = true; });
+  if (deselectAll) deselectAll.onclick = () => list.querySelectorAll('.tmpl-slot-cb').forEach(cb => { cb.checked = false; });
+}
+
+async function confirmSaveTemplate() {
+  const activeDoc = getActiveDoc();
+  const name = $('templateNameInput')?.value.trim();
+  if (!activeDoc || !name) { showStatus('Escribe un nombre para la plantilla', 'error'); return; }
+  const source = collectTemplateSourceElements();
+  const selected = [...document.querySelectorAll('.tmpl-slot-cb:checked')];
+  if (!selected.length) { showStatus('Selecciona al menos un elemento', 'error'); return; }
+
+  const templates = await loadTemplates();
+  if (templates.some(t => t.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
+    showStatus('Ya existe una plantilla con ese nombre', 'error');
+    return;
+  }
+
+  const slots = selected.map(cb => {
+    const index = Number(cb.dataset.idx);
+    const item = source[index];
+    const field = document.querySelector(`.tmpl-slot-field[data-idx="${index}"]`);
+    const label = field?.value.trim().toUpperCase() || 'TEXTO';
+    const el = item.el;
+    return {
+      type: el.type, label, page: item.page,
+      x: el.x, y: el.y,
+      width: el.width || (el.type === 'text' ? 150 : 100),
+      height: el.height || (el.type === 'text' ? Math.max(28, (el.size || 14) + 12) : 60),
+      size: el.size || DEFAULT_FONT_SIZE,
+      color: el.color || '#000000',
+      bold: Boolean(el.bold), italic: Boolean(el.italic), underline: Boolean(el.underline),
+      sourcePageWidth: activeDoc.pageWidth,
+      sourcePageHeight: activeDoc.pageHeight
+    };
+  });
+
+  try {
+    await saveTemplateToSupabase(name, slots);
+    showStatus(`Plantilla “${name}” compartida (${slots.length} huecos)`, 'success');
+  } catch (err) {
+    await saveTemplateLocally({ id: `local_${Date.now()}`, name, slots, createdAt: Date.now(), shared: false });
+    showStatus(`Plantilla “${name}” guardada en este equipo`, 'success');
+  }
+  showTemplateListView();
+}
+
+async function renderTemplatesList() {
+  const list = $('templatesList');
+  if (!list) return;
+  list.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:15px;">Cargando…</div>';
+  const templates = await loadTemplates();
+  if (!templates.length) {
+    list.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:18px;font-size:12px;">Todavía no hay plantillas.</div>';
+    return;
+  }
+  list.innerHTML = templates.map((template, index) => {
+    const groups = {};
+    (template.slots || []).forEach(slot => { groups[slot.label || 'TEXTO'] = (groups[slot.label || 'TEXTO'] || 0) + 1; });
+    const summary = Object.entries(groups).map(([label, count]) => `${label}×${count}`).join(' · ');
+    const isLocal = String(template.id).startsWith('local_');
+    const canDelete = isLocal || !template.user_id || template.user_id === currentUser?.id;
+    return `<div style="display:flex;align-items:center;gap:7px;padding:8px;background:#1e293b;border-radius:7px;margin-bottom:6px;">
+      <span style="flex:1;min-width:0;color:#e2e8f0;font-size:12px;"><strong>${escapeHtml(template.name)}</strong><br><span style="color:#818cf8;font-size:10px;">${escapeHtml(summary || 'Sin huecos')}</span><br><span style="color:#64748b;font-size:9px;">${isLocal ? 'Solo en este equipo' : `Compartida${template.user_name ? ` por ${escapeHtml(template.user_name)}` : ''}`}</span></span>
+      <button class="sidebar-btn" data-template-use="${index}" style="padding:5px 8px;background:#2563eb;color:white;">Usar</button>
+      ${canDelete ? `<button class="sidebar-btn" data-template-delete="${index}" style="padding:5px 8px;background:#6b2c2c;color:#fca5a5;">🗑️</button>` : ''}
+    </div>`;
+  }).join('');
+  list.querySelectorAll('[data-template-use]').forEach(button => {
+    button.onclick = () => applyTemplate(templateCache[Number(button.dataset.templateUse)]);
+  });
+  list.querySelectorAll('[data-template-delete]').forEach(button => {
+    button.onclick = async () => {
+      const template = templateCache[Number(button.dataset.templateDelete)];
+      if (!template || !confirm(`¿Eliminar la plantilla “${template.name}”?`)) return;
+      try {
+        await deleteTemplate(template);
+        showStatus('Plantilla eliminada', 'success');
+        renderTemplatesList();
+      } catch (err) {
+        showStatus(err.message, 'error');
+      }
+    };
+  });
+}
+
+function applyTemplate(template) {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc || !template?.slots?.length) { showStatus('La plantilla no contiene huecos', 'error'); return; }
+  const requiredPages = Math.max(...template.slots.map(slot => slot.page || 1));
+  if (requiredPages > activeDoc.totalPages && !confirm(`La plantilla usa ${requiredPages} páginas y este PDF solo tiene ${activeDoc.totalPages}. ¿Aplicar los huecos compatibles?`)) return;
+
+  const groupTotals = {};
+  const groupIndexes = {};
+  template.slots.forEach(slot => { groupTotals[slot.label || 'TEXTO'] = (groupTotals[slot.label || 'TEXTO'] || 0) + 1; });
+  let added = 0;
+  [...template.slots].sort((a, b) => (a.page || 1) - (b.page || 1) || a.y - b.y || a.x - b.x).forEach(slot => {
+    const page = slot.page || 1;
+    if (page > activeDoc.totalPages) return;
+    const label = slot.label || 'TEXTO';
+    groupIndexes[label] = (groupIndexes[label] || 0) + 1;
+    const scaleX = slot.sourcePageWidth ? activeDoc.pageWidth / slot.sourcePageWidth : 1;
+    const scaleY = slot.sourcePageHeight ? activeDoc.pageHeight / slot.sourcePageHeight : 1;
+    const placeholder = {
+      type: slot.type,
+      x: slot.x * scaleX, y: slot.y * scaleY,
+      width: (slot.width || 100) * scaleX, height: (slot.height || 60) * scaleY,
+      size: (slot.size || DEFAULT_FONT_SIZE) * Math.min(scaleX, scaleY),
+      color: slot.color || '#000000', bold: Boolean(slot.bold), italic: Boolean(slot.italic), underline: Boolean(slot.underline),
+      isPlaceholder: true, fieldGroup: label,
+      placeholderLabel: `${label} (${groupIndexes[label]}/${groupTotals[label]})`,
+      text: '', src: '', name: ''
+    };
+    pushElement(activeDoc, page, placeholder);
+    added++;
+  });
+  if (!added) { showStatus('No hay huecos compatibles con este PDF', 'error'); return; }
+  activeDoc.currentPage = Math.min(...template.slots.map(slot => slot.page || 1).filter(page => page <= activeDoc.totalPages));
+  updateTabModified(activeDoc.id, true);
+  $('templatesModal')?.classList.remove('show');
+  renderPage();
+  showStatus(`Plantilla “${template.name}” aplicada: ${added} huecos`, 'success');
+}
+
+function updateFillTemplateVisibility() {
+  const section = $('fillTemplateSection');
+  const activeDoc = getActiveDoc();
+  if (!section) return;
+  const hasPlaceholders = activeDoc && Object.values(activeDoc.elements).some(elements => elements.some(el => el.isPlaceholder));
+  section.style.display = hasPlaceholders ? '' : 'none';
+}
+
+function getTemplateGroups() {
+  const activeDoc = getActiveDoc();
+  const groups = {};
+  if (!activeDoc) return groups;
+  for (let page = 1; page <= activeDoc.totalPages; page++) {
+    (activeDoc.elements[page] || []).forEach((el, index) => {
+      if (!el.isPlaceholder) return;
+      const label = el.fieldGroup || 'TEXTO';
+      (groups[label] ||= []).push({ page, index, el });
+    });
+  }
+  Object.values(groups).forEach(items => items.sort((a, b) => a.page - b.page || a.el.y - b.el.y || a.el.x - b.el.x));
+  return groups;
+}
+
+function showFillTemplateModal() {
+  const modal = $('fillTemplateModal');
+  const content = $('fillTemplateContent');
+  const groups = getTemplateGroups();
+  if (!modal || !content) return;
+  const names = Object.keys(groups).sort();
+  if (!names.length) { showStatus('No quedan huecos por rellenar', 'error'); return; }
+  content.innerHTML = names.map(name => {
+    const items = groups[name];
+    const type = items[0].el.type;
+    if (type === 'text') return `<div style="background:#1e293b;border-radius:8px;padding:10px;margin-bottom:8px;"><strong>📝 ${escapeHtml(name)}</strong> <small>(${items.length})</small><textarea class="fill-template-values" data-group="${escapeHtml(name)}" rows="${Math.min(5, items.length + 1)}" placeholder="Un valor por línea" style="width:100%;margin-top:7px;padding:7px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#f1f5f9;"></textarea><button class="sidebar-btn fill-template-text" data-group="${escapeHtml(name)}" style="width:100%;margin-top:5px;background:#4338ca;color:white;">Rellenar</button>${['FECHA','DATE'].includes(name) ? `<button class="sidebar-btn fill-template-date" data-group="${escapeHtml(name)}" style="width:100%;margin-top:5px;background:#8b5cf6;color:white;">Usar fecha de hoy</button>` : ''}</div>`;
+    if (type === 'signature') return `<div style="background:#1e293b;border-radius:8px;padding:10px;margin-bottom:8px;"><strong>✍️ ${escapeHtml(name)}</strong> <small>(${items.length})</small><button class="sidebar-btn fill-template-signature" style="width:100%;margin-top:7px;background:#7c3aed;color:white;">Buscar firmas</button></div>`;
+    return `<div style="background:#1e293b;border-radius:8px;padding:10px;margin-bottom:8px;"><strong>🖼️ ${escapeHtml(name)}</strong> <small>(${items.length})</small><p style="font-size:10px;color:#94a3b8;margin-top:5px;">Haz doble clic sobre cada hueco para elegir su imagen.</p></div>`;
+  }).join('');
+  content.querySelectorAll('.fill-template-text').forEach(button => {
+    button.onclick = () => {
+      const input = content.querySelector(`.fill-template-values[data-group="${CSS.escape(button.dataset.group)}"]`);
+      fillTemplateTextGroup(button.dataset.group, input?.value || '');
+    };
+  });
+  content.querySelectorAll('.fill-template-date').forEach(button => { button.onclick = () => fillTemplateDateGroup(button.dataset.group); });
+  content.querySelectorAll('.fill-template-signature').forEach(button => {
+    button.onclick = () => { modal.classList.remove('show'); showSignatureModal(); };
+  });
+  modal.classList.add('show');
+}
+
+function clearPlaceholderMetadata(el) {
+  delete el.isPlaceholder;
+  delete el.placeholderLabel;
+  delete el.fieldGroup;
+}
+
+function fillTemplateTextGroup(groupName, rawValues) {
+  const values = rawValues.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+  if (!values.length) { showStatus('Introduce al menos un valor', 'error'); return; }
+  const activeDoc = getActiveDoc();
+  const slots = getTemplateGroups()[groupName] || [];
+  const count = Math.min(values.length, slots.length);
+  for (let i = 0; i < count; i++) {
+    const el = activeDoc.elements[slots[i].page][slots[i].index];
+    el.text = values[i];
+    clearPlaceholderMetadata(el);
+  }
+  updateTabModified(activeDoc.id, true);
+  renderPage();
+  showStatus(`${count} campo(s) de ${groupName} rellenado(s)`, 'success');
+  if (Object.keys(getTemplateGroups()).length) showFillTemplateModal();
+  else $('fillTemplateModal')?.classList.remove('show');
+}
+
+function fillTemplateDateGroup(groupName) {
+  const now = new Date();
+  const value = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
+  const slots = getTemplateGroups()[groupName] || [];
+  fillTemplateTextGroup(groupName, slots.map(() => value).join('\n'));
+}
+
+function fillImagePlaceholder(page, index) {
+  const activeDoc = getActiveDoc();
+  const slot = activeDoc?.elements[page]?.[index];
+  if (!slot?.isPlaceholder || slot.type !== 'image') return;
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      slot.src = reader.result;
+      clearPlaceholderMetadata(slot);
+      updateTabModified(activeDoc.id, true);
+      renderPage();
+      showStatus('Imagen colocada en la plantilla', 'success');
+    };
+    reader.readAsDataURL(file);
+  };
+  input.click();
 }
 
 // hexToRgb moved to shared-utils.js

@@ -1038,6 +1038,28 @@ body.light-mode .recent-sig-btn:hover { background: #dbeafe; border-color: #2563
 body.light-mode .draw-signature-name { color: #6d28d9; }
 body.light-mode .draw-signature-help { color: #475569; }
 
+/* PDF position templates */
+.template-help { margin: 0 0 10px; color: #94a3b8; font-size: 11px; line-height: 1.4; }
+.pdf-element-placeholder {
+  min-width: 70px;
+  min-height: 28px;
+  border: 2px dashed #8b5cf6 !important;
+  background: rgba(139, 92, 246, 0.12) !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pdf-element-placeholder .placeholder-label {
+  color: #7c3aed;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  padding: 3px 6px;
+  pointer-events: none;
+}
+body:not(.light-mode) .pdf-element-placeholder .placeholder-label { color: #c4b5fd; }
+body.light-mode .template-help { color: #475569; }
+
 /* Signature item actions */
 .signature-name {
   flex: 1;

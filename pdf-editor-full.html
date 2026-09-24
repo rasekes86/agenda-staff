@@ -258,8 +258,7 @@
           </button>
         </div>
         
-        <!-- Plantillas: deshabilitado temporalmente (código preservado) -->
-        <div class="sidebar-section" id="templatesSection" style="display:none;">
+        <div class="sidebar-section" id="templatesSection">
           <div class="sidebar-title">Plantillas</div>
           <button class="sidebar-btn" id="btnOpenTemplates" style="background:#4338ca;color:#e0e7ff;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -272,7 +271,6 @@
           </button>
         </div>
 
-        <!-- Rellenar plantilla: deshabilitado temporalmente (código preservado) -->
         <div class="sidebar-section" id="fillTemplateSection" style="display:none;">
           <div class="sidebar-title">Rellenar campos</div>
           <button class="sidebar-btn" id="btnFillTemplate" style="background:#059669;color:#d1fae5;">
@@ -569,6 +567,7 @@
       <!-- List view (default) -->
       <div id="templateListView">
         <button class="sidebar-btn" id="btnShowSaveView" style="width:100%;background:#4338ca;color:#e0e7ff;margin-bottom:10px;padding:8px;">+ Nueva plantilla</button>
+        <p class="template-help">Las plantillas guardan posiciones y tamaños, nunca los datos introducidos.</p>
         <div id="templatesList" style="max-height:300px;overflow-y:auto;"></div>
         <div class="modal-actions">
           <button class="btn-cancel" id="closeTemplatesModal">Cerrar</button>
