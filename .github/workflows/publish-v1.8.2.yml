@@ -1,0 +1,38 @@
+name: Publish v1.8.2
+
+on:
+  push:
+    paths:
+      - ".github/workflows/publish-v1.8.2.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      TARGET_SHA: 9de8ca458d851c2137d52f2648b85b4fcce2d724
+      TAG: v1.8.2
+      ASSET: agenda-staff-v1.8.2.zip
+    steps:
+      - name: Checkout exact v1.8.2 commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 0
+
+      - name: Create ZIP
+        run: |
+          zip -r "$ASSET" .             -x ".git/*"             -x ".github/*"             -x "$ASSET"
+
+      - name: Create and push tag
+        run: |
+          git tag "$TAG" "$TARGET_SHA"
+          git push origin "$TAG"
+
+      - name: Create GitHub Release and upload ZIP
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" "$ASSET"             --repo "${{ github.repository }}"             --title "$TAG"             --generate-notes             --target "$TARGET_SHA"
