@@ -221,6 +221,7 @@ function clearSelection() {
   selectedIndices.clear();
   document.querySelectorAll('.pdf-element.multi-selected').forEach(el => el.classList.remove('multi-selected'));
   if (boxSelectRect) { boxSelectRect.remove(); boxSelectRect = null; }
+  updateMultiSelectUI();
 }
 
 function selectElementIdx(idx) {
@@ -1357,12 +1358,17 @@ function createElementDiv(el, idx, scale, activeDoc) {
     }
   } // end shape/image element rendering (shapes removed, stamps are type 'image')
   
-  // Multi-select: Shift+click to toggle selection
+  // Normal click keeps one element selected; Shift+click toggles multi-select.
   div.addEventListener('click', (e) => {
+    e.stopPropagation();
     if (e.shiftKey) {
-      e.stopPropagation();
       toggleMultiSelect(idx);
       return;
+    }
+
+    if (!selectedIndices.has(idx) || selectedIndices.size !== 1) {
+      clearSelection();
+      selectElementIdx(idx);
     }
   });
 
@@ -1397,8 +1403,84 @@ function createElementDiv(el, idx, scale, activeDoc) {
   
   makeDraggable(div, el, scale, activeDoc, idx);
   makeResizable(div, el, scale, activeDoc);
+  makeWheelResizable(div, el, scale, activeDoc, idx);
   
   return div;
+}
+
+/**
+ * Resize a selected element with the mouse wheel. A wheel gesture is grouped
+ * into one undo action, and image-like elements retain their aspect ratio.
+ */
+function makeWheelResizable(div, el, scale, activeDoc, idx) {
+  let resizeStart = null;
+  let resizeTimer = null;
+
+  div.addEventListener('wheel', (e) => {
+    if (selectedIndices.size !== 1 || !selectedIndices.has(idx)) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!resizeStart) {
+      resizeStart = el.type === 'text'
+        ? { size: el.size || DEFAULT_FONT_SIZE }
+        : { x: el.x, y: el.y, width: el.width, height: el.height };
+    }
+
+    if (el.type === 'text') {
+      const step = e.deltaY < 0 ? 1 : -1;
+      el.size = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, (el.size || DEFAULT_FONT_SIZE) + step));
+      div.style.fontSize = (el.size * scale) + 'px';
+    } else {
+      const factor = e.deltaY < 0 ? 1.06 : 1 / 1.06;
+      const oldWidth = el.width;
+      const oldHeight = el.height;
+      const maxWidth = activeDoc.pageWidth * 2;
+      const maxHeight = activeDoc.pageHeight * 2;
+      let newWidth = Math.max(MIN_ELEMENT_SIZE, Math.min(maxWidth, oldWidth * factor));
+      let newHeight = Math.max(MIN_ELEMENT_SIZE, Math.min(maxHeight, oldHeight * factor));
+
+      // If either dimension reached a limit, restore the original ratio.
+      const ratio = oldWidth / oldHeight;
+      if (newWidth / newHeight > ratio) newWidth = newHeight * ratio;
+      else newHeight = newWidth / ratio;
+
+      const centeredX = el.x - (newWidth - oldWidth) / 2;
+      const centeredY = el.y - (newHeight - oldHeight) / 2;
+      el.x = Math.max(0, Math.min(Math.max(0, activeDoc.pageWidth - newWidth), centeredX));
+      el.y = Math.max(0, Math.min(Math.max(0, activeDoc.pageHeight - newHeight), centeredY));
+      el.width = newWidth;
+      el.height = newHeight;
+
+      const img = div.querySelector('img');
+      if (img) {
+        img.style.width = (newWidth * scale) + 'px';
+        img.style.height = (newHeight * scale) + 'px';
+      }
+      div.style.left = (el.x * scale) + 'px';
+      div.style.top = (el.y * scale) + 'px';
+    }
+
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      const currentProps = el.type === 'text'
+        ? { size: el.size }
+        : { x: el.x, y: el.y, width: el.width, height: el.height };
+      pushUndo(activeDoc.id, {
+        type: 'resize',
+        page: activeDoc.currentPage,
+        index: idx,
+        prevProps: resizeStart,
+        currentProps
+      });
+      resizeStart = null;
+      resizeTimer = null;
+      updateTabModified(activeDoc.id, true);
+      scheduleAutoSave();
+      showStatus('Tamaño actualizado con la rueda', 'success');
+    }, 220);
+  }, { passive: false });
 }
 
 // ============================================

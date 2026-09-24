@@ -493,10 +493,13 @@ body.multiple-documents .editor-sidebar { padding-top: 44px; }
 }
 
 .pdf-element:hover,
-.pdf-element.selected {
+.pdf-element.selected,
+.pdf-element.multi-selected {
   border-color: #3b82f6;
   background: rgba(59, 130, 246, 0.1);
 }
+
+.pdf-element.multi-selected { box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35); }
 
 .pdf-element-text {
   background: transparent;
@@ -627,7 +630,8 @@ body.light-mode .recent-sig-btn:hover { background: #dbeafe; border-color: #2563
 }
 
 .pdf-element:hover .pdf-element-delete,
-.pdf-element.selected .pdf-element-delete { display: flex; }
+.pdf-element.selected .pdf-element-delete,
+.pdf-element.multi-selected .pdf-element-delete { display: flex; }
 
 /* Resize handles */
 .resize-handle {
@@ -650,7 +654,8 @@ body.light-mode .recent-sig-btn:hover { background: #dbeafe; border-color: #2563
 }
 
 .pdf-element:hover .resize-handle,
-.pdf-element.selected .resize-handle {
+.pdf-element.selected .resize-handle,
+.pdf-element.multi-selected .resize-handle {
   opacity: 1;
 }
 
