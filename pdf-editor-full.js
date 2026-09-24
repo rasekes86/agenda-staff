@@ -2378,11 +2378,25 @@ function reinforceSignatureInk(data) {
   for (let i = 0; i < data.length; i += 4) {
     const alpha = data[i + 3];
     if (alpha < 18) {
+      // Transparent pixels must also be black in RGB. Leaving a white RGB
+      // matte behind a zero alpha channel creates a white fringe when the
+      // browser or PDF renderer scales the PNG with bilinear interpolation.
+      data[i] = 0;
+      data[i + 1] = 0;
+      data[i + 2] = 0;
       data[i + 3] = 0;
       continue;
     }
 
-    data[i + 3] = alpha <= 72 ? 72 : alpha <= 160 ? 160 : 255;
+    // Stable multi-level antialiasing: enough levels for smooth curves, but
+    // every output is a fixed point so repeated processing cannot fade it.
+    data[i + 3] = alpha <= 24 ? 24
+      : alpha <= 48 ? 48
+      : alpha <= 80 ? 80
+      : alpha <= 120 ? 120
+      : alpha <= 168 ? 168
+      : alpha <= 216 ? 216
+      : 255;
 
     // Preserve blue/black ink hue while limiting brightness to a dark tone.
     const maxChannel = Math.max(data[i], data[i + 1], data[i + 2]);

@@ -2674,10 +2674,22 @@ async function processAndTrimSignature(src) {
           : Math.round(a * Math.min(1, Math.pow(inkStrength, 0.58) * 1.35));
 
         if (alpha < 18) alpha = 0;
-        else alpha = alpha <= 72 ? 72 : alpha <= 160 ? 160 : 255;
+        else alpha = alpha <= 24 ? 24
+          : alpha <= 48 ? 48
+          : alpha <= 80 ? 80
+          : alpha <= 120 ? 120
+          : alpha <= 168 ? 168
+          : alpha <= 216 ? 216
+          : 255;
         data[i + 3] = alpha;
 
-        if (alpha > 0) {
+        if (alpha === 0) {
+          // Remove the hidden white matte responsible for bright halos when
+          // transparent PNGs are resized or embedded into the final PDF.
+          data[i] = 0;
+          data[i + 1] = 0;
+          data[i + 2] = 0;
+        } else {
           const maxChannel = Math.max(r, g, b);
           if (maxChannel > 80) {
             const factor = 80 / maxChannel;
