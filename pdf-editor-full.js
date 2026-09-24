@@ -3189,6 +3189,7 @@ let templatePlacementMode = false;
 let pendingTemplateSlot = null;
 let templateEditorActive = false;
 let templateFieldClipboard = [];
+let editingTemplateId = null;
 
 async function ensureSession() {
   if (session?.access_token) return session;
@@ -3304,6 +3305,15 @@ async function saveTemplateToSupabase(name, slots) {
   return body.id;
 }
 
+async function updateTemplateInSupabase(id, name, slots) {
+  await ensureSession();
+  if (!session?.access_token) throw new Error('No hay una sesión activa');
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/pdf_templates?id=eq.${encodeURIComponent(id)}`, {
+    method: 'PATCH', headers: getTemplateHeaders(true), body: JSON.stringify({ name, slots })
+  });
+  if (!response.ok) throw new Error(await response.text() || 'No se pudo actualizar la plantilla');
+}
+
 async function saveTemplateLocally(template) {
   const stored = await chrome.storage.local.get(TEMPLATES_STORAGE_KEY);
   const templates = Array.isArray(stored[TEMPLATES_STORAGE_KEY]) ? stored[TEMPLATES_STORAGE_KEY] : [];
@@ -3322,6 +3332,15 @@ async function deleteTemplate(template) {
     method: 'DELETE', headers: getTemplateHeaders()
   });
   if (!response.ok) throw new Error('No tienes permiso para eliminar esta plantilla');
+}
+
+async function updateLocalTemplate(id, name, slots) {
+  const stored = await chrome.storage.local.get(TEMPLATES_STORAGE_KEY);
+  const templates = Array.isArray(stored[TEMPLATES_STORAGE_KEY]) ? stored[TEMPLATES_STORAGE_KEY] : [];
+  const index = templates.findIndex(template => template.id === id);
+  if (index < 0) throw new Error('No se encontró la plantilla local');
+  templates[index] = { ...templates[index], name, slots, updatedAt: Date.now() };
+  await chrome.storage.local.set({ [TEMPLATES_STORAGE_KEY]: templates });
 }
 
 function guessTemplateField(el) {
@@ -3354,9 +3373,12 @@ function showTemplateListView() {
   templateEditorActive = false;
   templatePlacementMode = false;
   pendingTemplateSlot = null;
+  editingTemplateId = null;
   if ($('templateListView')) $('templateListView').style.display = '';
   if ($('templateSaveView')) $('templateSaveView').style.display = 'none';
   if ($('templateNameInput')) $('templateNameInput').value = '';
+  if ($('templateEditorTitle')) $('templateEditorTitle').textContent = 'Nueva plantilla';
+  if ($('btnConfirmSaveTemplate')) $('btnConfirmSaveTemplate').textContent = '💾 Guardar plantilla';
   renderTemplatesList();
 }
 
@@ -3364,6 +3386,7 @@ function showTemplateSaveView() {
   removeTemplateDraftSlots();
   templatePlacementMode = false;
   pendingTemplateSlot = null;
+  editingTemplateId = null;
   templateEditorActive = true;
   if ($('templateListView')) $('templateListView').style.display = 'none';
   if ($('templateSaveView')) $('templateSaveView').style.display = '';
@@ -3371,7 +3394,55 @@ function showTemplateSaveView() {
     $('templateNameInput').value = '';
     $('templateNameInput').focus();
   }
+  if ($('templateEditorTitle')) $('templateEditorTitle').textContent = 'Nueva plantilla';
+  if ($('btnConfirmSaveTemplate')) $('btnConfirmSaveTemplate').textContent = '💾 Guardar plantilla';
   renderTemplateSlotSelection();
+}
+
+function editTemplate(template) {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) { showStatus('Primero carga el PDF correspondiente', 'error'); return; }
+  if (!template?.slots?.length) { showStatus('La plantilla no contiene huecos', 'error'); return; }
+  const requiredPages = Math.max(...template.slots.map(slot => slot.page || 1));
+  if (requiredPages > activeDoc.totalPages) {
+    showStatus(`Carga un PDF de al menos ${requiredPages} páginas para editar esta plantilla`, 'error');
+    return;
+  }
+
+  removeTemplateDraftSlots();
+  editingTemplateId = template.id;
+  templatePlacementMode = false;
+  pendingTemplateSlot = null;
+  templateEditorActive = true;
+  templateFieldClipboard = [];
+
+  template.slots.forEach(slot => {
+    const page = slot.page || 1;
+    const label = slot.label || 'TEXTO';
+    const scaleX = slot.sourcePageWidth ? activeDoc.pageWidth / slot.sourcePageWidth : 1;
+    const scaleY = slot.sourcePageHeight ? activeDoc.pageHeight / slot.sourcePageHeight : 1;
+    (activeDoc.elements[page] ||= []).push({
+      type: slot.type,
+      x: slot.x * scaleX,
+      y: slot.y * scaleY,
+      width: (slot.width || 100) * scaleX,
+      height: (slot.height || 60) * scaleY,
+      size: (slot.size || DEFAULT_FONT_SIZE) * Math.min(scaleX, scaleY),
+      color: slot.color || '#000000',
+      bold: Boolean(slot.bold), italic: Boolean(slot.italic), underline: Boolean(slot.underline),
+      text: '', src: '', name: '',
+      isPlaceholder: true, templateDraft: true,
+      fieldGroup: label, placeholderLabel: label
+    });
+  });
+
+  if ($('templateListView')) $('templateListView').style.display = 'none';
+  if ($('templateSaveView')) $('templateSaveView').style.display = '';
+  if ($('templateNameInput')) $('templateNameInput').value = template.name || '';
+  if ($('templateEditorTitle')) $('templateEditorTitle').textContent = 'Editar plantilla';
+  if ($('btnConfirmSaveTemplate')) $('btnConfirmSaveTemplate').textContent = '💾 Actualizar plantilla';
+  renderTemplateSlotSelection();
+  renderPage();
 }
 
 function collectTemplateDraftSlots() {
@@ -3548,6 +3619,7 @@ function cancelTemplateDraft() {
   pendingTemplateSlot = null;
   templateEditorActive = false;
   templateFieldClipboard = [];
+  editingTemplateId = null;
   showTemplateListView();
   renderPage();
 }
@@ -3560,7 +3632,7 @@ async function confirmSaveTemplate() {
   if (!draftSlots.length) { showStatus('Coloca al menos un hueco sobre el PDF', 'error'); return; }
 
   const templates = await loadTemplates();
-  if (templates.some(t => String(t.name || '').trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
+  if (templates.some(t => String(t.id) !== String(editingTemplateId) && String(t.name || '').trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
     showStatus('Ya existe una plantilla con ese nombre', 'error');
     return;
   }
@@ -3580,16 +3652,28 @@ async function confirmSaveTemplate() {
     };
   });
 
-  try {
-    await saveTemplateToSupabase(name, slots);
-    showStatus(`Plantilla “${name}” compartida (${slots.length} huecos)`, 'success');
-  } catch (err) {
-    await saveTemplateLocally({ id: `local_${Date.now()}`, name, slots, createdAt: Date.now(), shared: false });
-    showStatus(`No se pudo compartir “${name}”. Queda pendiente de sincronizar`, 'error');
+  if (editingTemplateId) {
+    try {
+      if (String(editingTemplateId).startsWith('local_')) await updateLocalTemplate(editingTemplateId, name, slots);
+      else await updateTemplateInSupabase(editingTemplateId, name, slots);
+      showStatus(`Plantilla “${name}” actualizada`, 'success');
+    } catch (err) {
+      showStatus(err.message || 'No se pudo actualizar la plantilla', 'error');
+      return;
+    }
+  } else {
+    try {
+      await saveTemplateToSupabase(name, slots);
+      showStatus(`Plantilla “${name}” compartida (${slots.length} huecos)`, 'success');
+    } catch (err) {
+      await saveTemplateLocally({ id: `local_${Date.now()}`, name, slots, createdAt: Date.now(), shared: false });
+      showStatus(`No se pudo compartir “${name}”. Queda pendiente de sincronizar`, 'error');
+    }
   }
   removeTemplateDraftSlots();
   templateEditorActive = false;
   templateFieldClipboard = [];
+  editingTemplateId = null;
   updateTabModified(activeDoc.id, true);
   renderPage();
   showTemplateListView();
@@ -3609,7 +3693,6 @@ async function renderTemplatesList() {
     (template.slots || []).forEach(slot => { groups[slot.label || 'TEXTO'] = (groups[slot.label || 'TEXTO'] || 0) + 1; });
     const summary = Object.entries(groups).map(([label, count]) => `${label}×${count}`).join(' · ');
     const isLocal = String(template.id).startsWith('local_');
-    const canDelete = isLocal || !template.user_id || template.user_id === currentUser?.id;
     return `<div class="template-card">
       <div class="template-card-info">
         <strong class="template-card-name">📄 ${escapeHtml(template.name)}</strong>
@@ -3618,12 +3701,16 @@ async function renderTemplatesList() {
       </div>
       <div class="template-card-actions">
         <button class="sidebar-btn" data-template-use="${index}" style="background:#2563eb;color:white;">Usar</button>
-        ${canDelete ? `<button class="sidebar-btn" data-template-delete="${index}" style="background:#6b2c2c;color:#fca5a5;">Borrar</button>` : ''}
+        <button class="sidebar-btn" data-template-edit="${index}" style="background:#0f766e;color:white;">Editar</button>
+        <button class="sidebar-btn" data-template-delete="${index}" style="background:#6b2c2c;color:#fca5a5;">Borrar</button>
       </div>
     </div>`;
   }).join('');
   list.querySelectorAll('[data-template-use]').forEach(button => {
     button.onclick = () => applyTemplate(templateCache[Number(button.dataset.templateUse)]);
+  });
+  list.querySelectorAll('[data-template-edit]').forEach(button => {
+    button.onclick = () => editTemplate(templateCache[Number(button.dataset.templateEdit)]);
   });
   list.querySelectorAll('[data-template-delete]').forEach(button => {
     button.onclick = async () => {

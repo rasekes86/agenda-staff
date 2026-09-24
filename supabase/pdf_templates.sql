@@ -25,10 +25,18 @@ create policy "Authenticated users can create PDF templates"
   with check (auth.uid() = user_id);
 
 drop policy if exists "Owners can delete PDF templates" on public.pdf_templates;
-create policy "Owners can delete PDF templates"
+drop policy if exists "Authenticated users can delete PDF templates" on public.pdf_templates;
+create policy "Authenticated users can delete PDF templates"
   on public.pdf_templates for delete
   to authenticated
-  using (auth.uid() = user_id);
+  using (true);
 
-grant select, insert, delete on public.pdf_templates to authenticated;
+drop policy if exists "Authenticated users can update PDF templates" on public.pdf_templates;
+create policy "Authenticated users can update PDF templates"
+  on public.pdf_templates for update
+  to authenticated
+  using (true)
+  with check (true);
+
+grant select, insert, update, delete on public.pdf_templates to authenticated;
 revoke all on public.pdf_templates from anon;
