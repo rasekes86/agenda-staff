@@ -788,6 +788,9 @@ function setupEventListeners() {
   $('btnCancelSaveTemplate')?.addEventListener('click', cancelTemplateDraft);
   $('btnPlaceTemplateSlot')?.addEventListener('click', beginTemplateSlotPlacement);
   $('btnAdjustTemplateSlots')?.addEventListener('click', adjustTemplateDraftOnPdf);
+  document.querySelectorAll('[data-template-quick-field]').forEach(button => {
+    button.addEventListener('click', () => beginQuickTemplatePlacement(button.dataset.templateQuickType, button.dataset.templateQuickField));
+  });
   $('closeTemplatesModal')?.addEventListener('click', () => $('templatesModal')?.classList.remove('show'));
   $('closeFillTemplateModal')?.addEventListener('click', () => $('fillTemplateModal')?.classList.remove('show'));
   $('templateNameInput')?.addEventListener('keydown', (e) => {
@@ -3293,7 +3296,11 @@ function renderTemplateSlotSelection() {
     return `<div style="display:flex;align-items:center;gap:6px;padding:6px;background:#1e293b;border-radius:6px;margin-bottom:4px;">
       <span title="Página ${item.page}">${icons[item.el.type]} P${item.page}</span>
       <strong style="flex:1;color:#c4b5fd;font-size:11px;">${escapeHtml(item.el.fieldGroup || 'TEXTO')}</strong>
-      <span style="color:#64748b;font-size:9px;">${Math.round(item.el.width)}×${Math.round(item.el.height)}</span>
+      <span class="template-draft-size" title="Ancho × alto">
+        <input type="number" min="20" step="5" value="${Math.round(item.el.width)}" data-template-size="width" data-page="${item.page}" data-index="${item.index}">
+        ×
+        <input type="number" min="20" step="5" value="${Math.round(item.el.height)}" data-template-size="height" data-page="${item.page}" data-index="${item.index}">
+      </span>
       <button class="sidebar-btn template-draft-delete" data-page="${item.page}" data-index="${item.index}" style="padding:3px 6px;background:#6b2c2c;color:#fca5a5;">✕</button>
     </div>`;
   }).join('');
@@ -3305,6 +3312,20 @@ function renderTemplateSlotSelection() {
       renderPage();
     };
   });
+  list.querySelectorAll('[data-template-size]').forEach(input => {
+    input.addEventListener('change', () => {
+      const activeDoc = getActiveDoc();
+      const element = activeDoc?.elements[Number(input.dataset.page)]?.[Number(input.dataset.index)];
+      if (!element?.templateDraft) return;
+      const dimension = input.dataset.templateSize;
+      const maximum = dimension === 'width' ? activeDoc.pageWidth : activeDoc.pageHeight;
+      element[dimension] = Math.max(MIN_ELEMENT_SIZE, Math.min(maximum, Number(input.value) || MIN_ELEMENT_SIZE));
+      input.value = Math.round(element[dimension]);
+      updateTabModified(activeDoc.id, true);
+      renderPage();
+      showStatus('Tamaño del campo actualizado', 'success');
+    });
+  });
 }
 
 function beginTemplateSlotPlacement() {
@@ -3315,6 +3336,16 @@ function beginTemplateSlotPlacement() {
   $('templatesModal')?.classList.remove('show');
   renderPage();
   showStatus('Pulsa en el hueco del PDF que quieres marcar', 'success');
+}
+
+function beginQuickTemplatePlacement(type, label) {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) { showStatus('Primero carga un PDF', 'error'); return; }
+  pendingTemplateSlot = { type, label };
+  templatePlacementMode = true;
+  $('templatesModal')?.classList.remove('show');
+  renderPage();
+  showStatus(`Pulsa para colocar ${label}`, 'success');
 }
 
 function adjustTemplateDraftOnPdf() {
@@ -3331,10 +3362,36 @@ function placeTemplateSlotAtEvent(event, overlay, scale, activeDoc) {
   const x = Math.max(0, (event.clientX - rect.left) / scale);
   const y = Math.max(0, (event.clientY - rect.top) / scale);
   const position = { page: activeDoc.currentPage, x, y };
+  const quickSlot = pendingTemplateSlot?.type && pendingTemplateSlot?.label ? { ...pendingTemplateSlot } : null;
   templatePlacementMode = false;
   pendingTemplateSlot = null;
   renderPage();
-  showTemplateFieldPicker(position);
+  if (quickSlot) {
+    addTemplateDraftSlot(position, quickSlot.type, quickSlot.label);
+    $('templatesModal')?.classList.add('show');
+  } else {
+    showTemplateFieldPicker(position);
+  }
+}
+
+function addTemplateDraftSlot(position, type, label) {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) return;
+  const dimensions = type === 'signature' ? { width: 180, height: 70 } : { width: label === 'NOMBRE' ? 220 : 110, height: 32 };
+  (activeDoc.elements[position.page] ||= []).push({
+    type,
+    x: Math.min(position.x, Math.max(0, activeDoc.pageWidth - dimensions.width)),
+    y: Math.min(position.y, Math.max(0, activeDoc.pageHeight - dimensions.height)),
+    ...dimensions,
+    size: DEFAULT_FONT_SIZE,
+    color: '#000000', text: '', src: '', name: '',
+    isPlaceholder: true, templateDraft: true,
+    fieldGroup: label, placeholderLabel: label
+  });
+  updateTabModified(activeDoc.id, true);
+  renderTemplateSlotSelection();
+  renderPage();
+  showStatus(`Hueco ${label} añadido`, 'success');
 }
 
 function showTemplateFieldPicker(position) {
@@ -3359,25 +3416,9 @@ function showTemplateFieldPicker(position) {
     button.onclick = () => {
       const activeDoc = getActiveDoc();
       if (!activeDoc) { close(); return; }
-      const type = button.dataset.type;
-      const label = button.dataset.field;
-      const dimensions = type === 'signature' ? { width: 180, height: 70 } : { width: label === 'NOMBRE' ? 220 : 110, height: 32 };
-      (activeDoc.elements[position.page] ||= []).push({
-        type,
-        x: Math.min(position.x, Math.max(0, activeDoc.pageWidth - dimensions.width)),
-        y: Math.min(position.y, Math.max(0, activeDoc.pageHeight - dimensions.height)),
-        ...dimensions,
-        size: DEFAULT_FONT_SIZE,
-        color: '#000000', text: '', src: '', name: '',
-        isPlaceholder: true, templateDraft: true,
-        fieldGroup: label, placeholderLabel: label
-      });
-      updateTabModified(activeDoc.id, true);
       picker.remove();
-      renderTemplateSlotSelection();
-      renderPage();
+      addTemplateDraftSlot(position, button.dataset.type, button.dataset.field);
       $('templatesModal')?.classList.add('show');
-      showStatus(`Hueco ${label} añadido`, 'success');
     };
   });
 }
@@ -3454,10 +3495,16 @@ async function renderTemplatesList() {
     const summary = Object.entries(groups).map(([label, count]) => `${label}×${count}`).join(' · ');
     const isLocal = String(template.id).startsWith('local_');
     const canDelete = isLocal || !template.user_id || template.user_id === currentUser?.id;
-    return `<div style="display:flex;align-items:center;gap:7px;padding:8px;background:#1e293b;border-radius:7px;margin-bottom:6px;">
-      <span style="flex:1;min-width:0;color:#e2e8f0;font-size:12px;"><strong>${escapeHtml(template.name)}</strong><br><span style="color:#818cf8;font-size:10px;">${escapeHtml(summary || 'Sin huecos')}</span><br><span style="color:#64748b;font-size:9px;">${isLocal ? 'Solo en este equipo' : `Compartida${template.user_name ? ` por ${escapeHtml(template.user_name)}` : ''}`}</span></span>
-      <button class="sidebar-btn" data-template-use="${index}" style="padding:5px 8px;background:#2563eb;color:white;">Usar</button>
-      ${canDelete ? `<button class="sidebar-btn" data-template-delete="${index}" style="padding:5px 8px;background:#6b2c2c;color:#fca5a5;">🗑️</button>` : ''}
+    return `<div class="template-card">
+      <div class="template-card-info">
+        <strong class="template-card-name">📄 ${escapeHtml(template.name)}</strong>
+        <span class="template-card-summary">${escapeHtml(summary || 'Sin campos')}</span>
+        <span class="template-card-origin">${isLocal ? 'Guardada en este equipo' : `Plantilla compartida${template.user_name ? ` · ${escapeHtml(template.user_name)}` : ''}`}</span>
+      </div>
+      <div class="template-card-actions">
+        <button class="sidebar-btn" data-template-use="${index}" style="background:#2563eb;color:white;">Usar</button>
+        ${canDelete ? `<button class="sidebar-btn" data-template-delete="${index}" style="background:#6b2c2c;color:#fca5a5;">Borrar</button>` : ''}
+      </div>
     </div>`;
   }).join('');
   list.querySelectorAll('[data-template-use]').forEach(button => {

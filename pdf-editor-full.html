@@ -581,6 +581,12 @@
         </div>
         <p style="margin-bottom:8px;color:#94a3b8;font-size:11px;">Pulsa el botón, marca un hueco del PDF y después indica si corresponde a Nombre, DNI, Fecha o Firma.</p>
         <button class="sidebar-btn" id="btnPlaceTemplateSlot" style="width:100%;margin-bottom:10px;background:#7c3aed;color:white;justify-content:center;">＋ Marcar hueco en el PDF</button>
+        <div class="template-quick-fields" aria-label="Añadir campo rápidamente">
+          <button data-template-quick-field="NOMBRE" data-template-quick-type="text">👤 Nombre</button>
+          <button data-template-quick-field="DNI" data-template-quick-type="text">🪪 DNI</button>
+          <button data-template-quick-field="FECHA" data-template-quick-type="text">📅 Fecha</button>
+          <button data-template-quick-field="FIRMA" data-template-quick-type="signature">✍️ Firma</button>
+        </div>
         <div id="templateSlotList" style="max-height:250px;overflow-y:auto;"></div>
         <button class="sidebar-btn" id="btnAdjustTemplateSlots" style="width:100%;margin-top:8px;background:#334155;color:#e2e8f0;">↔ Ajustar huecos sobre el PDF</button>
         <div style="display:flex;gap:8px;margin-top:12px;">
