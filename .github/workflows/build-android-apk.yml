@@ -24,9 +24,9 @@ jobs:
         working-directory: android-editor
         run: gradle assembleRelease
       - name: Name APK
-        run: cp android-editor/app/build/outputs/apk/release/app-release.apk agenda-staff-pdf-v3.0.3.apk
+        run: cp android-editor/app/build/outputs/apk/release/app-release.apk agenda-staff-pdf-v3.0.4.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: agenda-staff-pdf-v3.0.3
-          path: agenda-staff-pdf-v3.0.3.apk
+          name: agenda-staff-pdf-v3.0.4
+          path: agenda-staff-pdf-v3.0.4.apk
           if-no-files-found: error

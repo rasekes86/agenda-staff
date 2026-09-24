@@ -1,40 +1,136 @@
 .mobile-only { display: none !important; }
 
-@media (max-width: 900px) {
-  body.android-app { min-width: 760px; }
-  body.android-app .mobile-only { display: flex !important; }
-  body.android-app .editor-header {
-    position: sticky;
-    top: 0;
-    z-index: 140;
-    padding: 7px 10px;
-    gap: 7px;
-  }
-  body.android-app .editor-logo { height: 25px; max-width: 130px; }
-  body.android-app .toolbar-btn { padding: 7px 10px; font-size: 11px; }
-  body.android-app .header-left { gap: 6px; }
-  body.android-app .file-name { max-width: 120px; }
-  body.android-app .editor-sidebar {
-    top: 48px;
-    width: 220px;
-    min-width: 220px;
-    height: calc(100vh - 48px);
-    max-height: calc(100vh - 48px);
-  }
-  body.android-app .canvas-area { margin-left: 220px; }
-  body.android-app .document-tabs { top: 48px; }
-  body.android-app .sidebar-btn,
-  body.android-app .tool-tab { min-height: 38px; }
-  body.android-app input,
-  body.android-app textarea,
-  body.android-app select,
-  body.android-app button { touch-action: manipulation; }
+body.android-app {
+  width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
 }
 
-@media (max-width: 600px) {
-  body.android-app { min-width: 680px; }
-  body.android-app .editor-sidebar { width: 205px; min-width: 205px; }
-  body.android-app .canvas-area { margin-left: 205px; }
-  body.android-app .zoom-controls,
-  body.android-app .file-name { display: none !important; }
+body.android-app .mobile-only { display: flex !important; }
+body.android-app .tool-tabs,
+body.android-app #toolSplit,
+body.android-app #toolImgToPdf,
+body.android-app #toolWordToPdf,
+body.android-app #toolMerge,
+body.android-app #toolPages,
+body.android-app #workspaceImgToPdf,
+body.android-app #workspaceWordToPdf,
+body.android-app #workspaceMerge { display: none !important; }
+
+body.android-app .editor-header {
+  position: sticky;
+  top: 0;
+  z-index: 180;
+  min-height: 52px;
+  padding: 6px 8px;
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+body.android-app .editor-header::-webkit-scrollbar { display: none; }
+body.android-app .editor-logo,
+body.android-app .file-name,
+body.android-app .zoom-controls { display: none !important; }
+body.android-app .header-left { flex: 0 0 auto; gap: 0; }
+body.android-app .toolbar-spacer { display: none; }
+body.android-app .toolbar-btn {
+  width: 42px;
+  height: 40px;
+  min-width: 42px;
+  padding: 0;
+  justify-content: center;
+  gap: 0;
+  font-size: 0;
+}
+body.android-app .toolbar-btn svg { width: 19px; height: 19px; }
+body.android-app #btnMobileLogout { font-size: 11px; width: 46px; }
+body.android-app .page-nav {
+  flex: 0 0 auto;
+  height: 40px;
+  padding: 3px 5px;
+  gap: 4px;
+}
+body.android-app .page-nav button { width: 34px; height: 34px; }
+body.android-app .page-info { font-size: 11px; white-space: nowrap; }
+
+body.android-app .document-tabs { top: 52px; min-height: 40px; }
+body.android-app .editor-sidebar {
+  top: 52px;
+  left: 0;
+  width: min(88vw, 340px);
+  min-width: 0;
+  height: calc(100dvh - 52px);
+  max-height: calc(100dvh - 52px);
+  z-index: 220;
+  padding-top: 0 !important;
+  transform: translateX(-105%);
+  transition: transform .22s ease;
+  box-shadow: 12px 0 34px rgba(0,0,0,.55);
+}
+body.android-app .editor-sidebar.mobile-open { transform: translateX(0); }
+body.android-app .editor-sidebar .tool-content { padding: 10px 12px 90px; }
+body.android-app .sidebar-btn { min-height: 46px; font-size: 14px; }
+body.android-app .sidebar-section { padding: 10px; margin-bottom: 9px; }
+
+body.android-app .editor-canvas-area {
+  width: 100%;
+  max-width: 100vw;
+  margin-left: 0;
+  padding: 8px;
+  min-height: calc(100dvh - 52px);
+  max-height: calc(100dvh - 52px);
+  justify-content: flex-start;
+}
+body.android-app .canvas-container { margin: 0 auto; }
+body.android-app .upload-wrapper {
+  width: calc(100vw - 16px);
+  max-width: 520px;
+  height: min(62dvh, 430px);
+}
+body.android-app .upload-area { border-radius: 12px; padding: 18px; text-align: center; }
+body.android-app .upload-icon { font-size: 48px; margin-bottom: 10px; }
+body.android-app .upload-text { font-size: 16px; }
+body.android-app .upload-hint { font-size: 12px; }
+
+body.android-app .mobile-tools-toggle {
+  position: fixed;
+  left: 14px;
+  bottom: max(14px, env(safe-area-inset-bottom));
+  z-index: 210;
+  min-height: 50px;
+  padding: 0 17px;
+  border: 0;
+  border-radius: 25px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 8px 24px rgba(0,0,0,.45);
+}
+body.android-app .mobile-sidebar-backdrop {
+  position: fixed;
+  inset: 52px 0 0;
+  z-index: 215;
+  display: none;
+  background: rgba(2,6,23,.62);
+}
+body.android-app .mobile-sidebar-backdrop.show { display: block; }
+body.android-app .modal { width: min(94vw, 460px) !important; max-height: 88dvh; overflow-y: auto; }
+body.android-app .modal-overlay { padding: 10px; }
+body.android-app input,
+body.android-app textarea,
+body.android-app select { font-size: 16px !important; }
+body.android-app button { touch-action: manipulation; }
+body.android-app .resize-handle { width: 22px; height: 22px; }
+body.android-app .resize-handle-nw { top: -11px; left: -11px; }
+body.android-app .resize-handle-ne { top: -11px; right: -11px; }
+body.android-app .resize-handle-sw { bottom: -11px; left: -11px; }
+body.android-app .resize-handle-se { bottom: -11px; right: -11px; }
+
+@media (max-width: 420px) {
+  body.android-app .editor-header { gap: 4px; }
+  body.android-app .toolbar-btn { width: 39px; min-width: 39px; }
+  body.android-app .page-nav button { width: 31px; }
+  body.android-app .page-info { font-size: 10px; }
 }

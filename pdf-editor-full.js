@@ -1019,6 +1019,10 @@ function loadPdfAsNewTab(file, switchToIt = true) {
       newDoc.totalPages = totalPages;
       newDoc.pageWidth = width;
       newDoc.pageHeight = height;
+      if (window.AndroidBridge) {
+        const availableWidth = Math.max(280, window.innerWidth - 16);
+        newDoc.zoom = Math.max(ZOOM_MIN, Math.min(1, (availableWidth / width) * 0.96));
+      }
       
       for (let i = 1; i <= totalPages; i++) {
         newDoc.elements[i] = [];
