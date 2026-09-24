@@ -1040,6 +1040,33 @@ body.light-mode .draw-signature-help { color: #475569; }
 
 /* PDF position templates */
 .template-help { margin: 0 0 10px; color: #94a3b8; font-size: 11px; line-height: 1.4; }
+.template-slot-builder { display: grid; grid-template-columns: 110px 1fr; gap: 6px; margin-bottom: 10px; }
+.template-slot-builder select,
+.template-slot-builder input {
+  min-width: 0;
+  padding: 7px;
+  background: #0f172a;
+  border: 1px solid #4338ca;
+  border-radius: 6px;
+  color: #f1f5f9;
+}
+.template-slot-builder button { grid-column: 1 / -1; background: #7c3aed; color: white; justify-content: center; }
+.elements-overlay.template-placement-mode { cursor: crosshair; }
+.elements-overlay.template-placement-mode::after {
+  content: 'Pulsa para colocar el hueco';
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #7c3aed;
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  pointer-events: none;
+  z-index: 20;
+}
 .pdf-element-placeholder {
   min-width: 70px;
   min-height: 28px;
@@ -1059,6 +1086,8 @@ body.light-mode .draw-signature-help { color: #475569; }
 }
 body:not(.light-mode) .pdf-element-placeholder .placeholder-label { color: #c4b5fd; }
 body.light-mode .template-help { color: #475569; }
+body.light-mode .template-slot-builder select,
+body.light-mode .template-slot-builder input { background: #fff; color: #0f172a; }
 
 /* Signature item actions */
 .signature-name {

@@ -785,7 +785,10 @@ function setupEventListeners() {
   $('btnFillTemplate')?.addEventListener('click', showFillTemplateModal);
   $('btnShowSaveView')?.addEventListener('click', showTemplateSaveView);
   $('btnConfirmSaveTemplate')?.addEventListener('click', confirmSaveTemplate);
-  $('btnCancelSaveTemplate')?.addEventListener('click', showTemplateListView);
+  $('btnCancelSaveTemplate')?.addEventListener('click', cancelTemplateDraft);
+  $('btnPlaceTemplateSlot')?.addEventListener('click', beginTemplateSlotPlacement);
+  $('btnAdjustTemplateSlots')?.addEventListener('click', adjustTemplateDraftOnPdf);
+  $('templateSlotType')?.addEventListener('change', syncTemplateSlotLabel);
   $('closeTemplatesModal')?.addEventListener('click', () => $('templatesModal')?.classList.remove('show'));
   $('closeFillTemplateModal')?.addEventListener('click', () => $('fillTemplateModal')?.classList.remove('show'));
   $('templateNameInput')?.addEventListener('keydown', (e) => {
@@ -841,7 +844,14 @@ function setupEventListeners() {
       return;
     }
     if (e.key === 'Escape' && $('templatesModal')?.classList.contains('show')) {
-      $('templatesModal').classList.remove('show');
+      if ($('templateSaveView')?.style.display !== 'none') cancelTemplateDraft();
+      else $('templatesModal').classList.remove('show');
+      return;
+    }
+    if (e.key === 'Escape' && templatePlacementMode) {
+      templatePlacementMode = false;
+      renderPage();
+      $('templatesModal')?.classList.add('show');
       return;
     }
     if (e.key === 'Escape' && $('drawSignatureModal')?.classList.contains('show')) {
@@ -1293,6 +1303,7 @@ async function renderPage() {
     const overlay = document.createElement('div');
     overlay.className = 'elements-overlay';
     if (stampMode) overlay.classList.add('placement-mode');
+    if (templatePlacementMode) overlay.classList.add('template-placement-mode');
     overlay.style.width = canvas.width + 'px';
     overlay.style.height = canvas.height + 'px';
     
@@ -1309,6 +1320,10 @@ async function renderPage() {
     
     // Mousedown on overlay starts box selection (or stamp placement)
     overlay.addEventListener('mousedown', (e) => {
+      if (templatePlacementMode) {
+        placeTemplateSlotAtEvent(e, overlay, scale, activeDoc);
+        return;
+      }
       // #22 Stamp mode: place check/X on click
       if (stampMode) {
         onStampClick(e);
@@ -1427,9 +1442,10 @@ function createElementDiv(el, idx, scale, activeDoc) {
   if (el.type === 'text') {
     div.addEventListener('dblclick', (e) => {
       e.stopPropagation();
+      if (el.templateDraft) return;
       openEditTextModal(idx, activeDoc, scale);
     });
-  } else if (el.type === 'image' && el.isPlaceholder) {
+  } else if (el.type === 'image' && el.isPlaceholder && !el.templateDraft) {
     div.addEventListener('dblclick', (e) => {
       e.stopPropagation();
       fillImagePlaceholder(activeDoc.currentPage, idx);
@@ -2406,7 +2422,7 @@ function selectSignature(url, name) {
 function placeSignatureInTemplateOrPage(activeDoc, src, name, width, height, offset = 0) {
   for (let page = 1; page <= activeDoc.totalPages; page++) {
     const elements = activeDoc.elements[page] || [];
-    const placeholder = elements.find(el => el.isPlaceholder && el.type === 'signature');
+    const placeholder = elements.find(el => el.isPlaceholder && !el.templateDraft && el.type === 'signature');
     if (!placeholder) continue;
 
     placeholder.src = src;
@@ -3106,6 +3122,8 @@ function clearEditor() {
 // ============================================
 const TEMPLATES_STORAGE_KEY = 'pdfEditorTemplates';
 let templateCache = [];
+let templatePlacementMode = false;
+let pendingTemplateSlot = null;
 
 async function ensureSession() {
   if (session?.access_token) return session;
@@ -3218,11 +3236,20 @@ function guessTemplateField(el) {
 function showTemplatesModal() {
   const activeDoc = getActiveDoc();
   if (!activeDoc) { showStatus('Primero carga un PDF', 'error'); return; }
+  if (collectTemplateDraftSlots().length) {
+    if ($('templateListView')) $('templateListView').style.display = 'none';
+    if ($('templateSaveView')) $('templateSaveView').style.display = '';
+    renderTemplateSlotSelection();
+    $('templatesModal')?.classList.add('show');
+    return;
+  }
   showTemplateListView();
   $('templatesModal')?.classList.add('show');
 }
 
 function showTemplateListView() {
+  templatePlacementMode = false;
+  pendingTemplateSlot = null;
   if ($('templateListView')) $('templateListView').style.display = '';
   if ($('templateSaveView')) $('templateSaveView').style.display = 'none';
   if ($('templateNameInput')) $('templateNameInput').value = '';
@@ -3230,22 +3257,27 @@ function showTemplateListView() {
 }
 
 function showTemplateSaveView() {
+  removeTemplateDraftSlots();
+  templatePlacementMode = false;
+  pendingTemplateSlot = null;
   if ($('templateListView')) $('templateListView').style.display = 'none';
   if ($('templateSaveView')) $('templateSaveView').style.display = '';
   if ($('templateNameInput')) {
     $('templateNameInput').value = '';
     $('templateNameInput').focus();
   }
+  if ($('templateSlotType')) $('templateSlotType').value = 'text';
+  if ($('templateSlotLabel')) $('templateSlotLabel').value = 'TEXTO';
   renderTemplateSlotSelection();
 }
 
-function collectTemplateSourceElements() {
+function collectTemplateDraftSlots() {
   const activeDoc = getActiveDoc();
   if (!activeDoc) return [];
   const result = [];
   for (let page = 1; page <= activeDoc.totalPages; page++) {
-    (activeDoc.elements[page] || []).forEach(el => {
-      if (!el.isPlaceholder && ['text', 'signature', 'image'].includes(el.type)) result.push({ page, el });
+    (activeDoc.elements[page] || []).forEach((el, index) => {
+      if (el.templateDraft) result.push({ page, index, el });
     });
   }
   return result;
@@ -3254,49 +3286,118 @@ function collectTemplateSourceElements() {
 function renderTemplateSlotSelection() {
   const list = $('templateSlotList');
   if (!list) return;
-  const items = collectTemplateSourceElements();
+  const items = collectTemplateDraftSlots();
   if (!items.length) {
-    list.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:18px;font-size:12px;">Añade y coloca textos, firmas o imágenes antes de crear la plantilla.</div>';
+    list.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:18px;font-size:12px;">Aún no has marcado ningún hueco. Elige un campo y pulsa “Colocar en PDF”.</div>';
     return;
   }
   const icons = { text: '📝', signature: '✍️', image: '🖼️' };
   list.innerHTML = items.map((item, index) => {
-    const preview = item.el.text || item.el.name || `${Math.round(item.el.width || 0)}×${Math.round(item.el.height || 0)}`;
     return `<div style="display:flex;align-items:center;gap:6px;padding:6px;background:#1e293b;border-radius:6px;margin-bottom:4px;">
-      <input type="checkbox" class="tmpl-slot-cb" data-idx="${index}" checked>
       <span title="Página ${item.page}">${icons[item.el.type]} P${item.page}</span>
-      <input type="text" list="fieldTypeSuggestions" class="tmpl-slot-field" data-idx="${index}" value="${escapeHtml(guessTemplateField(item.el))}" style="width:92px;padding:4px;background:#0f172a;border:1px solid #4338ca;border-radius:4px;color:#c4b5fd;text-transform:uppercase;">
-      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#94a3b8;font-size:10px;" title="${escapeHtml(preview)}">${escapeHtml(preview)}</span>
+      <strong style="flex:1;color:#c4b5fd;font-size:11px;">${escapeHtml(item.el.fieldGroup || 'TEXTO')}</strong>
+      <span style="color:#64748b;font-size:9px;">${Math.round(item.el.width)}×${Math.round(item.el.height)}</span>
+      <button class="sidebar-btn template-draft-delete" data-page="${item.page}" data-index="${item.index}" style="padding:3px 6px;background:#6b2c2c;color:#fca5a5;">✕</button>
     </div>`;
   }).join('');
-  const selectAll = $('tmplSelectAll');
-  const deselectAll = $('tmplDeselectAll');
-  if (selectAll) selectAll.onclick = () => list.querySelectorAll('.tmpl-slot-cb').forEach(cb => { cb.checked = true; });
-  if (deselectAll) deselectAll.onclick = () => list.querySelectorAll('.tmpl-slot-cb').forEach(cb => { cb.checked = false; });
+  list.querySelectorAll('.template-draft-delete').forEach(button => {
+    button.onclick = () => {
+      const activeDoc = getActiveDoc();
+      activeDoc?.elements[Number(button.dataset.page)]?.splice(Number(button.dataset.index), 1);
+      renderTemplateSlotSelection();
+      renderPage();
+    };
+  });
+}
+
+function syncTemplateSlotLabel() {
+  const type = $('templateSlotType')?.value || 'text';
+  const defaults = { text: 'TEXTO', signature: 'FIRMA', image: 'IMAGEN' };
+  if ($('templateSlotLabel')) $('templateSlotLabel').value = defaults[type];
+}
+
+function beginTemplateSlotPlacement() {
+  const activeDoc = getActiveDoc();
+  const type = $('templateSlotType')?.value || 'text';
+  const label = $('templateSlotLabel')?.value.trim().toUpperCase();
+  if (!activeDoc || !label) { showStatus('Indica el nombre del campo', 'error'); return; }
+  pendingTemplateSlot = { type, label };
+  templatePlacementMode = true;
+  $('templatesModal')?.classList.remove('show');
+  renderPage();
+  showStatus(`Pulsa en el PDF para colocar ${label}`, 'success');
+}
+
+function adjustTemplateDraftOnPdf() {
+  if (!collectTemplateDraftSlots().length) { showStatus('Todavía no hay huecos que ajustar', 'error'); return; }
+  $('templatesModal')?.classList.remove('show');
+  showStatus('Mueve o redimensiona los huecos y pulsa Plantillas para continuar', 'success');
+}
+
+function placeTemplateSlotAtEvent(event, overlay, scale, activeDoc) {
+  if (!pendingTemplateSlot) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const rect = overlay.getBoundingClientRect();
+  const x = Math.max(0, (event.clientX - rect.left) / scale);
+  const y = Math.max(0, (event.clientY - rect.top) / scale);
+  const type = pendingTemplateSlot.type;
+  const dimensions = type === 'text' ? { width: 150, height: 32 } : type === 'signature' ? { width: 180, height: 70 } : { width: 120, height: 90 };
+  (activeDoc.elements[activeDoc.currentPage] ||= []).push({
+    type,
+    x: Math.min(x, Math.max(0, activeDoc.pageWidth - dimensions.width)),
+    y: Math.min(y, Math.max(0, activeDoc.pageHeight - dimensions.height)),
+    ...dimensions,
+    size: DEFAULT_FONT_SIZE,
+    color: '#000000',
+    text: '', src: '', name: '',
+    isPlaceholder: true,
+    templateDraft: true,
+    fieldGroup: pendingTemplateSlot.label,
+    placeholderLabel: pendingTemplateSlot.label
+  });
+  templatePlacementMode = false;
+  pendingTemplateSlot = null;
+  updateTabModified(activeDoc.id, true);
+  renderPage();
+  renderTemplateSlotSelection();
+  $('templatesModal')?.classList.add('show');
+  showStatus('Hueco añadido; puedes moverlo o cambiar su tamaño', 'success');
+}
+
+function removeTemplateDraftSlots() {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc) return;
+  for (let page = 1; page <= activeDoc.totalPages; page++) {
+    activeDoc.elements[page] = (activeDoc.elements[page] || []).filter(el => !el.templateDraft);
+  }
+}
+
+function cancelTemplateDraft() {
+  removeTemplateDraftSlots();
+  templatePlacementMode = false;
+  pendingTemplateSlot = null;
+  showTemplateListView();
+  renderPage();
 }
 
 async function confirmSaveTemplate() {
   const activeDoc = getActiveDoc();
   const name = $('templateNameInput')?.value.trim();
   if (!activeDoc || !name) { showStatus('Escribe un nombre para la plantilla', 'error'); return; }
-  const source = collectTemplateSourceElements();
-  const selected = [...document.querySelectorAll('.tmpl-slot-cb:checked')];
-  if (!selected.length) { showStatus('Selecciona al menos un elemento', 'error'); return; }
+  const draftSlots = collectTemplateDraftSlots();
+  if (!draftSlots.length) { showStatus('Coloca al menos un hueco sobre el PDF', 'error'); return; }
 
   const templates = await loadTemplates();
-  if (templates.some(t => t.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
+  if (templates.some(t => String(t.name || '').trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
     showStatus('Ya existe una plantilla con ese nombre', 'error');
     return;
   }
 
-  const slots = selected.map(cb => {
-    const index = Number(cb.dataset.idx);
-    const item = source[index];
-    const field = document.querySelector(`.tmpl-slot-field[data-idx="${index}"]`);
-    const label = field?.value.trim().toUpperCase() || 'TEXTO';
+  const slots = draftSlots.map(item => {
     const el = item.el;
     return {
-      type: el.type, label, page: item.page,
+      type: el.type, label: el.fieldGroup || 'TEXTO', page: item.page,
       x: el.x, y: el.y,
       width: el.width || (el.type === 'text' ? 150 : 100),
       height: el.height || (el.type === 'text' ? Math.max(28, (el.size || 14) + 12) : 60),
@@ -3315,6 +3416,9 @@ async function confirmSaveTemplate() {
     await saveTemplateLocally({ id: `local_${Date.now()}`, name, slots, createdAt: Date.now(), shared: false });
     showStatus(`Plantilla “${name}” guardada en este equipo`, 'success');
   }
+  removeTemplateDraftSlots();
+  updateTabModified(activeDoc.id, true);
+  renderPage();
   showTemplateListView();
 }
 
@@ -3399,7 +3503,7 @@ function updateFillTemplateVisibility() {
   const section = $('fillTemplateSection');
   const activeDoc = getActiveDoc();
   if (!section) return;
-  const hasPlaceholders = activeDoc && Object.values(activeDoc.elements).some(elements => elements.some(el => el.isPlaceholder));
+  const hasPlaceholders = activeDoc && Object.values(activeDoc.elements).some(elements => elements.some(el => el.isPlaceholder && !el.templateDraft));
   section.style.display = hasPlaceholders ? '' : 'none';
 }
 
@@ -3409,7 +3513,7 @@ function getTemplateGroups() {
   if (!activeDoc) return groups;
   for (let page = 1; page <= activeDoc.totalPages; page++) {
     (activeDoc.elements[page] || []).forEach((el, index) => {
-      if (!el.isPlaceholder) return;
+      if (!el.isPlaceholder || el.templateDraft) return;
       const label = el.fieldGroup || 'TEXTO';
       (groups[label] ||= []).push({ page, index, el });
     });
@@ -3449,6 +3553,7 @@ function clearPlaceholderMetadata(el) {
   delete el.isPlaceholder;
   delete el.placeholderLabel;
   delete el.fieldGroup;
+  delete el.templateDraft;
 }
 
 function fillTemplateTextGroup(groupName, rawValues) {
