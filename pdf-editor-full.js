@@ -20,9 +20,7 @@ const MAX_UNDO_STATES = 30;
 const PASTE_OFFSET = 30;
 
 // Signature processing settings
-const SIG_WHITE_THRESHOLD = 230;   // Pixels above this (per channel) are treated as "white"
-const SIG_FEATHER_RADIUS = 1;      // Edge feather radius in pixels
-const SIG_INK_VARIANCE = 0.06;     // Max opacity random variance (simulates real ink)
+const SIG_WHITE_THRESHOLD = 248;   // Near-white paper is removed without erasing pale strokes
 
 // SUPABASE_URL and SUPABASE_KEY are loaded from supabase-config.js (loaded before this script)
 // Do NOT redefine them here.
@@ -2088,64 +2086,6 @@ async function deleteSignature(id, name) {
   }
 }
 
-// Process image to make signature dark and clear
-function processSignatureImage(base64Data) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
-      
-      // Draw original image
-      ctx.drawImage(img, 0, 0);
-      
-      // Get image data
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imageData.data;
-      
-      // Process each pixel - make signature dark/black
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-        const a = data[i + 3];
-        
-        // Calculate grayscale
-        const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-        
-        // Increase contrast and threshold to make signature black
-        // Dark pixels become pure black, light pixels become transparent/white
-        if (a < 50) {
-          // Transparent pixel - keep transparent
-          data[i] = 255;
-          data[i + 1] = 255;
-          data[i + 2] = 255;
-          data[i + 3] = 0;
-        } else if (gray < 180) {
-          // Dark pixel (signature stroke) - make pure black
-          data[i] = 0;
-          data[i + 1] = 0;
-          data[i + 2] = 0;
-          data[i + 3] = 255;
-        } else {
-          // Light pixel - make transparent
-          data[i] = 255;
-          data[i + 1] = 255;
-          data[i + 2] = 255;
-          data[i + 3] = 0;
-        }
-      }
-      
-      ctx.putImageData(imageData, 0, 0);
-      resolve(canvas.toDataURL('image/png'));
-    };
-    img.onerror = () => resolve(base64Data); // Return original if processing fails
-    img.src = base64Data;
-  });
-}
-
 async function uploadMissingSignature(name) {
   const input = document.createElement('input');
   input.type = 'file';
@@ -2347,16 +2287,16 @@ function selectSignature(url, name) {
 
 // ============================================
 // SIGNATURE IMAGE PROCESSING
-// Removes white backgrounds, feather edges, apply natural ink variance
-// so signatures look like real pen strokes instead of pasted images.
+// Removes paper backgrounds and reinforces faint ink without resampling.
+// Reprocessing is safe and does not progressively degrade the signature.
 // ============================================
 
 /**
- * Process a signature image to make it look natural on a PDF.
+ * Process a signature image so it remains dark and legible on a PDF.
  * Steps:
  * 1. Remove white/near-white background (make transparent)
- * 2. Feather edges for smooth blending
- * 3. Apply slight random opacity variance (simulates real ink)
+ * 2. Reinforce pale strokes while retaining transparent edges
+ * 3. Trim empty transparent borders without resizing the bitmap
  * Returns a PNG data URL.
  */
 async function processSignatureImage(src) {
@@ -2373,17 +2313,11 @@ async function processSignatureImage(src) {
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const data = imageData.data;
       
-      // Step 1: Remove white/near-white background
-      // A pixel is "white" if all RGB channels are above the threshold
+      // Remove the paper background once and reinforce the surviving ink.
+      // The fixed opacity levels make this idempotent: processing the same
+      // transparent PNG again cannot progressively fade or blur its strokes.
       removeWhiteBackground(data, canvas.width, canvas.height);
-      
-      // Step 2: Feather edges — smooth the alpha channel boundary
-      // so signatures blend naturally with the document background
-      featherEdges(data, canvas.width, canvas.height);
-      
-      // Step 3: Apply ink variance — slight random opacity variation
-      // This makes the signature look like it was drawn with real ink
-      applyInkVariance(data, canvas.width, canvas.height);
+      reinforceSignatureInk(data);
       
       ctx.putImageData(imageData, 0, 0);
       
@@ -2410,121 +2344,54 @@ async function processSignatureImage(src) {
  */
 function removeWhiteBackground(data, width, height) {
   const threshold = SIG_WHITE_THRESHOLD;
-  const thresholdRange = 255 - threshold; // e.g., 25 for threshold 230
+  let transparentPixels = 0;
+  const pixelCount = width * height;
+
+  for (let i = 3; i < data.length; i += 4) {
+    if (data[i] < 245) transparentPixels++;
+  }
+
+  // Stored signatures are already transparent. Do not remove their pale
+  // anti-aliased edges again; only reinforce them in the next step.
+  if (transparentPixels > pixelCount * 0.005) return;
   
   for (let i = 0; i < data.length; i += 4) {
     const r = data[i];
     const g = data[i + 1];
     const b = data[i + 2];
     const a = data[i + 3];
-    
-    if (a === 0) continue; // Already transparent
-    
-    // Check how "white" this pixel is
-    const minChannel = Math.min(r, g, b);
-    const maxChannel = Math.max(r, g, b);
-    
-    // If all channels are above threshold, it's white/near-white background
-    if (minChannel >= threshold) {
-      // Fully white → fully transparent
-      // Near-white → partially transparent based on proximity to white
-      const whiteness = (minChannel - threshold) / thresholdRange;
-      data[i + 3] = Math.round(a * (1 - whiteness));
-    }
-    // If the pixel is light but has some color variation,
-    // reduce opacity proportionally (handles light-colored scan artifacts)
-    else if (maxChannel >= threshold && (maxChannel - minChannel) < 30) {
-      const lightness = (maxChannel - threshold) / thresholdRange;
-      const colorness = (maxChannel - minChannel) / 30;
-      // Reduce opacity based on lightness but preserve some for colored pixels
-      const reduction = lightness * (1 - colorness);
-      data[i + 3] = Math.round(a * (1 - reduction * 0.8));
-    }
+    if (a === 0) continue;
+
+    const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+    const inkStrength = Math.max(0, Math.min(1, (threshold - luminance) / 185));
+    data[i + 3] = inkStrength <= 0
+      ? 0
+      : Math.round(a * Math.min(1, Math.pow(inkStrength, 0.58) * 1.35));
   }
 }
 
 /**
- * Feather the edges of a signature for smooth blending.
- * Uses a simple alpha-smoothing pass on boundary pixels.
+ * Make faint transparent strokes solid and dark without resampling pixels.
+ * Alpha is mapped to stable levels so repeated processing is lossless.
  */
-function featherEdges(data, width, height) {
-  const radius = SIG_FEATHER_RADIUS;
-  if (radius <= 0) return;
-  
-  // Create a copy of the alpha channel for reading
-  const alphaCopy = new Uint8Array(width * height);
-  for (let i = 0; i < width * height; i++) {
-    alphaCopy[i] = data[i * 4 + 3];
-  }
-  
-  // Smooth alpha at boundaries (where alpha changes significantly)
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const idx = y * width + x;
-      const currentAlpha = alphaCopy[idx];
-      
-      if (currentAlpha === 0 || currentAlpha === 255) continue; // Skip fully transparent/opaque
-      
-      // Check if this is an edge pixel (neighbor has very different alpha)
-      let isEdge = false;
-      for (let dy = -radius; dy <= radius && !isEdge; dy++) {
-        for (let dx = -radius; dx <= radius && !isEdge; dx++) {
-          if (dx === 0 && dy === 0) continue;
-          const nx = x + dx;
-          const ny = y + dy;
-          if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
-          const neighborAlpha = alphaCopy[ny * width + nx];
-          if (Math.abs(neighborAlpha - currentAlpha) > 40) {
-            isEdge = true;
-          }
-        }
-      }
-      
-      if (isEdge) {
-        // Average alpha with neighbors for smoother edge
-        let sum = 0;
-        let count = 0;
-        for (let dy = -radius; dy <= radius; dy++) {
-          for (let dx = -radius; dx <= radius; dx++) {
-            const nx = x + dx;
-            const ny = y + dy;
-            if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
-            sum += alphaCopy[ny * width + nx];
-            count++;
-          }
-        }
-        // Blend: 60% original + 40% smoothed for subtle effect
-        const smoothed = Math.round(sum / count);
-        data[idx * 4 + 3] = Math.round(currentAlpha * 0.6 + smoothed * 0.4);
-      }
-    }
-  }
-}
-
-/**
- * Apply subtle random opacity variance to simulate real ink.
- * Real pen strokes have slight variations in ink density.
- */
-function applyInkVariance(data, width, height) {
-  const maxVariance = SIG_INK_VARIANCE;
-  
-  // Use a simple deterministic pseudo-random based on position
-  // This ensures the same signature always gets the same treatment
-  let seed = 12345;
-  function pseudoRandom() {
-    seed = (seed * 16807) % 2147483647;
-    return (seed - 1) / 2147483646;
-  }
-  
+function reinforceSignatureInk(data) {
   for (let i = 0; i < data.length; i += 4) {
-    const a = data[i + 3];
-    if (a === 0) continue; // Skip transparent
-    
-    // Apply random variance: slightly vary the opacity
-    // Range: [1 - maxVariance, 1 + maxVariance], clamped to [0, 1]
-    const variance = 1 + (pseudoRandom() * 2 - 1) * maxVariance;
-    const newAlpha = Math.min(255, Math.max(0, Math.round(a * variance)));
-    data[i + 3] = newAlpha;
+    const alpha = data[i + 3];
+    if (alpha < 18) {
+      data[i + 3] = 0;
+      continue;
+    }
+
+    data[i + 3] = alpha <= 72 ? 72 : alpha <= 160 ? 160 : 255;
+
+    // Preserve blue/black ink hue while limiting brightness to a dark tone.
+    const maxChannel = Math.max(data[i], data[i + 1], data[i + 2]);
+    if (maxChannel > 80) {
+      const factor = 80 / maxChannel;
+      data[i] = Math.round(data[i] * factor);
+      data[i + 1] = Math.round(data[i + 1] * factor);
+      data[i + 2] = Math.round(data[i + 2] * factor);
+    }
   }
 }
 

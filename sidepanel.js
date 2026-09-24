@@ -2662,16 +2662,29 @@ async function processAndTrimSignature(src) {
       const data = imageData.data;
       const w = canvas.width, h = canvas.height;
       
-      // Step 1: Remove white/near-white background
-      const threshold = 230;
-      const thresholdRange = 255 - threshold;
+      // Step 1: Remove the paper while preserving and reinforcing faint ink.
+      const threshold = 248;
       for (let i = 0; i < data.length; i += 4) {
         const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
         if (a === 0) continue;
-        const minChannel = Math.min(r, g, b);
-        if (minChannel >= threshold) {
-          const whiteness = (minChannel - threshold) / thresholdRange;
-          data[i + 3] = Math.round(a * (1 - whiteness));
+        const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+        const inkStrength = Math.max(0, Math.min(1, (threshold - luminance) / 185));
+        let alpha = inkStrength <= 0
+          ? 0
+          : Math.round(a * Math.min(1, Math.pow(inkStrength, 0.58) * 1.35));
+
+        if (alpha < 18) alpha = 0;
+        else alpha = alpha <= 72 ? 72 : alpha <= 160 ? 160 : 255;
+        data[i + 3] = alpha;
+
+        if (alpha > 0) {
+          const maxChannel = Math.max(r, g, b);
+          if (maxChannel > 80) {
+            const factor = 80 / maxChannel;
+            data[i] = Math.round(r * factor);
+            data[i + 1] = Math.round(g * factor);
+            data[i + 2] = Math.round(b * factor);
+          }
         }
       }
       
@@ -3911,4 +3924,3 @@ async function askDuplicateAction(duplicates, existingSignatures) {
     });
   });
 }
-
