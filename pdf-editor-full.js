@@ -35,7 +35,6 @@ let tabCounter = 0;
 // ============================================
 // #20 COLLAPSIBLE SIDEBAR STATE
 // ============================================
-let sidebarCollapsed = localStorage.getItem('pe_sidebarCollapsed') === 'true';
 
 // ============================================
 // #21 DRAWING TOOL STATE
@@ -639,14 +638,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Try to restore auto-saved state after a short delay (wait for PDFs to load)
   setTimeout(restoreAutoSave, 1500);
   
-  // #20 Apply initial sidebar state
-  applySidebarState();
+  // The sidebar is always available; remove preferences from the old collapse control.
+  localStorage.removeItem('pe_sidebarCollapsed');
 
-  // #20b Restore clean view state if previously active
-  if (localStorage.getItem('pe_cleanView') === 'true') {
-    cleanViewActive = false; // reset so toggle will activate
-    toggleCleanView();
-  }
+  // Restore the preferred colour theme.
+  applyLightMode(localStorage.getItem('pe_lightMode') === 'true');
   
   showStatus('Carga uno o más PDFs para comenzar');
 });
@@ -725,13 +721,9 @@ function setupEventListeners() {
   const btnAddDate = $('btnAddDate');
   if (btnAddDate) btnAddDate.addEventListener('click', addCurrentDate);
   
-  // #20 Sidebar toggle
-  const btnSidebarToggle = $('btnSidebarToggle');
-  if (btnSidebarToggle) btnSidebarToggle.addEventListener('click', toggleSidebar);
-
-  // Vista limpia toggle
-  const btnToggleCleanView = $('btnToggleCleanView');
-  if (btnToggleCleanView) btnToggleCleanView.addEventListener('click', toggleCleanView);
+  // Light/dark colour theme toggle
+  const btnToggleLightMode = $('btnToggleLightMode');
+  if (btnToggleLightMode) btnToggleLightMode.addEventListener('click', toggleLightMode);
   
   // #21 Drawing tool buttons
   const btnDraw = $('btnDraw');
@@ -982,6 +974,7 @@ function loadPdfAsNewTab(file, switchToIt = true) {
       
       documents.push(newDoc);
       createTab(newDoc);
+      updateDocumentTabsVisibility();
       
       if (switchToIt || documents.length === 1) {
         switchToTab(documents.length - 1);
@@ -1029,6 +1022,15 @@ function createTab(doc) {
   });
   
   tabsList.appendChild(tab);
+}
+
+// A tab bar is unnecessary for a single PDF. It only appears when it is
+// actually needed to switch between two or more open documents.
+function updateDocumentTabsVisibility() {
+  const docTabs = $('documentTabs');
+  const hasMultiple = documents.length > 1;
+  if (docTabs) docTabs.classList.toggle('has-multiple', hasMultiple);
+  document.body.classList.toggle('multiple-documents', hasMultiple);
 }
 
 function switchToTab(index) {
@@ -1081,6 +1083,7 @@ function closeTab(docId) {
   
   const tab = document.querySelector(`.doc-tab[data-doc-id="${docId}"]`);
   if (tab) tab.remove();
+  updateDocumentTabsVisibility();
   
   if (documents.length === 0) {
     activeDocIndex = -1;
@@ -3060,6 +3063,7 @@ function clearEditor() {
   
   // Remove all tabs
   document.querySelectorAll('.doc-tab').forEach(tab => tab.remove());
+  updateDocumentTabsVisibility();
   
   // Show upload area
   showUploadArea();
@@ -3069,76 +3073,27 @@ function clearEditor() {
 // hexToRgb moved to shared-utils.js
 
 // ============================================
-// #20 COLLAPSIBLE SIDEBAR
+// LIGHT MODE
 // ============================================
-function toggleSidebar() {
-  sidebarCollapsed = !sidebarCollapsed;
-  localStorage.setItem('pe_sidebarCollapsed', sidebarCollapsed);
-  applySidebarState();
-}
+let lightModeActive = false;
 
-function applySidebarState() {
-  const sidebar = $('editorSidebar');
-  const canvasArea = $('canvasArea');
-  if (sidebar) {
-    if (sidebarCollapsed) {
-      sidebar.classList.add('sidebar-collapsed');
-    } else {
-      sidebar.classList.remove('sidebar-collapsed');
-    }
-  }
-  if (canvasArea) {
-    if (sidebarCollapsed) {
-      canvasArea.classList.add('sidebar-expanded');
-    } else {
-      canvasArea.classList.remove('sidebar-expanded');
-    }
+function applyLightMode(active) {
+  lightModeActive = Boolean(active);
+  document.body.classList.toggle('light-mode', lightModeActive);
+  const btn = $('btnToggleLightMode');
+  if (btn) {
+    btn.classList.toggle('primary', lightModeActive);
+    btn.classList.toggle('secondary', !lightModeActive);
+    btn.innerHTML = lightModeActive
+      ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg> Modo oscuro`
+      : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line></svg> Modo claro`;
   }
 }
 
-// ============================================
-// #20b CLEAN VIEW (Vista limpia)
-// ============================================
-let cleanViewActive = false;
-
-function toggleCleanView() {
-  cleanViewActive = !cleanViewActive;
-  const sidebar = $('editorSidebar');
-  const canvasArea = $('canvasArea');
-  const docTabs = $('documentTabs');
-  const btn = $('btnToggleCleanView');
-
-  if (cleanViewActive) {
-    // Activate clean view: hide sidebar, doc tabs, expand canvas
-    if (sidebar) sidebar.style.display = 'none';
-    if (docTabs) docTabs.style.display = 'none';
-    if (canvasArea) {
-      canvasArea.style.marginLeft = '0';
-      canvasArea.style.padding = '40px';
-    }
-    if (btn) {
-      btn.classList.remove('secondary');
-      btn.classList.add('primary');
-      btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line><line x1="15" y1="3" x2="15" y2="21"></line></svg> Vista editor`;
-    }
-    localStorage.setItem('pe_cleanView', 'true');
-  } else {
-    // Deactivate clean view: restore sidebar, doc tabs, normal canvas
-    if (sidebar) sidebar.style.display = '';
-    if (docTabs) docTabs.style.display = '';
-    if (canvasArea) {
-      canvasArea.style.marginLeft = '';
-      canvasArea.style.padding = '';
-    }
-    if (btn) {
-      btn.classList.remove('primary');
-      btn.classList.add('secondary');
-      btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg> Vista limpia`;
-    }
-    localStorage.setItem('pe_cleanView', 'false');
-    // Re-apply sidebar state
-    applySidebarState();
-  }
+function toggleLightMode() {
+  applyLightMode(!lightModeActive);
+  localStorage.setItem('pe_lightMode', String(lightModeActive));
+  localStorage.removeItem('pe_cleanView');
 }
 
 // ============================================
@@ -3536,8 +3491,19 @@ async function renderPageThumbnails() {
   }
   
   if (noPdf) noPdf.style.display = 'none';
-  container.style.display = 'flex';
+  container.style.display = 'grid';
   container.innerHTML = '';
+
+  // Keep every page reachable when the PDF contains many sheets. Native
+  // drag-and-drop does not reliably scroll nested panels, so gently scroll
+  // the thumbnail grid when the pointer approaches either edge.
+  container.ondragover = (e) => {
+    e.preventDefault();
+    const bounds = container.getBoundingClientRect();
+    const edgeSize = 44;
+    if (e.clientY < bounds.top + edgeSize) container.scrollTop -= 14;
+    else if (e.clientY > bounds.bottom - edgeSize) container.scrollTop += 14;
+  };
   
   for (let i = 1; i <= activeDoc.totalPages; i++) {
     const thumb = document.createElement('div');
@@ -3576,6 +3542,7 @@ async function renderPageThumbnails() {
     // Drag events
     thumb.addEventListener('dragstart', (e) => {
       e.dataTransfer.setData('text/plain', i.toString());
+      e.dataTransfer.effectAllowed = 'move';
       thumb.classList.add('dragging');
     });
     
@@ -3585,6 +3552,7 @@ async function renderPageThumbnails() {
     
     thumb.addEventListener('dragover', (e) => {
       e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
       thumb.classList.add('drag-over');
     });
     
