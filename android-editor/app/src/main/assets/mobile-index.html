@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+  <title>Agenda Staff PDF</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0f172a;color:#e2e8f0;font-family:system-ui,sans-serif}.card{width:min(92vw,420px);padding:28px;border:1px solid #334155;border-radius:18px;background:#172033;box-shadow:0 18px 60px #0008}.logo{display:block;width:100%;max-width:290px;margin:0 auto 24px}h1{font-size:22px;text-align:center;margin:0 0 22px}label{display:block;font-size:12px;color:#94a3b8;margin:12px 0 5px}input{width:100%;padding:13px;border:1px solid #475569;border-radius:9px;background:#0f172a;color:white;font-size:16px}button{width:100%;padding:13px;margin-top:20px;border:0;border-radius:9px;background:#2563eb;color:white;font-weight:700;font-size:15px}button:disabled{opacity:.55}.error{min-height:20px;color:#fca5a5;font-size:13px;text-align:center;margin-top:12px}.hint{text-align:center;color:#64748b;font-size:11px;margin-top:16px}
+  </style>
+</head>
+<body>
+  <main class="card">
+    <img class="logo" src="icons/workout-events-logo.png" alt="Workout Events">
+    <h1>Editor PDF</h1>
+    <form id="loginForm">
+      <label for="email">Correo electrónico</label><input id="email" type="email" autocomplete="username" required>
+      <label for="password">Contraseña</label><input id="password" type="password" autocomplete="current-password" required>
+      <button id="loginButton" type="submit">Entrar</button>
+      <div class="error" id="error"></div>
+    </form>
+    <p class="hint">Utiliza el mismo usuario que en Agenda Staff.</p>
+  </main>
+  <script src="supabase-config.js"></script>
+  <script src="android-bridge.js"></script>
+  <script>
+    (async()=>{const saved=await chrome.storage.local.get('session');if(saved.session?.access_token)location.replace('pdf-editor-full.html')})();
+    loginForm.addEventListener('submit',async event=>{event.preventDefault();error.textContent='';loginButton.disabled=true;loginButton.textContent='Entrando…';try{const response=await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`,{method:'POST',headers:{apikey:SUPABASE_ANON_KEY,'Content-Type':'application/json'},body:JSON.stringify({email:email.value.trim(),password:password.value})});const data=await response.json();if(!response.ok)throw new Error(data.error_description||data.msg||'No se pudo iniciar sesión');const meta=data.user?.user_metadata||{};await chrome.storage.local.set({session:data,user:{id:data.user.id,email:data.user.email,name:meta.name||meta.full_name||data.user.email}});location.replace('pdf-editor-full.html')}catch(err){error.textContent=err.message;loginButton.disabled=false;loginButton.textContent='Entrar'}});
+  </script>
+</body>
+</html>

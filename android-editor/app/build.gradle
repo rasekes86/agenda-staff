@@ -1,0 +1,37 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.workoutevents.agendastaff.pdf'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.workoutevents.agendastaff.pdf'
+        minSdk 26
+        targetSdk 35
+        versionCode 303
+        versionName '3.0.3'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.debug
+        }
+    }
+}
+
+def editorRoot = rootProject.projectDir.parentFile
+def generatedAssets = layout.buildDirectory.dir('generated/editorAssets')
+
+tasks.register('prepareEditorAssets', Copy) {
+    from(editorRoot) {
+        include 'pdf-editor-full.html', 'pdf-editor-full.css', 'pdf-editor-full.js'
+        include 'android-mobile.css', 'android-bridge.js', 'shared-utils.js', 'supabase-config.js'
+        include 'jspdf.umd.min.js', 'pdf-lib.min.js', 'pdf.min.js', 'pdf.worker.min.js', 'mammoth.browser.min.js'
+        include 'icons/workout-events-logo.png'
+    }
+    into generatedAssets
+}
+
+android.sourceSets.main.assets.srcDir generatedAssets
+tasks.named('preBuild').configure { dependsOn tasks.named('prepareEditorAssets') }

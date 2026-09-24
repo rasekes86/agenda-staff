@@ -1,0 +1,40 @@
+.mobile-only { display: none !important; }
+
+@media (max-width: 900px) {
+  body.android-app { min-width: 760px; }
+  body.android-app .mobile-only { display: flex !important; }
+  body.android-app .editor-header {
+    position: sticky;
+    top: 0;
+    z-index: 140;
+    padding: 7px 10px;
+    gap: 7px;
+  }
+  body.android-app .editor-logo { height: 25px; max-width: 130px; }
+  body.android-app .toolbar-btn { padding: 7px 10px; font-size: 11px; }
+  body.android-app .header-left { gap: 6px; }
+  body.android-app .file-name { max-width: 120px; }
+  body.android-app .editor-sidebar {
+    top: 48px;
+    width: 220px;
+    min-width: 220px;
+    height: calc(100vh - 48px);
+    max-height: calc(100vh - 48px);
+  }
+  body.android-app .canvas-area { margin-left: 220px; }
+  body.android-app .document-tabs { top: 48px; }
+  body.android-app .sidebar-btn,
+  body.android-app .tool-tab { min-height: 38px; }
+  body.android-app input,
+  body.android-app textarea,
+  body.android-app select,
+  body.android-app button { touch-action: manipulation; }
+}
+
+@media (max-width: 600px) {
+  body.android-app { min-width: 680px; }
+  body.android-app .editor-sidebar { width: 205px; min-width: 205px; }
+  body.android-app .canvas-area { margin-left: 205px; }
+  body.android-app .zoom-controls,
+  body.android-app .file-name { display: none !important; }
+}
