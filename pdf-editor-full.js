@@ -809,22 +809,6 @@ function setupEventListeners() {
   const closeCopySelectorBtn = $('closeCopySelectorBtn');
   if (closeCopySelectorBtn) closeCopySelectorBtn.addEventListener('click', closeCopySelector);
 
-  // Date count modal
-  const btnConfirmDateCount = $('btnConfirmDateCount');
-  if (btnConfirmDateCount) btnConfirmDateCount.addEventListener('click', confirmAddDates);
-  const btnCancelDateCount = $('btnCancelDateCount');
-  if (btnCancelDateCount) btnCancelDateCount.addEventListener('click', () => {
-    const dateCountModal = $('dateCountModal');
-    if (dateCountModal) dateCountModal.classList.remove('show');
-  });
-  // Enter key in date count input
-  const dateCountInput = $('dateCountInput');
-  if (dateCountInput) {
-    dateCountInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') confirmAddDates();
-    });
-  }
-
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
     // #21 Enter in draw mode = confirm drawing
@@ -1271,6 +1255,7 @@ async function renderPage() {
     
     const overlay = document.createElement('div');
     overlay.className = 'elements-overlay';
+    if (stampMode) overlay.classList.add('placement-mode');
     overlay.style.width = canvas.width + 'px';
     overlay.style.height = canvas.height + 'px';
     
@@ -1558,60 +1543,7 @@ function confirmTextWithPosition() {
 }
 
 function addCurrentDate() {
-  const activeDoc = getActiveDoc();
-  if (!activeDoc || !activeDoc.pdfJsDoc) {
-    showStatus('Primero carga un PDF', 'error');
-    return;
-  }
-  
-  // Show quantity modal
-  const dateCountModal = $('dateCountModal');
-  if (dateCountModal) {
-    const dateCountInput = $('dateCountInput');
-    if (dateCountInput) dateCountInput.value = 1;
-    dateCountModal.classList.add('show');
-    if (dateCountInput) dateCountInput.focus();
-  }
-}
-
-function confirmAddDates() {
-  const activeDoc = getActiveDoc();
-  if (!activeDoc || !activeDoc.pdfJsDoc) return;
-  
-  const dateCountInput = $('dateCountInput');
-  const dateCountModal = $('dateCountModal');
-  const count = dateCountInput ? parseInt(dateCountInput.value) || 1 : 1;
-  
-  if (count < 1 || count > 50) {
-    showStatus('Introduce un número entre 1 y 50', 'error');
-    return;
-  }
-  
-  if (dateCountModal) dateCountModal.classList.remove('show');
-  
-  const today = new Date();
-  const dateStr = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
-  
-  const pageElements = activeDoc.elements[activeDoc.currentPage] || [];
-  const baseX = activeDoc.pageWidth / 2 - 40;
-  const baseY = activeDoc.pageHeight / 2;
-  const spacing = 25; // vertical space between dates
-  
-  for (let i = 0; i < count; i++) {
-    pushElement(activeDoc, activeDoc.currentPage, {
-      type: 'text',
-      text: dateStr,
-      x: baseX,
-      y: baseY + (i * spacing),
-      size: 14,
-      color: '#000000'
-    });
-  }
-  
-  updateTabModified(activeDoc.id, true);
-  renderPage();
-  showStatus(`${count} fecha(s) añadida(s): ${dateStr}`, 'success');
-  scheduleAutoSave();
+  enterStampMode('date');
 }
 
 function makeDraggable(div, el, scale, activeDoc, idx) {
@@ -3215,9 +3147,9 @@ function confirmDrawing() {
 }
 
 // ============================================
-// #22 STAMP TOOLS (Check ✓ and X ✗)
+// #22 PLACEMENT TOOLS (Check ✓, X ✗ and current date)
 // ============================================
-let stampMode = null; // 'check' or 'x' or null
+let stampMode = null; // 'check', 'x', 'date' or null
 
 /**
  * Generate a stamp image (check or X) as a PNG data URL.
@@ -3282,11 +3214,19 @@ function enterStampMode(type) {
   }
   
   stampMode = type;
-  showStatus(`Modo ${type === 'check' ? '✓ Check' : '✗ X'} activado - haz clic en el PDF para colocar`, 'success');
+  const buttonIds = { check: 'btnStampCheck', x: 'btnStampX', date: 'btnAddDate' };
+  Object.values(buttonIds).forEach(id => $(id)?.classList.remove('active'));
+  $(buttonIds[type])?.classList.add('active');
+  getCanvasContainer()?.querySelector('.elements-overlay')?.classList.add('placement-mode');
+
+  const modeLabel = type === 'check' ? '✓ Check' : type === 'x' ? '✗ X' : '📅 Fecha';
+  showStatus(`Modo ${modeLabel} activado - haz clic en el PDF para colocar`, 'success');
 }
 
 function exitStampMode() {
   stampMode = null;
+  ['btnStampCheck', 'btnStampX', 'btnAddDate'].forEach(id => $(id)?.classList.remove('active'));
+  getCanvasContainer()?.querySelector('.elements-overlay')?.classList.remove('placement-mode');
 }
 
 function onStampClick(e) {
@@ -3305,6 +3245,28 @@ function onStampClick(e) {
   const clickX = e.clientX - rect.left;
   const clickY = e.clientY - rect.top;
   const scale = activeDoc.zoom;
+
+  if (stampMode === 'date') {
+    const today = new Date();
+    const dateStr = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
+    const fontSize = 14;
+    const estimatedWidth = 78;
+
+    pushElement(activeDoc, activeDoc.currentPage, {
+      type: 'text',
+      text: dateStr,
+      x: Math.max(0, clickX / scale - estimatedWidth / 2),
+      y: Math.max(0, clickY / scale - fontSize / 2),
+      size: fontSize,
+      color: '#000000'
+    });
+
+    updateTabModified(activeDoc.id, true);
+    renderPage();
+    showStatus(`📅 Fecha añadida: ${dateStr}`, 'success');
+    scheduleAutoSave();
+    return;
+  }
   
   // Stamp size (in PDF points, ~30pt)
   const stampSize = 30;

@@ -351,6 +351,7 @@ body.multiple-documents .editor-sidebar { padding-top: 44px; }
 
 .sidebar-btn:hover { background: #3d4f63; color: #f1f5f9; }
 .sidebar-btn.active { background: #4b6a9b; }
+.sidebar-btn.active { outline: 2px solid #60a5fa; outline-offset: 1px; }
 .sidebar-btn.primary { background: #4b6a9b; color: #e2e8f0; }
 .sidebar-btn.primary:hover { background: #3b82f6; }
 .sidebar-btn.signature-btn { background: #2d6b5a; color: #a7f3d0; }
@@ -477,6 +478,8 @@ body.multiple-documents .editor-sidebar { padding-top: 44px; }
   left: 0;
   z-index: 1;
 }
+
+.elements-overlay.placement-mode { cursor: crosshair; }
 
 .pdf-element {
   position: absolute;
