@@ -619,6 +619,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       const rect = overlay.getBoundingClientRect();
       const x = (e.clientX - rect.left) / scale;
       const y = (e.clientY - rect.top) / scale;
+
+      if (templateEditorActive) {
+        e.preventDefault();
+        showTemplateFieldPicker({ page: activeDoc.currentPage, x, y });
+        return;
+      }
       
       const textInput = $('textInput');
       const textSize = $('textSize');
@@ -873,6 +879,16 @@ function setupEventListeners() {
     }
     if (e.key === 'Escape' && stampMode) {
       exitStampMode();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && templateEditorActive && !e.target.closest('input, textarea, select')) {
+      e.preventDefault();
+      copyTemplateFields();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && templateEditorActive && !e.target.closest('input, textarea, select')) {
+      e.preventDefault();
+      pasteTemplateFields();
       return;
     }
     
@@ -1375,7 +1391,7 @@ function createElementDiv(el, idx, scale, activeDoc) {
     placeholder.className = 'placeholder-label';
     placeholder.textContent = el.placeholderLabel || el.fieldGroup || 'HUECO';
     div.appendChild(placeholder);
-    if (el.type === 'text') {
+    if (el.type === 'text' && !el.templateDraft) {
       div.style.width = ((el.width || 150) * scale) + 'px';
       div.style.height = ((el.height || Math.max(28, (el.size || 14) + 12)) * scale) + 'px';
     } else {
@@ -1497,12 +1513,12 @@ function makeWheelResizable(div, el, scale, activeDoc, idx) {
     e.stopPropagation();
 
     if (!resizeStart) {
-      resizeStart = el.type === 'text'
+      resizeStart = el.type === 'text' && !el.templateDraft
         ? { size: el.size || DEFAULT_FONT_SIZE }
         : { x: el.x, y: el.y, width: el.width, height: el.height };
     }
 
-    if (el.type === 'text') {
+    if (el.type === 'text' && !el.templateDraft) {
       const step = e.deltaY < 0 ? 1 : -1;
       el.size = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, (el.size || DEFAULT_FONT_SIZE) + step));
       div.style.fontSize = (el.size * scale) + 'px';
@@ -1532,13 +1548,15 @@ function makeWheelResizable(div, el, scale, activeDoc, idx) {
         img.style.width = (newWidth * scale) + 'px';
         img.style.height = (newHeight * scale) + 'px';
       }
+      div.style.width = (newWidth * scale) + 'px';
+      div.style.height = (newHeight * scale) + 'px';
       div.style.left = (el.x * scale) + 'px';
       div.style.top = (el.y * scale) + 'px';
     }
 
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
-      const currentProps = el.type === 'text'
+      const currentProps = el.type === 'text' && !el.templateDraft
         ? { size: el.size }
         : { x: el.x, y: el.y, width: el.width, height: el.height };
       pushUndo(activeDoc.id, {
@@ -1783,7 +1801,7 @@ function makeResizable(div, el, scale, activeDoc) {
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
     
-    if (el.type === 'text') {
+    if (el.type === 'text' && !el.templateDraft) {
       const delta = Math.max(Math.abs(dx), Math.abs(dy));
       const scaleFactor = 1 + (dx > 0 ? delta / RESIZE_SENSITIVITY : -delta / RESIZE_SENSITIVITY);
       let newFontSize = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, startFontSize * scaleFactor));
@@ -1835,6 +1853,8 @@ function makeResizable(div, el, scale, activeDoc) {
         img.style.width = (newWidth * scale) + 'px';
         img.style.height = (newHeight * scale) + 'px';
       }
+      div.style.width = (newWidth * scale) + 'px';
+      div.style.height = (newHeight * scale) + 'px';
       div.style.left = (newX * scale) + 'px';
       div.style.top = (newY * scale) + 'px';
     }
@@ -1847,7 +1867,7 @@ function makeResizable(div, el, scale, activeDoc) {
     div.classList.remove('selected');
     
     // Record undo for resize
-    if (el.type === 'text') {
+    if (el.type === 'text' && !el.templateDraft) {
       pushUndo(activeDoc.id, { type: 'resize', page: activeDoc.currentPage, index: elIdx, prevProps: { size: startFontSize }, currentProps: { size: el.size } });
     } else {
       pushUndo(activeDoc.id, { type: 'resize', page: activeDoc.currentPage, index: elIdx, prevProps: { x: startXPos, y: startYPos, width: startWidth, height: startHeight }, currentProps: { x: el.x, y: el.y, width: el.width, height: el.height } });
@@ -1865,7 +1885,7 @@ function makeResizable(div, el, scale, activeDoc) {
       startY = e.clientY;
       elIdx = parseInt(div.dataset.idx);
       
-      if (el.type === 'text') {
+      if (el.type === 'text' && !el.templateDraft) {
         startFontSize = el.size || 14;
       } else {
         startWidth = el.width;
@@ -3126,6 +3146,8 @@ const TEMPLATES_STORAGE_KEY = 'pdfEditorTemplates';
 let templateCache = [];
 let templatePlacementMode = false;
 let pendingTemplateSlot = null;
+let templateEditorActive = false;
+let templateFieldClipboard = [];
 
 async function ensureSession() {
   if (session?.access_token) return session;
@@ -3239,6 +3261,7 @@ function showTemplatesModal() {
   const activeDoc = getActiveDoc();
   if (!activeDoc) { showStatus('Primero carga un PDF', 'error'); return; }
   if (collectTemplateDraftSlots().length) {
+    templateEditorActive = true;
     if ($('templateListView')) $('templateListView').style.display = 'none';
     if ($('templateSaveView')) $('templateSaveView').style.display = '';
     renderTemplateSlotSelection();
@@ -3250,6 +3273,7 @@ function showTemplatesModal() {
 }
 
 function showTemplateListView() {
+  templateEditorActive = false;
   templatePlacementMode = false;
   pendingTemplateSlot = null;
   if ($('templateListView')) $('templateListView').style.display = '';
@@ -3262,6 +3286,7 @@ function showTemplateSaveView() {
   removeTemplateDraftSlots();
   templatePlacementMode = false;
   pendingTemplateSlot = null;
+  templateEditorActive = true;
   if ($('templateListView')) $('templateListView').style.display = 'none';
   if ($('templateSaveView')) $('templateSaveView').style.display = '';
   if ($('templateNameInput')) {
@@ -3283,6 +3308,32 @@ function collectTemplateDraftSlots() {
   return result;
 }
 
+function copyTemplateFields() {
+  const activeDoc = getActiveDoc();
+  const elements = activeDoc?.elements[activeDoc.currentPage] || [];
+  const selected = [...selectedIndices].sort((a, b) => a - b).map(index => elements[index]).filter(el => el?.templateDraft);
+  if (!selected.length) { showStatus('Selecciona primero uno o varios campos de la plantilla', 'error'); return; }
+  templateFieldClipboard = JSON.parse(JSON.stringify(selected));
+  showStatus(`${selected.length} campo(s) copiado(s). Pulsa Ctrl+V para duplicar`, 'success');
+}
+
+function pasteTemplateFields() {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc || !templateFieldClipboard.length) { showStatus('No hay campos de plantilla copiados', 'error'); return; }
+  const pageElements = activeDoc.elements[activeDoc.currentPage] ||= [];
+  templateFieldClipboard.forEach((source, index) => {
+    const clone = JSON.parse(JSON.stringify(source));
+    const offset = 18 + index * 6;
+    clone.x = Math.min(Math.max(0, activeDoc.pageWidth - clone.width), clone.x + offset);
+    clone.y = Math.min(Math.max(0, activeDoc.pageHeight - clone.height), clone.y + offset);
+    pageElements.push(clone);
+  });
+  updateTabModified(activeDoc.id, true);
+  renderTemplateSlotSelection();
+  renderPage();
+  showStatus(`${templateFieldClipboard.length} campo(s) duplicado(s)`, 'success');
+}
+
 function renderTemplateSlotSelection() {
   const list = $('templateSlotList');
   if (!list) return;
@@ -3296,11 +3347,7 @@ function renderTemplateSlotSelection() {
     return `<div style="display:flex;align-items:center;gap:6px;padding:6px;background:#1e293b;border-radius:6px;margin-bottom:4px;">
       <span title="Página ${item.page}">${icons[item.el.type]} P${item.page}</span>
       <strong style="flex:1;color:#c4b5fd;font-size:11px;">${escapeHtml(item.el.fieldGroup || 'TEXTO')}</strong>
-      <span class="template-draft-size" title="Ancho × alto">
-        <input type="number" min="20" step="5" value="${Math.round(item.el.width)}" data-template-size="width" data-page="${item.page}" data-index="${item.index}">
-        ×
-        <input type="number" min="20" step="5" value="${Math.round(item.el.height)}" data-template-size="height" data-page="${item.page}" data-index="${item.index}">
-      </span>
+      <span style="color:#64748b;font-size:9px;">${Math.round(item.el.width)}×${Math.round(item.el.height)}</span>
       <button class="sidebar-btn template-draft-delete" data-page="${item.page}" data-index="${item.index}" style="padding:3px 6px;background:#6b2c2c;color:#fca5a5;">✕</button>
     </div>`;
   }).join('');
@@ -3311,20 +3358,6 @@ function renderTemplateSlotSelection() {
       renderTemplateSlotSelection();
       renderPage();
     };
-  });
-  list.querySelectorAll('[data-template-size]').forEach(input => {
-    input.addEventListener('change', () => {
-      const activeDoc = getActiveDoc();
-      const element = activeDoc?.elements[Number(input.dataset.page)]?.[Number(input.dataset.index)];
-      if (!element?.templateDraft) return;
-      const dimension = input.dataset.templateSize;
-      const maximum = dimension === 'width' ? activeDoc.pageWidth : activeDoc.pageHeight;
-      element[dimension] = Math.max(MIN_ELEMENT_SIZE, Math.min(maximum, Number(input.value) || MIN_ELEMENT_SIZE));
-      input.value = Math.round(element[dimension]);
-      updateTabModified(activeDoc.id, true);
-      renderPage();
-      showStatus('Tamaño del campo actualizado', 'success');
-    });
   });
 }
 
@@ -3435,6 +3468,8 @@ function cancelTemplateDraft() {
   removeTemplateDraftSlots();
   templatePlacementMode = false;
   pendingTemplateSlot = null;
+  templateEditorActive = false;
+  templateFieldClipboard = [];
   showTemplateListView();
   renderPage();
 }
@@ -3475,6 +3510,8 @@ async function confirmSaveTemplate() {
     showStatus(`Plantilla “${name}” guardada en este equipo`, 'success');
   }
   removeTemplateDraftSlots();
+  templateEditorActive = false;
+  templateFieldClipboard = [];
   updateTabModified(activeDoc.id, true);
   renderPage();
   showTemplateListView();
@@ -3552,6 +3589,11 @@ function applyTemplate(template) {
       placeholderLabel: `${label} (${groupIndexes[label]}/${groupTotals[label]})`,
       text: '', src: '', name: ''
     };
+    if (['FECHA', 'DATE'].includes(label.toUpperCase()) && placeholder.type === 'text') {
+      const now = new Date();
+      placeholder.text = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
+      clearPlaceholderMetadata(placeholder);
+    }
     pushElement(activeDoc, page, placeholder);
     added++;
   });

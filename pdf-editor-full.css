@@ -1091,16 +1091,6 @@ body.light-mode .template-field-picker button { background: #fff; color: #1e293b
   font-weight: 700;
 }
 .template-quick-fields button:hover { background: #3730a3; color: white; }
-.template-draft-size { display: flex; align-items: center; gap: 3px; color: #94a3b8; font-size: 9px; }
-.template-draft-size input {
-  width: 48px;
-  padding: 3px;
-  border: 1px solid #475569;
-  border-radius: 4px;
-  background: #0f172a;
-  color: #e2e8f0;
-  font-size: 10px;
-}
 .template-card {
   display: flex;
   align-items: center;
@@ -1121,7 +1111,6 @@ body.light-mode .template-quick-fields button,
 body.light-mode .template-card { background: #fff; color: #1e293b; }
 body.light-mode .template-card { border-color: #cbd5e1; }
 body.light-mode .template-card-name { color: #0f172a; }
-body.light-mode .template-draft-size input { background: #fff; color: #0f172a; }
 .pdf-element-placeholder {
   min-width: 70px;
   min-height: 28px;
