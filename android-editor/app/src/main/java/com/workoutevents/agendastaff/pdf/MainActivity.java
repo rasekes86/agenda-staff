@@ -65,7 +65,7 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(true);
         settings.setBuiltInZoomControls(false);
         settings.setMediaPlaybackRequiresUserGesture(false);
-        settings.setUserAgentString(settings.getUserAgentString() + " AgendaStaffPDF/3.0.9");
+        settings.setUserAgentString(settings.getUserAgentString() + " AgendaStaffPDF/3.1.0");
 
         webView.addJavascriptInterface(new AndroidFiles(), "AndroidBridge");
         webView.setWebViewClient(new WebViewClient() {

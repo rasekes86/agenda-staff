@@ -607,6 +607,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupMerge();
   setupSplit();
   setupMultiDocumentTabs();
+  setupMobilePinchZoom();
   
   // Delegated dblclick handler on canvasArea (M9: avoids re-attaching on every render)
   const canvasArea = $('canvasArea');
@@ -1933,11 +1934,83 @@ function navigatePage(delta) {
 function changeZoom(delta) {
   const activeDoc = getActiveDoc();
   if (!activeDoc) return;
-  
-  activeDoc.zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, activeDoc.zoom + delta));
+
+  const canvasArea = $('canvasArea');
+  const oldZoom = activeDoc.zoom;
+  const anchorX = canvasArea ? canvasArea.scrollLeft + canvasArea.clientWidth / 2 : 0;
+  const anchorY = canvasArea ? canvasArea.scrollTop + canvasArea.clientHeight / 2 : 0;
+  activeDoc.zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, oldZoom + delta));
   const zoomLevel = $('zoomLevel');
   if (zoomLevel) zoomLevel.textContent = Math.round(activeDoc.zoom * 100) + '%';
-  renderPage();
+  const ratio = activeDoc.zoom / oldZoom;
+  renderPage().then(() => {
+    if (!canvasArea) return;
+    canvasArea.scrollLeft = Math.max(0, anchorX * ratio - canvasArea.clientWidth / 2);
+    canvasArea.scrollTop = Math.max(0, anchorY * ratio - canvasArea.clientHeight / 2);
+  });
+}
+
+function setupMobilePinchZoom() {
+  if (!window.AndroidBridge) return;
+  const canvasArea = $('canvasArea');
+  if (!canvasArea) return;
+  let pinch = null;
+  const distance = touches => Math.hypot(
+    touches[0].clientX - touches[1].clientX,
+    touches[0].clientY - touches[1].clientY
+  );
+  const midpoint = touches => ({
+    x: (touches[0].clientX + touches[1].clientX) / 2,
+    y: (touches[0].clientY + touches[1].clientY) / 2
+  });
+
+  canvasArea.addEventListener('touchstart', event => {
+    if (event.touches.length !== 2 || isDrawMode) return;
+    const activeDoc = getActiveDoc();
+    const container = canvasArea.querySelector('.canvas-container');
+    if (!activeDoc || !container) return;
+    const areaRect = canvasArea.getBoundingClientRect();
+    const mid = midpoint(event.touches);
+    pinch = {
+      startDistance: distance(event.touches),
+      startZoom: activeDoc.zoom,
+      targetZoom: activeDoc.zoom,
+      container,
+      anchorX: canvasArea.scrollLeft + mid.x - areaRect.left,
+      anchorY: canvasArea.scrollTop + mid.y - areaRect.top,
+      screenX: mid.x - areaRect.left,
+      screenY: mid.y - areaRect.top
+    };
+    container.style.transformOrigin = '0 0';
+    event.preventDefault();
+  }, { passive: false });
+
+  canvasArea.addEventListener('touchmove', event => {
+    if (!pinch || event.touches.length !== 2) return;
+    const factor = distance(event.touches) / Math.max(1, pinch.startDistance);
+    pinch.targetZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, pinch.startZoom * factor));
+    pinch.container.style.transform = `scale(${pinch.targetZoom / pinch.startZoom})`;
+    const zoomLevel = $('zoomLevel');
+    if (zoomLevel) zoomLevel.textContent = Math.round(pinch.targetZoom * 100) + '%';
+    event.preventDefault();
+  }, { passive: false });
+
+  canvasArea.addEventListener('touchend', event => {
+    if (!pinch || event.touches.length >= 2) return;
+    const state = pinch;
+    pinch = null;
+    state.container.style.transform = '';
+    state.container.style.transformOrigin = '';
+    const activeDoc = getActiveDoc();
+    if (!activeDoc) return;
+    activeDoc.zoom = state.targetZoom;
+    renderPage().then(() => {
+      const ratio = state.targetZoom / state.startZoom;
+      canvasArea.scrollLeft = Math.max(0, state.anchorX * ratio - state.screenX);
+      canvasArea.scrollTop = Math.max(0, state.anchorY * ratio - state.screenY);
+    });
+    event.preventDefault();
+  }, { passive: false });
 }
 
 function showTextModal() {
