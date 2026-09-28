@@ -744,6 +744,13 @@ function setupEventListeners() {
   if (btnAddDate) btnAddDate.addEventListener('click', addCurrentDate);
   const btnAddDateParts = $('btnAddDateParts');
   if (btnAddDateParts) btnAddDateParts.addEventListener('click', () => enterStampMode('dateParts'));
+  $('btnAddWorkout')?.addEventListener('click', () => enterStampMode('workout'));
+  $('btnAddCity')?.addEventListener('click', showCityPicker);
+  $('cancelCityPicker')?.addEventListener('click', () => $('cityPickerModal')?.classList.remove('show'));
+  $('confirmCityPicker')?.addEventListener('click', confirmCityPicker);
+  $('cityPickerInput')?.addEventListener('keydown', event => {
+    if (event.key === 'Enter') confirmCityPicker();
+  });
   
   // Light/dark colour theme toggle
   const btnToggleLightMode = $('btnToggleLightMode');
@@ -3805,7 +3812,7 @@ function addTemplateDraftSlot(position, type, label) {
   if (!activeDoc) return;
   const dimensions = type === 'signature'
     ? { width: 180, height: 70 }
-    : { width: label === 'NOMBRE' ? 220 : ['DIA', 'MES', 'AÑO'].includes(label) ? 58 : 110, height: 32 };
+    : { width: label === 'NOMBRE' ? 220 : label === 'WORKOUT EVENTS' ? 150 : ['DIA', 'MES', 'AÑO'].includes(label) ? 58 : 110, height: 32 };
   (activeDoc.elements[position.page] ||= []).push({
     type,
     x: Math.min(position.x, Math.max(0, activeDoc.pageWidth - dimensions.width)),
@@ -3836,6 +3843,8 @@ function showTemplateFieldPicker(position) {
       <button data-field="DIA" data-type="text">📆 Día</button>
       <button data-field="MES" data-type="text">📆 Mes</button>
       <button data-field="AÑO" data-type="text">📆 Año</button>
+      <button data-field="WORKOUT EVENTS" data-type="text">🏢 Workout Events</button>
+      <button data-field="CIUDAD" data-type="text">📍 Ciudad</button>
       <button data-field="FIRMA" data-type="signature">✍️ Firma</button>
     </div>
     <div class="modal-actions"><button class="btn-cancel" data-cancel>Cancelar</button></div>
@@ -4021,7 +4030,14 @@ function applyTemplate(template, options = {}) {
       text: '', src: '', name: ''
     };
     const normalizedLabel = normalizeText(label).toUpperCase();
-    if (['FECHA', 'DATE', 'DIA', 'MES', 'ANO'].includes(normalizedLabel) && placeholder.type === 'text') {
+    if (normalizedLabel === 'WORKOUT EVENTS' && placeholder.type === 'text') {
+      placeholder.text = 'WORKOUT EVENTS';
+      placeholder.bold = true;
+      clearPlaceholderMetadata(placeholder);
+    } else if (normalizedLabel === 'CIUDAD' && placeholder.type === 'text') {
+      placeholder.text = localStorage.getItem('pe_lastCity') || selectedCity || 'Madrid';
+      clearPlaceholderMetadata(placeholder);
+    } else if (['FECHA', 'DATE', 'DIA', 'MES', 'ANO'].includes(normalizedLabel) && placeholder.type === 'text') {
       const now = new Date();
       if (normalizedLabel === 'DIA') placeholder.text = String(now.getDate()).padStart(2, '0');
       else if (normalizedLabel === 'MES') placeholder.text = String(now.getMonth() + 1).padStart(2, '0');
@@ -4577,7 +4593,33 @@ function confirmDrawing() {
 // ============================================
 // #22 PLACEMENT TOOLS (Check ✓, X ✗ and current date)
 // ============================================
-let stampMode = null; // 'check', 'x', 'date', 'dateParts' or null
+let stampMode = null; // 'check', 'x', 'date', 'dateParts', 'workout', 'city' or null
+let selectedCity = localStorage.getItem('pe_lastCity') || 'Madrid';
+
+function showCityPicker() {
+  const input = $('cityPickerInput');
+  if (input) {
+    input.value = localStorage.getItem('pe_lastCity') || selectedCity || 'Madrid';
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+  }
+  $('cityPickerModal')?.classList.add('show');
+}
+
+function confirmCityPicker() {
+  const input = $('cityPickerInput');
+  const rawValue = input?.value.trim() || '';
+  const provinces = Array.from(document.querySelectorAll('#spanishProvinceOptions option')).map(option => option.value);
+  const canonical = provinces.find(province => normalizeText(province).toLocaleLowerCase() === normalizeText(rawValue).toLocaleLowerCase());
+  if (!canonical) {
+    showStatus('Selecciona una provincia de la lista', 'error');
+    input?.focus();
+    return;
+  }
+  selectedCity = canonical;
+  localStorage.setItem('pe_lastCity', canonical);
+  $('cityPickerModal')?.classList.remove('show');
+  enterStampMode('city');
+}
 
 /**
  * Generate a stamp image (check or X) as a PNG data URL.
@@ -4642,18 +4684,25 @@ function enterStampMode(type) {
   }
   
   stampMode = type;
-  const buttonIds = { check: 'btnStampCheck', x: 'btnStampX', date: 'btnAddDate', dateParts: 'btnAddDateParts' };
+  const buttonIds = {
+    check: 'btnStampCheck', x: 'btnStampX', date: 'btnAddDate', dateParts: 'btnAddDateParts',
+    workout: 'btnAddWorkout', city: 'btnAddCity'
+  };
   Object.values(buttonIds).forEach(id => $(id)?.classList.remove('active'));
   $(buttonIds[type])?.classList.add('active');
   getCanvasContainer()?.querySelector('.elements-overlay')?.classList.add('placement-mode');
 
-  const modeLabel = type === 'check' ? '✓ Check' : type === 'x' ? '✗ X' : type === 'dateParts' ? '📅 Día / Mes / Año' : '📅 Fecha';
+  const modeLabel = type === 'check' ? '✓ Check'
+    : type === 'x' ? '✗ X'
+      : type === 'dateParts' ? '📅 Fecha separada'
+        : type === 'workout' ? '🏢 WORKOUT EVENTS'
+          : type === 'city' ? `📍 ${selectedCity}` : '📅 Fecha completa';
   showStatus(`Modo ${modeLabel} activado - haz clic en el PDF para colocar`, 'success');
 }
 
 function exitStampMode() {
   stampMode = null;
-  ['btnStampCheck', 'btnStampX', 'btnAddDate', 'btnAddDateParts'].forEach(id => $(id)?.classList.remove('active'));
+  ['btnStampCheck', 'btnStampX', 'btnAddDate', 'btnAddDateParts', 'btnAddWorkout', 'btnAddCity'].forEach(id => $(id)?.classList.remove('active'));
   getCanvasContainer()?.querySelector('.elements-overlay')?.classList.remove('placement-mode');
 }
 
@@ -4673,6 +4722,24 @@ function onStampClick(e) {
   const clickX = e.clientX - rect.left;
   const clickY = e.clientY - rect.top;
   const scale = activeDoc.zoom;
+
+  if (stampMode === 'workout' || stampMode === 'city') {
+    const text = stampMode === 'workout' ? 'WORKOUT EVENTS' : selectedCity;
+    const fontSize = 14;
+    const estimatedWidth = text.length * fontSize * 0.58;
+    pushElement(activeDoc, activeDoc.currentPage, {
+      type: 'text', text,
+      x: Math.max(0, clickX / scale - estimatedWidth / 2),
+      y: Math.max(0, clickY / scale - fontSize / 2),
+      size: fontSize, color: '#000000',
+      bold: stampMode === 'workout'
+    });
+    updateTabModified(activeDoc.id, true);
+    renderPage();
+    showStatus(`${text} añadido`, 'success');
+    scheduleAutoSave();
+    return;
+  }
 
   if (stampMode === 'date' || stampMode === 'dateParts') {
     const today = new Date();

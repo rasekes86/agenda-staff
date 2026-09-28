@@ -189,7 +189,7 @@
               <line x1="8" y1="2" x2="8" y2="6"></line>
               <line x1="3" y1="10" x2="21" y2="10"></line>
             </svg>
-            Insertar fecha
+            Fecha completa
           </button>
           <button class="sidebar-btn date-btn" id="btnAddDateParts">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -197,7 +197,7 @@
               <line x1="8" y1="2" x2="8" y2="6"></line><line x1="16" y1="2" x2="16" y2="6"></line>
               <line x1="3" y1="10" x2="21" y2="10"></line><line x1="9" y1="10" x2="9" y2="22"></line><line x1="15" y1="10" x2="15" y2="22"></line>
             </svg>
-            Insertar día / mes / año
+            Fecha separada
           </button>
           <button class="sidebar-btn" id="btnDraw" style="background:#5a4a2a;color:#fde68a;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -206,7 +206,15 @@
               <path d="M2 2l7.586 7.586"></path>
               <circle cx="11" cy="11" r="2"></circle>
             </svg>
-            Dibujar
+            Dibujar firma
+          </button>
+          <button class="sidebar-btn" id="btnAddWorkout" style="background:#7f1d1d;color:#fecaca;">
+            <span style="font-weight:900;font-size:11px;">WE</span>
+            WORKOUT EVENTS
+          </button>
+          <button class="sidebar-btn" id="btnAddCity" style="background:#164e63;color:#cffafe;">
+            <span aria-hidden="true">📍</span>
+            Ciudad
           </button>
           <button class="sidebar-btn" id="btnStampCheck" style="background:#2d5a3d;color:#a7f3d0;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
@@ -573,6 +581,8 @@
     <option value="DIA">
     <option value="MES">
     <option value="AÑO">
+    <option value="WORKOUT EVENTS">
+    <option value="CIUDAD">
     <option value="TELEFONO">
     <option value="EMAIL">
     <option value="DIRECCION">
@@ -614,6 +624,8 @@
           <button data-template-quick-field="DIA" data-template-quick-type="text">📆 Día</button>
           <button data-template-quick-field="MES" data-template-quick-type="text">📆 Mes</button>
           <button data-template-quick-field="AÑO" data-template-quick-type="text">📆 Año</button>
+          <button data-template-quick-field="WORKOUT EVENTS" data-template-quick-type="text">🏢 Workout Events</button>
+          <button data-template-quick-field="CIUDAD" data-template-quick-type="text">📍 Ciudad</button>
           <button data-template-quick-field="FIRMA" data-template-quick-type="signature">✍️ Firma</button>
         </div>
         <div id="templateSlotList" style="max-height:250px;overflow-y:auto;"></div>
@@ -635,6 +647,34 @@
     <div class="template-editor-bar-actions">
       <button id="btnCancelTemplateCanvas" class="btn-cancel">Cancelar</button>
       <button id="btnSaveTemplateCanvas" class="btn-add">Guardar plantilla</button>
+    </div>
+  </div>
+
+  <datalist id="spanishProvinceOptions">
+    <option value="A Coruña"><option value="Álava"><option value="Albacete"><option value="Alicante">
+    <option value="Almería"><option value="Asturias"><option value="Ávila"><option value="Badajoz">
+    <option value="Barcelona"><option value="Bizkaia"><option value="Burgos"><option value="Cáceres">
+    <option value="Cádiz"><option value="Cantabria"><option value="Castellón"><option value="Ceuta">
+    <option value="Ciudad Real"><option value="Córdoba"><option value="Cuenca"><option value="Gipuzkoa">
+    <option value="Girona"><option value="Granada"><option value="Guadalajara"><option value="Huelva">
+    <option value="Huesca"><option value="Illes Balears"><option value="Jaén"><option value="La Rioja">
+    <option value="Las Palmas"><option value="León"><option value="Lleida"><option value="Lugo">
+    <option value="Madrid"><option value="Málaga"><option value="Melilla"><option value="Murcia">
+    <option value="Navarra"><option value="Ourense"><option value="Palencia"><option value="Pontevedra">
+    <option value="Salamanca"><option value="Santa Cruz de Tenerife"><option value="Segovia"><option value="Sevilla">
+    <option value="Soria"><option value="Tarragona"><option value="Teruel"><option value="Toledo">
+    <option value="Valencia"><option value="Valladolid"><option value="Zamora"><option value="Zaragoza">
+  </datalist>
+
+  <div class="modal-overlay" id="cityPickerModal">
+    <div class="modal" style="max-width:390px;">
+      <h3>📍 Insertar ciudad</h3>
+      <p style="color:#94a3b8;font-size:12px;margin-bottom:10px;">Escribe para buscar una provincia. Se recordará la última utilizada.</p>
+      <input type="text" id="cityPickerInput" list="spanishProvinceOptions" autocomplete="off" placeholder="Provincia" style="width:100%;padding:10px;background:#0f172a;border:1px solid #475569;border-radius:7px;color:#f8fafc;">
+      <div class="modal-actions">
+        <button class="btn-cancel" id="cancelCityPicker">Cancelar</button>
+        <button class="btn-add" id="confirmCityPicker">Elegir posición</button>
+      </div>
     </div>
   </div>
 
