@@ -742,6 +742,8 @@ function setupEventListeners() {
   
   const btnAddDate = $('btnAddDate');
   if (btnAddDate) btnAddDate.addEventListener('click', addCurrentDate);
+  const btnAddDateParts = $('btnAddDateParts');
+  if (btnAddDateParts) btnAddDateParts.addEventListener('click', () => enterStampMode('dateParts'));
   
   // Light/dark colour theme toggle
   const btnToggleLightMode = $('btnToggleLightMode');
@@ -3801,7 +3803,9 @@ function placeTemplateSlotAtEvent(event, overlay, scale, activeDoc) {
 function addTemplateDraftSlot(position, type, label) {
   const activeDoc = getActiveDoc();
   if (!activeDoc) return;
-  const dimensions = type === 'signature' ? { width: 180, height: 70 } : { width: label === 'NOMBRE' ? 220 : 110, height: 32 };
+  const dimensions = type === 'signature'
+    ? { width: 180, height: 70 }
+    : { width: label === 'NOMBRE' ? 220 : ['DIA', 'MES', 'AÑO'].includes(label) ? 58 : 110, height: 32 };
   (activeDoc.elements[position.page] ||= []).push({
     type,
     x: Math.min(position.x, Math.max(0, activeDoc.pageWidth - dimensions.width)),
@@ -3828,6 +3832,10 @@ function showTemplateFieldPicker(position) {
       <button data-field="NOMBRE" data-type="text">👤 Nombre</button>
       <button data-field="DNI" data-type="text">🪪 DNI / NIE</button>
       <button data-field="FECHA" data-type="text">📅 Fecha</button>
+      <button data-date-parts>🗓️ Fecha separada</button>
+      <button data-field="DIA" data-type="text">📆 Día</button>
+      <button data-field="MES" data-type="text">📆 Mes</button>
+      <button data-field="AÑO" data-type="text">📆 Año</button>
       <button data-field="FIRMA" data-type="signature">✍️ Firma</button>
     </div>
     <div class="modal-actions"><button class="btn-cancel" data-cancel>Cancelar</button></div>
@@ -3844,6 +3852,13 @@ function showTemplateFieldPicker(position) {
       addTemplateDraftSlot(position, button.dataset.type, button.dataset.field);
     };
   });
+  picker.querySelector('[data-date-parts]').onclick = () => {
+    picker.remove();
+    addTemplateDraftSlot(position, 'text', 'DIA');
+    addTemplateDraftSlot({ ...position, x: position.x + 65 }, 'text', 'MES');
+    addTemplateDraftSlot({ ...position, x: position.x + 130 }, 'text', 'AÑO');
+    showStatus('Campos Día, Mes y Año añadidos como textos independientes', 'success');
+  };
 }
 
 function removeTemplateDraftSlots() {
@@ -4005,9 +4020,13 @@ function applyTemplate(template, options = {}) {
       placeholderLabel: `${label} (${groupIndexes[label]}/${groupTotals[label]})`,
       text: '', src: '', name: ''
     };
-    if (['FECHA', 'DATE'].includes(label.toUpperCase()) && placeholder.type === 'text') {
+    const normalizedLabel = normalizeText(label).toUpperCase();
+    if (['FECHA', 'DATE', 'DIA', 'MES', 'ANO'].includes(normalizedLabel) && placeholder.type === 'text') {
       const now = new Date();
-      placeholder.text = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
+      if (normalizedLabel === 'DIA') placeholder.text = String(now.getDate()).padStart(2, '0');
+      else if (normalizedLabel === 'MES') placeholder.text = String(now.getMonth() + 1).padStart(2, '0');
+      else if (normalizedLabel === 'ANO') placeholder.text = String(now.getFullYear());
+      else placeholder.text = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
       clearPlaceholderMetadata(placeholder);
     }
     pushElement(activeDoc, page, placeholder);
@@ -4558,7 +4577,7 @@ function confirmDrawing() {
 // ============================================
 // #22 PLACEMENT TOOLS (Check ✓, X ✗ and current date)
 // ============================================
-let stampMode = null; // 'check', 'x', 'date' or null
+let stampMode = null; // 'check', 'x', 'date', 'dateParts' or null
 
 /**
  * Generate a stamp image (check or X) as a PNG data URL.
@@ -4623,18 +4642,18 @@ function enterStampMode(type) {
   }
   
   stampMode = type;
-  const buttonIds = { check: 'btnStampCheck', x: 'btnStampX', date: 'btnAddDate' };
+  const buttonIds = { check: 'btnStampCheck', x: 'btnStampX', date: 'btnAddDate', dateParts: 'btnAddDateParts' };
   Object.values(buttonIds).forEach(id => $(id)?.classList.remove('active'));
   $(buttonIds[type])?.classList.add('active');
   getCanvasContainer()?.querySelector('.elements-overlay')?.classList.add('placement-mode');
 
-  const modeLabel = type === 'check' ? '✓ Check' : type === 'x' ? '✗ X' : '📅 Fecha';
+  const modeLabel = type === 'check' ? '✓ Check' : type === 'x' ? '✗ X' : type === 'dateParts' ? '📅 Día / Mes / Año' : '📅 Fecha';
   showStatus(`Modo ${modeLabel} activado - haz clic en el PDF para colocar`, 'success');
 }
 
 function exitStampMode() {
   stampMode = null;
-  ['btnStampCheck', 'btnStampX', 'btnAddDate'].forEach(id => $(id)?.classList.remove('active'));
+  ['btnStampCheck', 'btnStampX', 'btnAddDate', 'btnAddDateParts'].forEach(id => $(id)?.classList.remove('active'));
   getCanvasContainer()?.querySelector('.elements-overlay')?.classList.remove('placement-mode');
 }
 
@@ -4655,24 +4674,37 @@ function onStampClick(e) {
   const clickY = e.clientY - rect.top;
   const scale = activeDoc.zoom;
 
-  if (stampMode === 'date') {
+  if (stampMode === 'date' || stampMode === 'dateParts') {
     const today = new Date();
-    const dateStr = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
     const fontSize = 14;
-    const estimatedWidth = 78;
-
-    pushElement(activeDoc, activeDoc.currentPage, {
-      type: 'text',
-      text: dateStr,
-      x: Math.max(0, clickX / scale - estimatedWidth / 2),
-      y: Math.max(0, clickY / scale - fontSize / 2),
-      size: fontSize,
-      color: '#000000'
-    });
+    const day = String(today.getDate()).padStart(2, '0');
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const year = String(today.getFullYear());
+    if (stampMode === 'dateParts') {
+      const centerX = clickX / scale;
+      const y = Math.max(0, clickY / scale - fontSize / 2);
+      [
+        { text: day, x: centerX - 48 },
+        { text: month, x: centerX - 10 },
+        { text: year, x: centerX + 28 }
+      ].forEach(part => pushElement(activeDoc, activeDoc.currentPage, {
+        type: 'text', text: part.text,
+        x: Math.max(0, part.x), y,
+        size: fontSize, color: '#000000'
+      }));
+    } else {
+      const dateStr = `${day}/${month}/${year}`;
+      pushElement(activeDoc, activeDoc.currentPage, {
+        type: 'text', text: dateStr,
+        x: Math.max(0, clickX / scale - 39),
+        y: Math.max(0, clickY / scale - fontSize / 2),
+        size: fontSize, color: '#000000'
+      });
+    }
 
     updateTabModified(activeDoc.id, true);
     renderPage();
-    showStatus(`📅 Fecha añadida: ${dateStr}`, 'success');
+    showStatus(stampMode === 'dateParts' ? `📅 Fecha separada añadida: ${day} / ${month} / ${year}` : `📅 Fecha añadida: ${day}/${month}/${year}`, 'success');
     scheduleAutoSave();
     return;
   }
