@@ -259,6 +259,27 @@ body.android-app .status-msg {
 }
 body.android-app .modal { width: min(94vw, 460px) !important; max-height: 88dvh; overflow-y: auto; }
 body.android-app .modal-overlay { padding: 10px; }
+body.android-app .mobile-quick-insert .modal {
+  width: min(92vw, 390px) !important;
+  padding: 18px;
+  border-radius: 18px;
+}
+body.android-app .mobile-quick-insert h3 { margin-bottom: 14px; text-align: center; }
+body.android-app .mobile-quick-insert-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+body.android-app .mobile-quick-insert-grid button {
+  min-height: 76px;
+  border: 1px solid #475569;
+  border-radius: 13px;
+  background: #334155;
+  color: #fff;
+  font-size: 25px;
+}
+body.android-app .mobile-quick-insert-grid span { display: block; margin-top: 5px; font-size: 11px; font-weight: 700; }
+body.android-app .mobile-quick-cancel { width: 100%; min-height: 46px; margin-top: 12px; }
 body.android-app input,
 body.android-app textarea,
 body.android-app select { font-size: 16px !important; }

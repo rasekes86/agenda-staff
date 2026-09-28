@@ -63,6 +63,7 @@ let signatureDrawing = false;
 let signatureDrawHasInk = false;
 let signatureDrawLastPoint = null;
 let targetTemplateSignature = null;
+let pendingSignaturePosition = null;
 
 // Session for authentication
 let session = null;
@@ -630,6 +631,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         showTemplateFieldPicker({ page: activeDoc.currentPage, x, y });
         return;
       }
+
+      if (window.AndroidBridge) {
+        e.preventDefault();
+        showQuickInsertPicker({ page: activeDoc.currentPage, x, y });
+        return;
+      }
       
       const textInput = $('textInput');
       const textSize = $('textSize');
@@ -776,6 +783,7 @@ function setupEventListeners() {
   if (closeSignatureModal) {
     closeSignatureModal.addEventListener('click', () => {
       $('signatureModal').classList.remove('show');
+      pendingSignaturePosition = null;
     });
   }
   
@@ -1299,7 +1307,8 @@ async function renderPage() {
   
   const canvasArea = $('canvasArea');
   if (!canvasArea) return;
-  
+  const savedScrollLeft = canvasArea.scrollLeft;
+  const savedScrollTop = canvasArea.scrollTop;
   canvasArea.innerHTML = '';
   clearSelection();
   updateMultiSelectUI();
@@ -1342,6 +1351,8 @@ async function renderPage() {
     
     container.appendChild(overlay);
     canvasArea.appendChild(container);
+    canvasArea.scrollLeft = savedScrollLeft;
+    canvasArea.scrollTop = savedScrollTop;
     
     // dblclick handler is now delegated on canvasArea (M9) — no inline listener here
     
@@ -1927,6 +1938,11 @@ function navigatePage(delta) {
   const newPage = activeDoc.currentPage + delta;
   if (newPage >= 1 && newPage <= activeDoc.totalPages) {
     activeDoc.currentPage = newPage;
+    const canvasArea = $('canvasArea');
+    if (canvasArea) {
+      canvasArea.scrollLeft = 0;
+      canvasArea.scrollTop = 0;
+    }
     renderPage();
   }
 }
@@ -1955,6 +1971,8 @@ function setupMobilePinchZoom() {
   const canvasArea = $('canvasArea');
   if (!canvasArea) return;
   let pinch = null;
+  let tapStart = null;
+  let lastTap = null;
   const distance = touches => Math.hypot(
     touches[0].clientX - touches[1].clientX,
     touches[0].clientY - touches[1].clientY
@@ -1965,6 +1983,16 @@ function setupMobilePinchZoom() {
   });
 
   canvasArea.addEventListener('touchstart', event => {
+    if (event.touches.length === 1 && !isDrawMode) {
+      tapStart = {
+        x: event.touches[0].clientX,
+        y: event.touches[0].clientY,
+        time: Date.now(),
+        moved: false
+      };
+      return;
+    }
+    tapStart = null;
     if (event.touches.length !== 2 || isDrawMode) return;
     const activeDoc = getActiveDoc();
     const container = canvasArea.querySelector('.canvas-container');
@@ -1986,6 +2014,13 @@ function setupMobilePinchZoom() {
   }, { passive: false });
 
   canvasArea.addEventListener('touchmove', event => {
+    if (!pinch && tapStart && event.touches.length === 1) {
+      const moved = Math.hypot(
+        event.touches[0].clientX - tapStart.x,
+        event.touches[0].clientY - tapStart.y
+      );
+      if (moved > 12) tapStart.moved = true;
+    }
     if (!pinch || event.touches.length !== 2) return;
     const factor = distance(event.touches) / Math.max(1, pinch.startDistance);
     pinch.targetZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, pinch.startZoom * factor));
@@ -2011,6 +2046,31 @@ function setupMobilePinchZoom() {
     });
     event.preventDefault();
   }, { passive: false });
+
+  canvasArea.addEventListener('touchend', event => {
+    if (!tapStart || pinch || isDrawMode || event.touches.length !== 0) return;
+    const tap = tapStart;
+    tapStart = null;
+    if (tap.moved || Date.now() - tap.time > 350) return;
+    if (lastTap && Date.now() - lastTap.time < 380 && Math.hypot(tap.x - lastTap.x, tap.y - lastTap.y) < 28) {
+      lastTap = null;
+      const target = document.elementFromPoint(tap.x, tap.y) || canvasArea;
+      target.dispatchEvent(new MouseEvent('dblclick', {
+        bubbles: true,
+        cancelable: true,
+        clientX: tap.x,
+        clientY: tap.y
+      }));
+      event.preventDefault();
+    } else {
+      lastTap = { x: tap.x, y: tap.y, time: Date.now() };
+    }
+  }, { passive: false });
+
+  canvasArea.addEventListener('touchcancel', () => {
+    pinch = null;
+    tapStart = null;
+  });
 }
 
 function showTextModal() {
@@ -2036,6 +2096,68 @@ function showTextModal() {
     textModal.classList.add('show');
   }
   if (textInput) textInput.focus();
+}
+
+function showTextModalAt(x, y) {
+  showTextModal();
+  const textModal = $('textModal');
+  if (textModal) {
+    textModal.dataset.posX = x;
+    textModal.dataset.posY = y;
+  }
+}
+
+function placeStampAtPdfPoint(type, x, y) {
+  const activeDoc = getActiveDoc();
+  const overlay = getCanvasContainer()?.querySelector('.elements-overlay');
+  if (!activeDoc || !overlay) return;
+  const rect = overlay.getBoundingClientRect();
+  stampMode = type;
+  onStampClick({
+    target: overlay,
+    clientX: rect.left + x * activeDoc.zoom,
+    clientY: rect.top + y * activeDoc.zoom
+  });
+  stampMode = null;
+}
+
+function showQuickInsertPicker(point) {
+  document.getElementById('mobileQuickInsertPicker')?.remove();
+  const picker = document.createElement('div');
+  picker.id = 'mobileQuickInsertPicker';
+  picker.className = 'modal-overlay show mobile-quick-insert';
+  picker.innerHTML = `
+    <div class="modal">
+      <h3>¿Qué quieres insertar aquí?</h3>
+      <div class="mobile-quick-insert-grid">
+        <button data-action="text">📝<span>Texto</span></button>
+        <button data-action="signature">✍️<span>Firma</span></button>
+        <button data-action="date">📅<span>Fecha</span></button>
+        <button data-action="check">✅<span>Check</span></button>
+        <button data-action="x">❌<span>X</span></button>
+        <button data-action="draw">✏️<span>Dibujar</span></button>
+      </div>
+      <button class="btn-cancel mobile-quick-cancel">Cancelar</button>
+    </div>`;
+  document.body.appendChild(picker);
+  const close = () => picker.remove();
+  picker.querySelector('.mobile-quick-cancel').addEventListener('click', close);
+  picker.addEventListener('click', event => {
+    if (event.target === picker) close();
+  });
+  picker.querySelector('.mobile-quick-insert-grid').addEventListener('click', event => {
+    const button = event.target.closest('[data-action]');
+    if (!button) return;
+    const action = button.dataset.action;
+    close();
+    if (action === 'text') showTextModalAt(point.x, point.y);
+    else if (action === 'signature') {
+      const activeDoc = getActiveDoc();
+      if (activeDoc) pendingSignaturePosition = { docId: activeDoc.id, page: point.page, x: point.x, y: point.y };
+      showSignatureModal();
+    } else if (action === 'draw') enterDrawMode();
+    else placeStampAtPdfPoint(action, point.x, point.y);
+  });
 }
 
 function addImage() {
@@ -2545,6 +2667,18 @@ function placeSignatureInTemplateOrPage(activeDoc, src, name, width, height, off
       return true;
     }
     targetTemplateSignature = null;
+  }
+  if (pendingSignaturePosition?.docId === activeDoc.id) {
+    const position = pendingSignaturePosition;
+    pendingSignaturePosition = null;
+    activeDoc.currentPage = position.page;
+    pushElement(activeDoc, position.page, {
+      type: 'signature', src,
+      x: Math.max(0, position.x - width / 2),
+      y: Math.max(0, position.y - height / 2),
+      width, height, name
+    });
+    return true;
   }
   for (let page = 1; page <= activeDoc.totalPages; page++) {
     const elements = activeDoc.elements[page] || [];
@@ -4317,9 +4451,6 @@ function confirmDrawing() {
   const activeDoc = getActiveDoc();
   if (!activeDoc) return;
   
-  // Capture the drawing as a PNG data URL
-  const dataUrl = drawCanvasOverlay.toDataURL('image/png');
-  
   // Calculate bounding box of the drawing
   const scale = activeDoc.zoom;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -4331,12 +4462,29 @@ function confirmDrawing() {
       if (pt.y > maxY) maxY = pt.y;
     });
   });
+
+  // Crop the source to the actual ink. Using the full-page canvas here would
+  // squeeze the whole page into the small signature box, especially at zoom.
+  const padding = Math.max(4, drawStrokeWidth * 2);
+  const cropX = Math.max(0, Math.floor(minX - padding));
+  const cropY = Math.max(0, Math.floor(minY - padding));
+  const cropW = Math.max(1, Math.ceil(maxX - minX + padding * 2));
+  const cropH = Math.max(1, Math.ceil(maxY - minY + padding * 2));
+  const croppedCanvas = document.createElement('canvas');
+  croppedCanvas.width = cropW;
+  croppedCanvas.height = cropH;
+  croppedCanvas.getContext('2d').drawImage(
+    drawCanvasOverlay,
+    cropX, cropY, cropW, cropH,
+    0, 0, cropW, cropH
+  );
+  const dataUrl = croppedCanvas.toDataURL('image/png');
   
   // Convert to PDF coordinates (unscaled)
-  const pdfX = minX / scale;
-  const pdfY = minY / scale;
-  const pdfW = (maxX - minX) / scale || 10;
-  const pdfH = (maxY - minY) / scale || 10;
+  const pdfX = cropX / scale;
+  const pdfY = cropY / scale;
+  const pdfW = cropW / scale || 10;
+  const pdfH = cropH / scale || 10;
   
   // Store paths for potential re-editing
   const storedPaths = drawPaths.map(path => path.map(pt => ({
@@ -4926,6 +5074,55 @@ function setupImgToPdf() {
   
   const btnConvertImg = $('btnConvertImg');
   if (btnConvertImg) btnConvertImg.addEventListener('click', convertImgToPdf);
+
+  const mobileButton = $('btnMobileImagesToPdf');
+  const mobileInput = $('mobileImagesToPdfInput');
+  if (mobileButton && mobileInput) {
+    mobileButton.addEventListener('click', () => mobileInput.click());
+    mobileInput.addEventListener('change', async event => {
+      const files = Array.from(event.target.files || []).filter(file => file.type.startsWith('image/'));
+      mobileInput.value = '';
+      if (!files.length) return;
+      mobileButton.disabled = true;
+      showStatus(`Preparando ${files.length} imagen${files.length === 1 ? '' : 'es'}…`, 'success');
+      try {
+        imgFiles = await Promise.all(files.map(readImageForPdf));
+        await convertImgToPdf();
+      } catch (error) {
+        showStatus(`No se pudieron convertir las imágenes: ${error.message}`, 'error');
+      } finally {
+        mobileButton.disabled = false;
+      }
+    });
+  }
+}
+
+function readImageForPdf(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`No se pudo leer ${file.name}`));
+    reader.onload = event => {
+      const source = event.target.result;
+      if (file.type === 'image/png' || file.type === 'image/jpeg') {
+        resolve({ name: file.name, src: source });
+        return;
+      }
+      const image = new Image();
+      image.onerror = () => reject(new Error(`Formato no compatible: ${file.name}`));
+      image.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const context = canvas.getContext('2d');
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0);
+        resolve({ name: file.name, src: canvas.toDataURL('image/jpeg', 0.92) });
+      };
+      image.src = source;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 function handleImgFiles(files) {
