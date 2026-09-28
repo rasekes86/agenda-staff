@@ -194,6 +194,33 @@ body.android-app .mobile-tools-toggle {
   box-shadow: 0 10px 30px rgba(0,0,0,.55), 0 0 0 3px rgba(255,255,255,.16);
 }
 body.android-app .mobile-tools-toggle:active { transform: translateX(-50%) scale(.97); }
+body.android-app.draw-mode-active .mobile-tools-toggle { display: none !important; }
+body.android-app .draw-toolbar {
+  right: 10px;
+  bottom: calc(var(--android-safe-bottom) + 14px);
+  left: 10px;
+  z-index: 1200;
+  min-height: 64px;
+  padding: 9px 10px;
+  gap: 7px;
+  justify-content: space-between;
+  border-radius: 18px;
+  box-sizing: border-box;
+}
+body.android-app .draw-toolbar label {
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10px;
+}
+body.android-app .draw-toolbar input[type="color"] { width: 44px; height: 34px; }
+body.android-app .draw-toolbar input[type="range"] { width: 76px !important; }
+body.android-app .draw-toolbar-btn {
+  min-height: 44px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
 body.android-app .mobile-sidebar-backdrop {
   position: fixed;
   top: var(--android-safe-top);

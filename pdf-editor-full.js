@@ -4127,6 +4127,7 @@ function enterDrawMode() {
   if (stampMode) exitStampMode();
   
   isDrawMode = true;
+  document.body.classList.add('draw-mode-active');
   drawPaths = [];
   drawCurrentPath = [];
   
@@ -4148,10 +4149,10 @@ function enterDrawMode() {
     container.appendChild(overlay);
     drawCanvasOverlay = overlay;
     
-    overlay.addEventListener('mousedown', onDrawStart);
-    overlay.addEventListener('mousemove', onDrawMove);
-    overlay.addEventListener('mouseup', onDrawEnd);
-    overlay.addEventListener('mouseleave', onDrawEnd);
+    overlay.addEventListener('pointerdown', onDrawStart);
+    overlay.addEventListener('pointermove', onDrawMove);
+    overlay.addEventListener('pointerup', onDrawEnd);
+    overlay.addEventListener('pointercancel', onDrawEnd);
   }
   
   showStatus('Modo dibujo activado - dibuja sobre el PDF', 'success');
@@ -4159,6 +4160,7 @@ function enterDrawMode() {
 
 function exitDrawMode() {
   isDrawMode = false;
+  document.body.classList.remove('draw-mode-active');
   drawPaths = [];
   drawCurrentPath = [];
   
@@ -4166,10 +4168,10 @@ function exitDrawMode() {
   if (toolbar) toolbar.style.display = 'none';
   
   if (drawCanvasOverlay) {
-    drawCanvasOverlay.removeEventListener('mousedown', onDrawStart);
-    drawCanvasOverlay.removeEventListener('mousemove', onDrawMove);
-    drawCanvasOverlay.removeEventListener('mouseup', onDrawEnd);
-    drawCanvasOverlay.removeEventListener('mouseleave', onDrawEnd);
+    drawCanvasOverlay.removeEventListener('pointerdown', onDrawStart);
+    drawCanvasOverlay.removeEventListener('pointermove', onDrawMove);
+    drawCanvasOverlay.removeEventListener('pointerup', onDrawEnd);
+    drawCanvasOverlay.removeEventListener('pointercancel', onDrawEnd);
     drawCanvasOverlay.remove();
     drawCanvasOverlay = null;
   }
@@ -4185,6 +4187,7 @@ function onDrawStart(e) {
   drawStrokeWidth = $('drawStrokeWidth') ? parseInt($('drawStrokeWidth').value) : 2;
   
   drawCurrentPath = [{ x, y, color: drawStrokeColor, width: drawStrokeWidth }];
+  drawCanvasOverlay.setPointerCapture?.(e.pointerId);
   e.preventDefault();
 }
 
@@ -4207,6 +4210,7 @@ function onDrawMove(e) {
   ctx.moveTo(prev.x, prev.y);
   ctx.lineTo(x, y);
   ctx.stroke();
+  e.preventDefault();
 }
 
 function onDrawEnd(e) {
@@ -4216,6 +4220,10 @@ function onDrawEnd(e) {
     drawPaths.push([...drawCurrentPath]);
   }
   drawCurrentPath = [];
+  if (drawCanvasOverlay?.hasPointerCapture?.(e.pointerId)) {
+    drawCanvasOverlay.releasePointerCapture(e.pointerId);
+  }
+  e.preventDefault();
 }
 
 function clearDrawing() {
