@@ -812,6 +812,9 @@ function setupEventListeners() {
   });
   $('closeTemplatesModal')?.addEventListener('click', () => $('templatesModal')?.classList.remove('show'));
   $('closeFillTemplateModal')?.addEventListener('click', () => $('fillTemplateModal')?.classList.remove('show'));
+  $('templateSearchInput')?.addEventListener('input', () => renderTemplatesList());
+  $('btnSaveTemplateCanvas')?.addEventListener('click', confirmSaveTemplate);
+  $('btnCancelTemplateCanvas')?.addEventListener('click', cancelTemplateDraft);
   $('templateNameInput')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') confirmSaveTemplate();
   });
@@ -1258,9 +1261,18 @@ function setupToolTabs() {
       if (toolContent) toolContent.classList.add('active');
       
       currentTool = tool;
-      
       const isEditor = tool === 'editor';
       const activeDoc = getActiveDoc();
+
+      document.querySelectorAll('.tool-workspace').forEach(workspace => { workspace.style.display = 'none'; });
+      const canvasContainer = $('canvasArea')?.querySelector('.canvas-container');
+      if (canvasContainer) canvasContainer.style.display = isEditor ? '' : 'none';
+      const workspace = document.getElementById('workspace' + tool.charAt(0).toUpperCase() + tool.slice(1));
+      if (!isEditor && workspace) workspace.style.display = 'flex';
+      if (isEditor) {
+        if (activeDoc) renderPage();
+        else if ($('workspaceEditor')) $('workspaceEditor').style.display = 'flex';
+      }
       
       const pageNav = $('pageNav');
       const zoomControls = $('zoomControls');
@@ -1309,7 +1321,10 @@ async function renderPage() {
   if (!canvasArea) return;
   const savedScrollLeft = canvasArea.scrollLeft;
   const savedScrollTop = canvasArea.scrollTop;
-  canvasArea.innerHTML = '';
+  Array.from(canvasArea.children).forEach(child => {
+    if (!child.classList.contains('tool-workspace')) child.remove();
+  });
+  canvasArea.querySelectorAll('.tool-workspace').forEach(workspace => { workspace.style.display = 'none'; });
   clearSelection();
   updateMultiSelectUI();
   updateUndoRedoUI();
@@ -1360,6 +1375,17 @@ async function renderPage() {
     overlay.addEventListener('mousedown', (e) => {
       if (templatePlacementMode) {
         placeTemplateSlotAtEvent(e, overlay, scale, activeDoc);
+        return;
+      }
+      if (templateEditorActive && e.target === overlay) {
+        e.preventDefault();
+        e.stopPropagation();
+        const rect = overlay.getBoundingClientRect();
+        showTemplateFieldPicker({
+          page: activeDoc.currentPage,
+          x: Math.max(0, (e.clientX - rect.left) / scale),
+          y: Math.max(0, (e.clientY - rect.top) / scale)
+        });
         return;
       }
       // #22 Stamp mode: place check/X on click
@@ -3568,12 +3594,18 @@ function guessTemplateField(el) {
 function showTemplatesModal() {
   const activeDoc = getActiveDoc();
   if (!activeDoc) { showStatus('Primero carga un PDF', 'error'); return; }
+  if (templateEditorActive) {
+    if ($('templateEditorBar')) $('templateEditorBar').style.display = 'block';
+    $('templatesModal')?.classList.remove('show');
+    showStatus('Continúa marcando campos sobre el PDF o pulsa Guardar plantilla', 'success');
+    return;
+  }
   if (collectTemplateDraftSlots().length) {
     templateEditorActive = true;
-    if ($('templateListView')) $('templateListView').style.display = 'none';
-    if ($('templateSaveView')) $('templateSaveView').style.display = '';
+    if ($('templateEditorBar')) $('templateEditorBar').style.display = 'block';
     renderTemplateSlotSelection();
-    $('templatesModal')?.classList.add('show');
+    $('templatesModal')?.classList.remove('show');
+    showStatus('Continúa marcando campos o guarda la plantilla', 'success');
     return;
   }
   showTemplateListView();
@@ -3588,6 +3620,7 @@ function showTemplateListView() {
   if ($('templateListView')) $('templateListView').style.display = '';
   if ($('templateSaveView')) $('templateSaveView').style.display = 'none';
   if ($('templateNameInput')) $('templateNameInput').value = '';
+  if ($('templateEditorBar')) $('templateEditorBar').style.display = 'none';
   if ($('templateEditorTitle')) $('templateEditorTitle').textContent = 'Nueva plantilla';
   if ($('btnConfirmSaveTemplate')) $('btnConfirmSaveTemplate').textContent = '💾 Guardar plantilla';
   renderTemplatesList();
@@ -3599,15 +3632,13 @@ function showTemplateSaveView() {
   pendingTemplateSlot = null;
   editingTemplateId = null;
   templateEditorActive = true;
-  if ($('templateListView')) $('templateListView').style.display = 'none';
-  if ($('templateSaveView')) $('templateSaveView').style.display = '';
-  if ($('templateNameInput')) {
-    $('templateNameInput').value = '';
-    $('templateNameInput').focus();
-  }
-  if ($('templateEditorTitle')) $('templateEditorTitle').textContent = 'Nueva plantilla';
-  if ($('btnConfirmSaveTemplate')) $('btnConfirmSaveTemplate').textContent = '💾 Guardar plantilla';
+  $('templatesModal')?.classList.remove('show');
+  if ($('templateCanvasName')) $('templateCanvasName').value = '';
+  if ($('templateCanvasTitle')) $('templateCanvasTitle').textContent = 'Nueva plantilla';
+  if ($('templateEditorBar')) $('templateEditorBar').style.display = 'block';
   renderTemplateSlotSelection();
+  renderPage();
+  showStatus('Haz clic en cada hueco del PDF e indica qué dato corresponde', 'success');
 }
 
 function editTemplate(template) {
@@ -3647,11 +3678,10 @@ function editTemplate(template) {
     });
   });
 
-  if ($('templateListView')) $('templateListView').style.display = 'none';
-  if ($('templateSaveView')) $('templateSaveView').style.display = '';
-  if ($('templateNameInput')) $('templateNameInput').value = template.name || '';
-  if ($('templateEditorTitle')) $('templateEditorTitle').textContent = 'Editar plantilla';
-  if ($('btnConfirmSaveTemplate')) $('btnConfirmSaveTemplate').textContent = '💾 Actualizar plantilla';
+  $('templatesModal')?.classList.remove('show');
+  if ($('templateCanvasName')) $('templateCanvasName').value = template.name || '';
+  if ($('templateCanvasTitle')) $('templateCanvasTitle').textContent = 'Editar plantilla';
+  if ($('templateEditorBar')) $('templateEditorBar').style.display = 'block';
   renderTemplateSlotSelection();
   renderPage();
 }
@@ -3698,6 +3728,7 @@ function renderTemplateSlotSelection() {
   const list = $('templateSlotList');
   if (!list) return;
   const items = collectTemplateDraftSlots();
+  if ($('templateCanvasCount')) $('templateCanvasCount').textContent = `${items.length} campo${items.length === 1 ? '' : 's'}`;
   if (!items.length) {
     list.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:18px;font-size:12px;">Aún no has marcado ningún hueco. Elige un campo y pulsa “Colocar en PDF”.</div>';
     return;
@@ -3802,7 +3833,7 @@ function showTemplateFieldPicker(position) {
     <div class="modal-actions"><button class="btn-cancel" data-cancel>Cancelar</button></div>
   </div>`;
   document.body.appendChild(picker);
-  const close = () => { picker.remove(); $('templatesModal')?.classList.add('show'); };
+  const close = () => picker.remove();
   picker.querySelector('[data-cancel]').onclick = close;
   picker.addEventListener('click', event => { if (event.target === picker) close(); });
   picker.querySelectorAll('[data-field]').forEach(button => {
@@ -3811,7 +3842,6 @@ function showTemplateFieldPicker(position) {
       if (!activeDoc) { close(); return; }
       picker.remove();
       addTemplateDraftSlot(position, button.dataset.type, button.dataset.field);
-      $('templatesModal')?.classList.add('show');
     };
   });
 }
@@ -3831,13 +3861,15 @@ function cancelTemplateDraft() {
   templateEditorActive = false;
   templateFieldClipboard = [];
   editingTemplateId = null;
+  if ($('templateEditorBar')) $('templateEditorBar').style.display = 'none';
   showTemplateListView();
   renderPage();
+  $('templatesModal')?.classList.add('show');
 }
 
 async function confirmSaveTemplate() {
   const activeDoc = getActiveDoc();
-  const name = $('templateNameInput')?.value.trim();
+  const name = ($('templateCanvasName')?.value || $('templateNameInput')?.value || '').trim();
   if (!activeDoc || !name) { showStatus('Escribe un nombre para la plantilla', 'error'); return; }
   const draftSlots = collectTemplateDraftSlots();
   if (!draftSlots.length) { showStatus('Coloca al menos un hueco sobre el PDF', 'error'); return; }
@@ -3885,9 +3917,11 @@ async function confirmSaveTemplate() {
   templateEditorActive = false;
   templateFieldClipboard = [];
   editingTemplateId = null;
+  if ($('templateEditorBar')) $('templateEditorBar').style.display = 'none';
   updateTabModified(activeDoc.id, true);
   renderPage();
   showTemplateListView();
+  $('templatesModal')?.classList.add('show');
 }
 
 async function renderTemplatesList() {
@@ -3899,7 +3933,13 @@ async function renderTemplatesList() {
     list.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:18px;font-size:12px;">Todavía no hay plantillas.</div>';
     return;
   }
-  list.innerHTML = templates.map((template, index) => {
+  const query = ($('templateSearchInput')?.value || '').trim().toLocaleLowerCase();
+  const visibleTemplates = templates.filter(template => String(template.name || '').toLocaleLowerCase().includes(query));
+  if (!visibleTemplates.length) {
+    list.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:18px;font-size:12px;">No hay plantillas que coincidan con la búsqueda.</div>';
+    return;
+  }
+  list.innerHTML = visibleTemplates.map((template, index) => {
     const groups = {};
     (template.slots || []).forEach(slot => { groups[slot.label || 'TEXTO'] = (groups[slot.label || 'TEXTO'] || 0) + 1; });
     const summary = Object.entries(groups).map(([label, count]) => `${label}×${count}`).join(' · ');
@@ -3911,21 +3951,21 @@ async function renderTemplatesList() {
         <span class="template-card-origin">${isLocal ? 'Guardada en este equipo' : `Plantilla compartida${template.user_name ? ` · ${escapeHtml(template.user_name)}` : ''}`}</span>
       </div>
       <div class="template-card-actions">
-        <button class="sidebar-btn" data-template-use="${index}" style="background:#2563eb;color:white;">Usar</button>
-        <button class="sidebar-btn" data-template-edit="${index}" style="background:#0f766e;color:white;">Editar</button>
-        <button class="sidebar-btn" data-template-delete="${index}" style="background:#6b2c2c;color:#fca5a5;">Borrar</button>
+        <button class="sidebar-btn" data-template-use="${index}" title="Usar plantilla" aria-label="Usar plantilla" style="background:#2563eb;color:white;">▶</button>
+        <button class="sidebar-btn" data-template-edit="${index}" title="Editar plantilla" aria-label="Editar plantilla" style="background:#0f766e;color:white;">✎</button>
+        <button class="sidebar-btn" data-template-delete="${index}" title="Borrar plantilla" aria-label="Borrar plantilla" style="background:#6b2c2c;color:#fca5a5;">🗑</button>
       </div>
     </div>`;
   }).join('');
   list.querySelectorAll('[data-template-use]').forEach(button => {
-    button.onclick = () => applyTemplate(templateCache[Number(button.dataset.templateUse)]);
+    button.onclick = () => applyTemplate(visibleTemplates[Number(button.dataset.templateUse)]);
   });
   list.querySelectorAll('[data-template-edit]').forEach(button => {
-    button.onclick = () => editTemplate(templateCache[Number(button.dataset.templateEdit)]);
+    button.onclick = () => editTemplate(visibleTemplates[Number(button.dataset.templateEdit)]);
   });
   list.querySelectorAll('[data-template-delete]').forEach(button => {
     button.onclick = async () => {
-      const template = templateCache[Number(button.dataset.templateDelete)];
+      const template = visibleTemplates[Number(button.dataset.templateDelete)];
       if (!template || !confirm(`¿Eliminar la plantilla “${template.name}”?`)) return;
       try {
         await deleteTemplate(template);
@@ -5040,8 +5080,8 @@ async function splitPdf() {
 // ============================================
 
 function setupImgToPdf() {
-  const dropzone = $('imgDropzone');
-  const fileInput = $('imgFileInput');
+  const dropzone = $('imgMainDropzone');
+  const fileInput = $('imgMainFileInput');
   
   if (dropzone && fileInput) {
     dropzone.addEventListener('click', () => fileInput.click());
@@ -5125,20 +5165,20 @@ function readImageForPdf(file) {
   });
 }
 
-function handleImgFiles(files) {
-  for (const file of files) {
-    if (!file.type.startsWith('image/')) continue;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      imgFiles.push({ name: file.name, src: e.target.result });
-      renderImgPreview();
-    };
-    reader.readAsDataURL(file);
+async function handleImgFiles(files) {
+  const supported = Array.from(files).filter(file => /\.(jpe?g|png|webp)$/i.test(file.name) || ['image/jpeg', 'image/png', 'image/webp'].includes(file.type));
+  if (!supported.length) { showStatus('Selecciona imágenes JPG, PNG o WEBP', 'error'); return; }
+  try {
+    const normalized = await Promise.all(supported.map(readImageForPdf));
+    imgFiles.push(...normalized);
+    renderImgPreview();
+  } catch (error) {
+    showStatus(error.message, 'error');
   }
 }
 
 function renderImgPreview() {
-  const list = $('imgPreviewList');
+  const list = $('imgMainPreview');
   if (!list) return;
   list.innerHTML = '';
   
@@ -5155,6 +5195,8 @@ function renderImgPreview() {
       renderImgPreview();
     });
   });
+  if ($('imgFileCount')) $('imgFileCount').textContent = `${imgFiles.length} imagen${imgFiles.length === 1 ? '' : 'es'}`;
+  if ($('btnConvertImg')) $('btnConvertImg').disabled = imgFiles.length === 0;
 }
 
 async function convertImgToPdf() {
@@ -5230,8 +5272,8 @@ async function convertImgToPdf() {
 // ============================================
 
 function setupWordToPdf() {
-  const dropzone = $('wordDropzone');
-  const fileInput = $('wordFileInput');
+  const dropzone = $('wordMainDropzone');
+  const fileInput = $('wordMainFileInput');
   
   if (dropzone && fileInput) {
     dropzone.addEventListener('click', () => fileInput.click());
@@ -5254,7 +5296,7 @@ function handleWordFiles(files) {
 }
 
 function renderWordPreview() {
-  const list = $('wordPreviewList');
+  const list = $('wordMainPreview');
   if (!list) return;
   list.innerHTML = '';
   
@@ -5268,6 +5310,8 @@ function renderWordPreview() {
   list.querySelectorAll('.remove-btn').forEach(btn => {
     btn.addEventListener('click', () => { wordFiles.splice(parseInt(btn.dataset.idx), 1); renderWordPreview(); });
   });
+  if ($('wordFileCount')) $('wordFileCount').textContent = `${wordFiles.length} documento${wordFiles.length === 1 ? '' : 's'}`;
+  if ($('btnConvertWord')) $('btnConvertWord').disabled = wordFiles.length === 0;
 }
 
 async function convertWordToPdf() {

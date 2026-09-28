@@ -1065,6 +1065,15 @@ body.light-mode .draw-signature-help { color: #475569; }
 
 /* PDF position templates */
 .template-help { margin: 0 0 10px; color: #94a3b8; font-size: 11px; line-height: 1.4; }
+.template-search-input {
+  width: 100%;
+  margin-bottom: 9px;
+  padding: 9px 11px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #f8fafc;
+}
 .template-slot-builder { display: grid; grid-template-columns: 110px 1fr; gap: 6px; margin-bottom: 10px; }
 .template-slot-builder select,
 .template-slot-builder input {
@@ -1120,22 +1129,58 @@ body.light-mode .template-field-picker button { background: #fff; color: #1e293b
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 11px;
-  margin-bottom: 8px;
+  padding: 7px 9px;
+  margin-bottom: 5px;
   border: 1px solid #334155;
   border-radius: 9px;
   background: #1e293b;
 }
 .template-card-info { flex: 1; min-width: 0; }
-.template-card-name { display: block; color: #f8fafc; font-size: 13px; margin-bottom: 4px; overflow-wrap: anywhere; }
+.template-card-name { display: block; color: #f8fafc; font-size: 12px; margin-bottom: 2px; overflow-wrap: anywhere; }
 .template-card-summary { color: #a5b4fc; font-size: 10px; }
-.template-card-origin { display: block; color: #64748b; font-size: 9px; margin-top: 3px; }
-.template-card-actions { display: flex; flex-direction: column; gap: 5px; }
-.template-card-actions button { min-width: 62px; justify-content: center; padding: 5px 8px; font-size: 10px; }
+.template-card-origin { display: none; }
+.template-card-actions { display: flex; flex-direction: row; gap: 4px; }
+.template-card-actions button {
+  width: 31px;
+  min-width: 31px;
+  height: 31px;
+  margin: 0;
+  padding: 0;
+  justify-content: center;
+  font-size: 14px;
+}
+.template-editor-bar {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 900;
+  width: min(440px, calc(100vw - 294px));
+  padding: 12px;
+  border: 1px solid #4f46e5;
+  border-radius: 12px;
+  background: #0f172a;
+  box-shadow: 0 14px 34px rgba(0,0,0,.5);
+}
+.template-editor-bar-title { display: flex; justify-content: space-between; margin-bottom: 8px; }
+.template-editor-bar-title span { color: #a5b4fc; font-size: 11px; }
+.template-editor-bar input {
+  width: 100%;
+  margin-bottom: 9px;
+  padding: 9px 10px;
+  border: 1px solid #475569;
+  border-radius: 7px;
+  background: #1e293b;
+  color: #fff;
+}
+.template-editor-bar-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.template-editor-bar-actions button { min-height: 38px; }
 body.light-mode .template-quick-fields button,
 body.light-mode .template-card { background: #fff; color: #1e293b; }
 body.light-mode .template-card { border-color: #cbd5e1; }
 body.light-mode .template-card-name { color: #0f172a; }
+body.light-mode .template-search-input,
+body.light-mode .template-editor-bar,
+body.light-mode .template-editor-bar input { background: #fff; color: #0f172a; border-color: #cbd5e1; }
 .pdf-element-placeholder {
   min-width: 70px;
   min-height: 28px;
