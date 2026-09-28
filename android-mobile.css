@@ -205,6 +205,13 @@ body.android-app .mobile-sidebar-backdrop {
   background: rgba(2,6,23,.62);
 }
 body.android-app .mobile-sidebar-backdrop.show { display: block; }
+body.android-app .status-msg {
+  bottom: calc(var(--android-safe-bottom) + 94px);
+  z-index: 900;
+  max-width: calc(100vw - 32px);
+  text-align: center;
+  pointer-events: none;
+}
 body.android-app .modal { width: min(94vw, 460px) !important; max-height: 88dvh; overflow-y: auto; }
 body.android-app .modal-overlay { padding: 10px; }
 body.android-app input,

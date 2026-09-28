@@ -1495,6 +1495,7 @@ body.light-mode .page-thumb-label { color: #334155; }
   z-index: 1001;
   opacity: 0;
   transition: opacity 0.3s;
+  pointer-events: none;
 }
 
 .status-msg.show { opacity: 1; }
