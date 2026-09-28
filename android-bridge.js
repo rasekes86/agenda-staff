@@ -34,6 +34,36 @@
     document.body.classList.add('android-app');
     const sidebar = document.getElementById('editorSidebar');
     if (sidebar) {
+      const sheetHeader = document.createElement('div');
+      sheetHeader.className = 'mobile-sheet-header';
+      sheetHeader.innerHTML = '<div><strong>¿Qué quieres hacer?</strong><small>Editor PDF</small></div><button type="button" aria-label="Cerrar herramientas">×</button>';
+
+      const quickActions = document.createElement('div');
+      quickActions.className = 'mobile-action-grid';
+      const actions = [
+        ['📂', 'Abrir PDF', 'btnUpload'],
+        ['📝', 'Texto', 'btnAddText'],
+        ['🖼️', 'Imagen', 'btnAddImage'],
+        ['✍️', 'Firma', 'btnAddSignature'],
+        ['📅', 'Fecha', 'btnAddDate'],
+        ['✏️', 'Dibujar', 'btnDraw'],
+        ['✅', 'Check', 'btnStampCheck'],
+        ['❌', 'X', 'btnStampX'],
+        ['📐', 'Plantillas', 'btnOpenTemplates'],
+        ['📋', 'Rellenar', 'btnFillTemplate'],
+        ['💾', 'Guardar PDF', 'btnSave']
+      ];
+      actions.forEach(([icon, label, targetId]) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.mobileTarget = targetId;
+        button.innerHTML = `<span>${icon}</span><b>${label}</b>`;
+        if (targetId === 'btnSave') button.classList.add('mobile-save-action');
+        quickActions.appendChild(button);
+      });
+      sidebar.prepend(quickActions);
+      sidebar.prepend(sheetHeader);
+
       const toggle = document.createElement('button');
       toggle.type = 'button';
       toggle.className = 'mobile-tools-toggle';
@@ -49,6 +79,14 @@
       };
       toggle.addEventListener('click', () => setOpen(true));
       backdrop.addEventListener('click', () => setOpen(false));
+      sheetHeader.querySelector('button').addEventListener('click', () => setOpen(false));
+      quickActions.addEventListener('click', event => {
+        const action = event.target.closest('[data-mobile-target]');
+        if (!action) return;
+        const target = document.getElementById(action.dataset.mobileTarget);
+        if (target && !target.disabled) target.click();
+        setOpen(false);
+      });
       sidebar.addEventListener('click', event => {
         if (event.target.closest('.sidebar-btn')) setTimeout(() => setOpen(false), 80);
       });

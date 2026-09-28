@@ -56,22 +56,91 @@ body.android-app .page-info { font-size: 11px; white-space: nowrap; }
 
 body.android-app .document-tabs { top: 52px; min-height: 40px; }
 body.android-app .editor-sidebar {
-  top: 52px;
+  top: auto;
+  right: 0;
+  bottom: 0;
   left: 0;
-  width: min(88vw, 340px);
+  width: 100%;
   min-width: 0;
-  height: calc(100dvh - 52px);
-  max-height: calc(100dvh - 52px);
+  height: auto;
+  max-height: min(82dvh, 720px);
   z-index: 220;
   padding-top: 0 !important;
-  transform: translateX(-105%);
+  border: 1px solid #334155;
+  border-bottom: 0;
+  border-radius: 22px 22px 0 0;
+  transform: translateY(105%);
   transition: transform .22s ease;
-  box-shadow: 12px 0 34px rgba(0,0,0,.55);
+  box-shadow: 0 -14px 38px rgba(0,0,0,.58);
 }
-body.android-app .editor-sidebar.mobile-open { transform: translateX(0); }
-body.android-app .editor-sidebar .tool-content { padding: 10px 12px 90px; }
+body.android-app .editor-sidebar.mobile-open { transform: translateY(0); }
+body.android-app .editor-sidebar .tool-content { padding: 8px 12px 36px; }
+body.android-app #toolEditor > .sidebar-section:first-child { display: none; }
 body.android-app .sidebar-btn { min-height: 46px; font-size: 14px; }
 body.android-app .sidebar-section { padding: 10px; margin-bottom: 9px; }
+
+body.android-app .mobile-sheet-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 62px;
+  padding: 10px 16px 9px;
+  border-bottom: 1px solid #334155;
+  border-radius: 22px 22px 0 0;
+  background: #0f172a;
+  flex-shrink: 0;
+}
+body.android-app .mobile-sheet-header::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  width: 44px;
+  height: 4px;
+  transform: translateX(-50%);
+  border-radius: 4px;
+  background: #475569;
+}
+body.android-app .mobile-sheet-header strong { display: block; font-size: 16px; color: #f8fafc; }
+body.android-app .mobile-sheet-header small { display: block; margin-top: 2px; color: #94a3b8; font-size: 11px; }
+body.android-app .mobile-sheet-header button {
+  width: 42px;
+  height: 42px;
+  border: 0;
+  border-radius: 21px;
+  background: #1e293b;
+  color: #e2e8f0;
+  font-size: 26px;
+}
+body.android-app .mobile-action-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px;
+  background: #0f172a;
+  flex-shrink: 0;
+}
+body.android-app .mobile-action-grid button {
+  min-height: 70px;
+  padding: 8px 4px;
+  border: 1px solid #334155;
+  border-radius: 13px;
+  background: #1e293b;
+  color: #e2e8f0;
+  text-align: center;
+}
+body.android-app .mobile-action-grid button:active { background: #334155; transform: scale(.97); }
+body.android-app .mobile-action-grid span { display: block; margin-bottom: 4px; font-size: 24px; }
+body.android-app .mobile-action-grid b { display: block; font-size: 11px; line-height: 1.15; }
+body.android-app .mobile-action-grid .mobile-save-action {
+  grid-column: span 2;
+  background: #047857;
+  border-color: #10b981;
+  color: white;
+}
 
 body.android-app .editor-canvas-area {
   width: 100%;
@@ -95,8 +164,9 @@ body.android-app .upload-hint { font-size: 12px; }
 
 body.android-app .mobile-tools-toggle {
   position: fixed;
-  left: 14px;
+  left: 50%;
   bottom: max(14px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
   z-index: 210;
   min-height: 50px;
   padding: 0 17px;
@@ -110,7 +180,7 @@ body.android-app .mobile-tools-toggle {
 }
 body.android-app .mobile-sidebar-backdrop {
   position: fixed;
-  inset: 52px 0 0;
+  inset: 0;
   z-index: 215;
   display: none;
   background: rgba(2,6,23,.62);
@@ -133,4 +203,12 @@ body.android-app .resize-handle-se { bottom: -11px; right: -11px; }
   body.android-app .toolbar-btn { width: 39px; min-width: 39px; }
   body.android-app .page-nav button { width: 31px; }
   body.android-app .page-info { font-size: 10px; }
+  body.android-app .mobile-action-grid { gap: 6px; padding: 10px; }
+  body.android-app .mobile-action-grid button { min-height: 64px; }
 }
+
+body.android-app.light-mode .mobile-sheet-header,
+body.android-app.light-mode .mobile-action-grid { background: #f8fafc; border-color: #cbd5e1; }
+body.android-app.light-mode .mobile-sheet-header strong { color: #0f172a; }
+body.android-app.light-mode .mobile-action-grid button { background: #fff; color: #1e293b; border-color: #cbd5e1; }
+body.android-app.light-mode .mobile-action-grid .mobile-save-action { background: #047857; color: #fff; }
