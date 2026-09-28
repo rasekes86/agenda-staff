@@ -77,7 +77,13 @@
         backdrop.classList.toggle('show', open);
         toggle.style.display = open ? 'none' : '';
       };
-      toggle.addEventListener('click', () => setOpen(true));
+      const openTools = event => {
+        event.preventDefault();
+        event.stopPropagation();
+        setOpen(true);
+      };
+      toggle.addEventListener('pointerdown', openTools);
+      toggle.addEventListener('click', openTools);
       backdrop.addEventListener('click', () => setOpen(false));
       sheetHeader.querySelector('button').addEventListener('click', () => setOpen(false));
       quickActions.addEventListener('click', event => {

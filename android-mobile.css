@@ -165,19 +165,26 @@ body.android-app .upload-hint { font-size: 12px; }
 body.android-app .mobile-tools-toggle {
   position: fixed;
   left: 50%;
-  bottom: max(14px, env(safe-area-inset-bottom));
+  bottom: 16px;
   transform: translateX(-50%);
-  z-index: 210;
-  min-height: 50px;
-  padding: 0 17px;
+  z-index: 1000;
+  width: min(76vw, 280px);
+  min-width: 210px;
+  min-height: 62px;
+  padding: 0 24px;
   border: 0;
-  border-radius: 25px;
+  border-radius: 31px;
   background: #2563eb;
   color: #fff;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
-  box-shadow: 0 8px 24px rgba(0,0,0,.45);
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  box-shadow: 0 10px 30px rgba(0,0,0,.55), 0 0 0 3px rgba(255,255,255,.16);
 }
+body.android-app .mobile-tools-toggle:active { transform: translateX(-50%) scale(.97); }
 body.android-app .mobile-sidebar-backdrop {
   position: fixed;
   inset: 0;

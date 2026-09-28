@@ -17,6 +17,7 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.view.WindowInsets;
 import android.widget.Toast;
 
 import java.io.File;
@@ -36,6 +37,15 @@ public class MainActivity extends Activity {
 
         webView = new WebView(this);
         setContentView(webView);
+        if (Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
+            webView.setOnApplyWindowInsetsListener((view, insets) -> {
+                android.graphics.Insets systemBars = insets.getInsets(WindowInsets.Type.systemBars());
+                view.setPadding(0, systemBars.top, 0, systemBars.bottom);
+                return insets;
+            });
+            webView.requestApplyInsets();
+        }
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
@@ -43,7 +53,7 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(true);
         settings.setBuiltInZoomControls(false);
         settings.setMediaPlaybackRequiresUserGesture(false);
-        settings.setUserAgentString(settings.getUserAgentString() + " AgendaStaffPDF/3.0.5");
+        settings.setUserAgentString(settings.getUserAgentString() + " AgendaStaffPDF/3.0.6");
 
         webView.addJavascriptInterface(new AndroidFiles(), "AndroidBridge");
         webView.setWebViewClient(new WebViewClient());
