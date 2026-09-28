@@ -745,8 +745,11 @@ function setupEventListeners() {
   const btnAddDateParts = $('btnAddDateParts');
   if (btnAddDateParts) btnAddDateParts.addEventListener('click', () => enterStampMode('dateParts'));
   $('btnAddWorkout')?.addEventListener('click', () => enterStampMode('workout'));
-  $('btnAddCity')?.addEventListener('click', showCityPicker);
-  $('cancelCityPicker')?.addEventListener('click', () => $('cityPickerModal')?.classList.remove('show'));
+  $('btnAddCity')?.addEventListener('click', () => showCityPicker());
+  $('cancelCityPicker')?.addEventListener('click', () => {
+    cityPickerCallback = null;
+    $('cityPickerModal')?.classList.remove('show');
+  });
   $('confirmCityPicker')?.addEventListener('click', confirmCityPicker);
   $('cityPickerInput')?.addEventListener('keydown', event => {
     if (event.key === 'Enter') confirmCityPicker();
@@ -3683,7 +3686,9 @@ function editTemplate(template) {
       bold: Boolean(slot.bold), italic: Boolean(slot.italic), underline: Boolean(slot.underline),
       text: '', src: '', name: '',
       isPlaceholder: true, templateDraft: true,
-      fieldGroup: label, placeholderLabel: label
+      fieldGroup: label,
+      templateFixedValue: slot.fixedValue || '',
+      placeholderLabel: slot.fixedValue ? `${label} · ${slot.fixedValue}` : label
     });
   });
 
@@ -3746,7 +3751,7 @@ function renderTemplateSlotSelection() {
   list.innerHTML = items.map((item, index) => {
     return `<div style="display:flex;align-items:center;gap:6px;padding:6px;background:#1e293b;border-radius:6px;margin-bottom:4px;">
       <span title="Página ${item.page}">${icons[item.el.type]} P${item.page}</span>
-      <strong style="flex:1;color:#c4b5fd;font-size:11px;">${escapeHtml(item.el.fieldGroup || 'TEXTO')}</strong>
+      <strong style="flex:1;color:#c4b5fd;font-size:11px;">${escapeHtml(item.el.fieldGroup || 'TEXTO')}${item.el.templateFixedValue ? ` · ${escapeHtml(item.el.templateFixedValue)}` : ''}</strong>
       <span style="color:#64748b;font-size:9px;">${Math.round(item.el.width)}×${Math.round(item.el.height)}</span>
       <button class="sidebar-btn template-draft-delete" data-page="${item.page}" data-index="${item.index}" style="padding:3px 6px;background:#6b2c2c;color:#fca5a5;">✕</button>
     </div>`;
@@ -3807,7 +3812,7 @@ function placeTemplateSlotAtEvent(event, overlay, scale, activeDoc) {
   }
 }
 
-function addTemplateDraftSlot(position, type, label) {
+function addTemplateDraftSlot(position, type, label, options = {}) {
   const activeDoc = getActiveDoc();
   if (!activeDoc) return;
   const dimensions = type === 'signature'
@@ -3821,7 +3826,9 @@ function addTemplateDraftSlot(position, type, label) {
     size: DEFAULT_FONT_SIZE,
     color: '#000000', text: '', src: '', name: '',
     isPlaceholder: true, templateDraft: true,
-    fieldGroup: label, placeholderLabel: label
+    fieldGroup: label,
+    templateFixedValue: options.fixedValue || '',
+    placeholderLabel: options.fixedValue ? `${label} · ${options.fixedValue}` : label
   });
   updateTabModified(activeDoc.id, true);
   renderTemplateSlotSelection();
@@ -3858,6 +3865,10 @@ function showTemplateFieldPicker(position) {
       const activeDoc = getActiveDoc();
       if (!activeDoc) { close(); return; }
       picker.remove();
+      if (button.dataset.field === 'CIUDAD') {
+        showCityPicker(city => addTemplateDraftSlot(position, button.dataset.type, button.dataset.field, { fixedValue: city }));
+        return;
+      }
       addTemplateDraftSlot(position, button.dataset.type, button.dataset.field);
     };
   });
@@ -3914,6 +3925,7 @@ async function confirmSaveTemplate() {
       size: el.size || DEFAULT_FONT_SIZE,
       color: el.color || '#000000',
       bold: Boolean(el.bold), italic: Boolean(el.italic), underline: Boolean(el.underline),
+      fixedValue: el.templateFixedValue || '',
       sourcePageWidth: activeDoc.pageWidth,
       sourcePageHeight: activeDoc.pageHeight
     };
@@ -4026,6 +4038,7 @@ function applyTemplate(template, options = {}) {
       size: (slot.size || DEFAULT_FONT_SIZE) * Math.min(scaleX, scaleY),
       color: slot.color || '#000000', bold: Boolean(slot.bold), italic: Boolean(slot.italic), underline: Boolean(slot.underline),
       isPlaceholder: true, fieldGroup: label,
+      templateFixedValue: slot.fixedValue || '',
       placeholderLabel: `${label} (${groupIndexes[label]}/${groupTotals[label]})`,
       text: '', src: '', name: ''
     };
@@ -4035,7 +4048,7 @@ function applyTemplate(template, options = {}) {
       placeholder.bold = true;
       clearPlaceholderMetadata(placeholder);
     } else if (normalizedLabel === 'CIUDAD' && placeholder.type === 'text') {
-      placeholder.text = localStorage.getItem('pe_lastCity') || selectedCity || 'Madrid';
+      placeholder.text = slot.fixedValue || localStorage.getItem('pe_lastCity') || selectedCity || 'Madrid';
       clearPlaceholderMetadata(placeholder);
     } else if (['FECHA', 'DATE', 'DIA', 'MES', 'ANO'].includes(normalizedLabel) && placeholder.type === 'text') {
       const now = new Date();
@@ -4122,6 +4135,7 @@ function clearPlaceholderMetadata(el) {
   delete el.placeholderLabel;
   delete el.fieldGroup;
   delete el.templateDraft;
+  delete el.templateFixedValue;
   delete el.expectedSignatureName;
 }
 
@@ -4595,8 +4609,10 @@ function confirmDrawing() {
 // ============================================
 let stampMode = null; // 'check', 'x', 'date', 'dateParts', 'workout', 'city' or null
 let selectedCity = localStorage.getItem('pe_lastCity') || 'Madrid';
+let cityPickerCallback = null;
 
-function showCityPicker() {
+function showCityPicker(callback = null) {
+  cityPickerCallback = typeof callback === 'function' ? callback : null;
   const input = $('cityPickerInput');
   if (input) {
     input.value = localStorage.getItem('pe_lastCity') || selectedCity || 'Madrid';
@@ -4618,7 +4634,10 @@ function confirmCityPicker() {
   selectedCity = canonical;
   localStorage.setItem('pe_lastCity', canonical);
   $('cityPickerModal')?.classList.remove('show');
-  enterStampMode('city');
+  const callback = cityPickerCallback;
+  cityPickerCallback = null;
+  if (callback) callback(canonical);
+  else enterStampMode('city');
 }
 
 /**
