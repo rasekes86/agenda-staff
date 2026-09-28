@@ -28,6 +28,15 @@ public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 4102;
     private WebView webView;
     private ValueCallback<Uri[]> fileCallback;
+    private int safeTopCss;
+    private int safeBottomCss;
+
+    private void applySafeArea() {
+        if (webView == null) return;
+        String script = "document.documentElement.style.setProperty('--android-safe-top','" + safeTopCss + "px');" +
+                "document.documentElement.style.setProperty('--android-safe-bottom','" + safeBottomCss + "px');";
+        webView.evaluateJavascript(script, null);
+    }
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -41,7 +50,10 @@ public class MainActivity extends Activity {
             getWindow().setDecorFitsSystemWindows(false);
             webView.setOnApplyWindowInsetsListener((view, insets) -> {
                 android.graphics.Insets systemBars = insets.getInsets(WindowInsets.Type.systemBars());
-                view.setPadding(0, systemBars.top, 0, systemBars.bottom);
+                float density = getResources().getDisplayMetrics().density;
+                safeTopCss = Math.round(systemBars.top / density);
+                safeBottomCss = Math.round(systemBars.bottom / density);
+                view.post(this::applySafeArea);
                 return insets;
             });
             webView.requestApplyInsets();
@@ -53,10 +65,14 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(true);
         settings.setBuiltInZoomControls(false);
         settings.setMediaPlaybackRequiresUserGesture(false);
-        settings.setUserAgentString(settings.getUserAgentString() + " AgendaStaffPDF/3.0.6");
+        settings.setUserAgentString(settings.getUserAgentString() + " AgendaStaffPDF/3.0.7");
 
         webView.addJavascriptInterface(new AndroidFiles(), "AndroidBridge");
-        webView.setWebViewClient(new WebViewClient());
+        webView.setWebViewClient(new WebViewClient() {
+            @Override public void onPageFinished(WebView view, String url) {
+                applySafeArea();
+            }
+        });
         webView.setWebChromeClient(new WebChromeClient() {
             @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
                 if (fileCallback != null) fileCallback.onReceiveValue(null);

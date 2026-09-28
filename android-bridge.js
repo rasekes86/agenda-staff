@@ -82,6 +82,7 @@
         event.stopPropagation();
         setOpen(true);
       };
+      toggle.addEventListener('touchstart', openTools, { passive: false });
       toggle.addEventListener('pointerdown', openTools);
       toggle.addEventListener('click', openTools);
       backdrop.addEventListener('click', () => setOpen(false));
