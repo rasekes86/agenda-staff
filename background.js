@@ -4,6 +4,9 @@
 // Open side panel when extension icon is clicked
 chrome.action.onClicked.addListener((tab) => {
   chrome.sidePanel.open({ windowId: tab.windowId });
+  if (tab.url?.startsWith('https://mail.google.com/')) {
+    scanGmailPersonnel(tab.id);
+  }
 });
 
 // Set side panel behavior
@@ -72,7 +75,49 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ success: true });
     return true;
   }
+
+  if (message.type === 'SCAN_GMAIL_PERSONNEL') {
+    scanActiveGmailTab()
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
 });
+
+async function scanActiveGmailTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id || !tab.url?.startsWith('https://mail.google.com/')) {
+    return { success: false, skipped: true, error: 'La pestaña activa no es Gmail' };
+  }
+  return scanGmailPersonnel(tab.id);
+}
+
+async function scanGmailPersonnel(tabId) {
+  try {
+    const stored = await chrome.storage.local.get(['session']);
+    const configUrl = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
+    const configKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1Z3V0Y3N1a3hreGxncGttenh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzc5OTExMjksImV4cCI6MjA1MzU2NzEyOX0.PpolAzqqXNBOhRlUVzplqkKeGQxzfed4gH377CidVJE';
+    const headers = { apikey: configKey };
+    if (stored.session?.access_token) headers.Authorization = `Bearer ${stored.session.access_token}`;
+    const response = await fetch(`${configUrl}/rest/v1/signatures?select=name&order=name.asc`, { headers });
+    if (!response.ok) throw new Error('No se ha podido consultar la base de firmas');
+    const signatures = await response.json();
+
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['gmail-signature-overlay.js'] });
+    await chrome.scripting.insertCSS({ target: { tabId }, files: ['gmail-signature-overlay.css'] });
+    await chrome.tabs.sendMessage(tabId, {
+      type: 'AGENDA_SCAN_GMAIL_SIGNATURES',
+      signatureNames: signatures.map(signature => signature.name).filter(Boolean)
+    });
+    return { success: true, signatures: signatures.length };
+  } catch (error) {
+    console.error('Gmail personnel scan error:', error);
+    try {
+      await chrome.tabs.sendMessage(tabId, { type: 'AGENDA_GMAIL_SCAN_ERROR', error: error.message });
+    } catch (_) {}
+    return { success: false, error: error.message };
+  }
+}
 
 function startNotificationCheck() {
   // Clear existing interval

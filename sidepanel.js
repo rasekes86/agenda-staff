@@ -174,6 +174,7 @@ function showAuthScreen() {
 async function showMainScreen() {
   $('authScreen').style.display = 'none';
   $('mainScreen').style.display = 'flex';
+  chrome.runtime.sendMessage({ type: 'SCAN_GMAIL_PERSONNEL' }).catch(() => {});
   
   viewStartDate = new Date();
   viewStartDate.setHours(0, 0, 0, 0);
