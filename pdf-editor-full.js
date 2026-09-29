@@ -55,6 +55,9 @@ let imgFiles = [];
 let wordFiles = [];
 let mergeFiles = [];
 let currentTool = 'editor';
+let whiteBgSourceImage = null;
+let whiteBgFileName = 'foto-fondo-blanco.jpg';
+let whiteBgProcessTimer = null;
 
 // State for multiple signatures
 let addedSignaturesCount = 0;
@@ -604,6 +607,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupToolTabs();
   setupCollapsibleInstructions();
   setupImgToPdf();
+  setupWhiteBackgroundTool();
   setupWordToPdf();
   setupMerge();
   setupSplit();
@@ -746,6 +750,7 @@ function setupEventListeners() {
   if (btnAddDateParts) btnAddDateParts.addEventListener('click', () => enterStampMode('dateParts'));
   $('btnAddWorkout')?.addEventListener('click', () => enterStampMode('workout'));
   $('btnAddCity')?.addEventListener('click', () => showCityPicker());
+  $('btnAddCategory')?.addEventListener('click', () => showCategoryPicker());
   $('cancelCityPicker')?.addEventListener('click', () => {
     cityPickerCallback = null;
     $('cityPickerModal')?.classList.remove('show');
@@ -753,6 +758,14 @@ function setupEventListeners() {
   $('confirmCityPicker')?.addEventListener('click', confirmCityPicker);
   $('cityPickerInput')?.addEventListener('keydown', event => {
     if (event.key === 'Enter') confirmCityPicker();
+  });
+  $('cancelCategoryPicker')?.addEventListener('click', () => {
+    categoryPickerCallback = null;
+    $('categoryPickerModal')?.classList.remove('show');
+  });
+  $('confirmCategoryPicker')?.addEventListener('click', confirmCategoryPicker);
+  $('categoryPickerInput')?.addEventListener('keydown', event => {
+    if (event.key === 'Enter') confirmCategoryPicker();
   });
   
   // Light/dark colour theme toggle
@@ -3776,10 +3789,18 @@ function beginTemplateSlotPlacement() {
   showStatus('Pulsa en el hueco del PDF que quieres marcar', 'success');
 }
 
-function beginQuickTemplatePlacement(type, label) {
+function beginQuickTemplatePlacement(type, label, fixedValue = '') {
   const activeDoc = getActiveDoc();
   if (!activeDoc) { showStatus('Primero carga un PDF', 'error'); return; }
-  pendingTemplateSlot = { type, label };
+  if (label === 'CIUDAD' && !fixedValue) {
+    showCityPicker(value => beginQuickTemplatePlacement(type, label, value));
+    return;
+  }
+  if (label === 'CATEGORIA' && !fixedValue) {
+    showCategoryPicker(value => beginQuickTemplatePlacement(type, label, value));
+    return;
+  }
+  pendingTemplateSlot = { type, label, fixedValue };
   templatePlacementMode = true;
   $('templatesModal')?.classList.remove('show');
   renderPage();
@@ -3805,7 +3826,7 @@ function placeTemplateSlotAtEvent(event, overlay, scale, activeDoc) {
   pendingTemplateSlot = null;
   renderPage();
   if (quickSlot) {
-    addTemplateDraftSlot(position, quickSlot.type, quickSlot.label);
+    addTemplateDraftSlot(position, quickSlot.type, quickSlot.label, { fixedValue: quickSlot.fixedValue || '' });
     $('templatesModal')?.classList.add('show');
   } else {
     showTemplateFieldPicker(position);
@@ -3817,7 +3838,7 @@ function addTemplateDraftSlot(position, type, label, options = {}) {
   if (!activeDoc) return;
   const dimensions = type === 'signature'
     ? { width: 180, height: 70 }
-    : { width: label === 'NOMBRE' ? 220 : label === 'WORKOUT EVENTS' ? 150 : ['DIA', 'MES', 'AÑO'].includes(label) ? 58 : 110, height: 32 };
+    : { width: label === 'NOMBRE' ? 220 : label === 'WORKOUT EVENTS' ? 150 : label === 'CATEGORIA' ? 240 : ['DIA', 'MES', 'AÑO'].includes(label) ? 58 : 110, height: 32 };
   (activeDoc.elements[position.page] ||= []).push({
     type,
     x: Math.min(position.x, Math.max(0, activeDoc.pageWidth - dimensions.width)),
@@ -3852,6 +3873,7 @@ function showTemplateFieldPicker(position) {
       <button data-field="AÑO" data-type="text">📆 Año</button>
       <button data-field="WORKOUT EVENTS" data-type="text">🏢 Workout Events</button>
       <button data-field="CIUDAD" data-type="text">📍 Ciudad</button>
+      <button data-field="CATEGORIA" data-type="text">🏷️ Categoría</button>
       <button data-field="FIRMA" data-type="signature">✍️ Firma</button>
     </div>
     <div class="modal-actions"><button class="btn-cancel" data-cancel>Cancelar</button></div>
@@ -3867,6 +3889,10 @@ function showTemplateFieldPicker(position) {
       picker.remove();
       if (button.dataset.field === 'CIUDAD') {
         showCityPicker(city => addTemplateDraftSlot(position, button.dataset.type, button.dataset.field, { fixedValue: city }));
+        return;
+      }
+      if (button.dataset.field === 'CATEGORIA') {
+        showCategoryPicker(category => addTemplateDraftSlot(position, button.dataset.type, button.dataset.field, { fixedValue: category }));
         return;
       }
       addTemplateDraftSlot(position, button.dataset.type, button.dataset.field);
@@ -4049,6 +4075,9 @@ function applyTemplate(template, options = {}) {
       clearPlaceholderMetadata(placeholder);
     } else if (normalizedLabel === 'CIUDAD' && placeholder.type === 'text') {
       placeholder.text = slot.fixedValue || localStorage.getItem('pe_lastCity') || selectedCity || 'Madrid';
+      clearPlaceholderMetadata(placeholder);
+    } else if (normalizedLabel === 'CATEGORIA' && placeholder.type === 'text') {
+      placeholder.text = slot.fixedValue || localStorage.getItem('pe_lastCategory') || selectedCategory || CATEGORY_OPTIONS[0];
       clearPlaceholderMetadata(placeholder);
     } else if (['FECHA', 'DATE', 'DIA', 'MES', 'ANO'].includes(normalizedLabel) && placeholder.type === 'text') {
       const now = new Date();
@@ -4607,9 +4636,17 @@ function confirmDrawing() {
 // ============================================
 // #22 PLACEMENT TOOLS (Check ✓, X ✗ and current date)
 // ============================================
-let stampMode = null; // 'check', 'x', 'date', 'dateParts', 'workout', 'city' or null
+let stampMode = null; // 'check', 'x', 'date', 'dateParts', 'workout', 'city', 'category' or null
 let selectedCity = localStorage.getItem('pe_lastCity') || 'Madrid';
 let cityPickerCallback = null;
+const CATEGORY_OPTIONS = [
+  'CARGA Y DESCARGA', 'AUX.MONTAJE', 'AUX.AUDIOVISUAL',
+  'OPERADOR CARRETILLA ELEVADORA', 'OPERADOR PLATAFORMA ELEVADORA',
+  'CLIMBER', 'SCAFFOLDER', 'AUX.LIMPIEZA', 'CONTROL DE ACCESOS',
+  'AZAFATA/O', 'CAMARERO/A', 'COCINERO/A', 'CONDUCTOR/A'
+];
+let selectedCategory = localStorage.getItem('pe_lastCategory') || CATEGORY_OPTIONS[0];
+let categoryPickerCallback = null;
 
 function showCityPicker(callback = null) {
   cityPickerCallback = typeof callback === 'function' ? callback : null;
@@ -4638,6 +4675,34 @@ function confirmCityPicker() {
   cityPickerCallback = null;
   if (callback) callback(canonical);
   else enterStampMode('city');
+}
+
+function showCategoryPicker(callback = null) {
+  categoryPickerCallback = typeof callback === 'function' ? callback : null;
+  const input = $('categoryPickerInput');
+  if (input) {
+    input.value = localStorage.getItem('pe_lastCategory') || selectedCategory || CATEGORY_OPTIONS[0];
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+  }
+  $('categoryPickerModal')?.classList.add('show');
+}
+
+function confirmCategoryPicker() {
+  const input = $('categoryPickerInput');
+  const rawValue = input?.value.trim() || '';
+  const canonical = CATEGORY_OPTIONS.find(category => normalizeText(category).toLocaleLowerCase() === normalizeText(rawValue).toLocaleLowerCase());
+  if (!canonical) {
+    showStatus('Selecciona una categoría de la lista', 'error');
+    input?.focus();
+    return;
+  }
+  selectedCategory = canonical;
+  localStorage.setItem('pe_lastCategory', canonical);
+  $('categoryPickerModal')?.classList.remove('show');
+  const callback = categoryPickerCallback;
+  categoryPickerCallback = null;
+  if (callback) callback(canonical);
+  else enterStampMode('category');
 }
 
 /**
@@ -4705,7 +4770,7 @@ function enterStampMode(type) {
   stampMode = type;
   const buttonIds = {
     check: 'btnStampCheck', x: 'btnStampX', date: 'btnAddDate', dateParts: 'btnAddDateParts',
-    workout: 'btnAddWorkout', city: 'btnAddCity'
+    workout: 'btnAddWorkout', city: 'btnAddCity', category: 'btnAddCategory'
   };
   Object.values(buttonIds).forEach(id => $(id)?.classList.remove('active'));
   $(buttonIds[type])?.classList.add('active');
@@ -4715,13 +4780,14 @@ function enterStampMode(type) {
     : type === 'x' ? '✗ X'
       : type === 'dateParts' ? '📅 Fecha separada'
         : type === 'workout' ? '🏢 WORKOUT EVENTS'
-          : type === 'city' ? `📍 ${selectedCity}` : '📅 Fecha completa';
+          : type === 'city' ? `📍 ${selectedCity}`
+            : type === 'category' ? `🏷️ ${selectedCategory}` : '📅 Fecha completa';
   showStatus(`Modo ${modeLabel} activado - haz clic en el PDF para colocar`, 'success');
 }
 
 function exitStampMode() {
   stampMode = null;
-  ['btnStampCheck', 'btnStampX', 'btnAddDate', 'btnAddDateParts', 'btnAddWorkout', 'btnAddCity'].forEach(id => $(id)?.classList.remove('active'));
+  ['btnStampCheck', 'btnStampX', 'btnAddDate', 'btnAddDateParts', 'btnAddWorkout', 'btnAddCity', 'btnAddCategory'].forEach(id => $(id)?.classList.remove('active'));
   getCanvasContainer()?.querySelector('.elements-overlay')?.classList.remove('placement-mode');
 }
 
@@ -4742,8 +4808,8 @@ function onStampClick(e) {
   const clickY = e.clientY - rect.top;
   const scale = activeDoc.zoom;
 
-  if (stampMode === 'workout' || stampMode === 'city') {
-    const text = stampMode === 'workout' ? 'WORKOUT EVENTS' : selectedCity;
+  if (stampMode === 'workout' || stampMode === 'city' || stampMode === 'category') {
+    const text = stampMode === 'workout' ? 'WORKOUT EVENTS' : stampMode === 'city' ? selectedCity : selectedCategory;
     const fontSize = 14;
     const estimatedWidth = text.length * fontSize * 0.58;
     pushElement(activeDoc, activeDoc.currentPage, {
@@ -5383,6 +5449,206 @@ async function convertImgToPdf() {
       btn.innerHTML = 'Crear PDF';
     }
   }
+}
+
+// ============================================
+// AUTOMATIC WHITE PHOTO BACKGROUND
+// ============================================
+
+function setupWhiteBackgroundTool() {
+  const dropzone = $('whiteBgDropzone');
+  const input = $('whiteBgFileInput');
+  const sensitivity = $('whiteBgSensitivity');
+  if (dropzone && input) {
+    dropzone.addEventListener('click', () => input.click());
+    dropzone.addEventListener('dragover', event => {
+      event.preventDefault();
+      dropzone.classList.add('drag-over');
+    });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
+    dropzone.addEventListener('drop', event => {
+      event.preventDefault();
+      dropzone.classList.remove('drag-over');
+      const file = Array.from(event.dataTransfer.files || []).find(item => /\.(jpe?g|png|webp)$/i.test(item.name) || item.type.startsWith('image/'));
+      if (file) loadWhiteBackgroundPhoto(file);
+      else showStatus('Selecciona una fotografía JPG, PNG o WEBP', 'error');
+    });
+    input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      input.value = '';
+      if (file) loadWhiteBackgroundPhoto(file);
+    });
+  }
+  sensitivity?.addEventListener('input', () => {
+    if ($('whiteBgSensitivityValue')) $('whiteBgSensitivityValue').textContent = sensitivity.value;
+    clearTimeout(whiteBgProcessTimer);
+    if (whiteBgSourceImage) whiteBgProcessTimer = setTimeout(processWhiteBackgroundPhoto, 140);
+  });
+  $('btnDownloadWhiteBg')?.addEventListener('click', downloadWhiteBackgroundPhoto);
+  $('btnResetWhiteBg')?.addEventListener('click', resetWhiteBackgroundTool);
+}
+
+function loadWhiteBackgroundPhoto(file) {
+  if (!/\.(jpe?g|png|webp)$/i.test(file.name) && !['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+    showStatus('Formato no compatible. Utiliza JPG, PNG o WEBP', 'error');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onerror = () => showStatus('No se ha podido leer la fotografía', 'error');
+  reader.onload = event => {
+    const image = new Image();
+    image.onerror = () => showStatus('No se ha podido abrir la fotografía', 'error');
+    image.onload = () => {
+      whiteBgSourceImage = image;
+      whiteBgFileName = `${file.name.replace(/\.[^.]+$/, '')}-fondo-blanco.jpg`;
+      if ($('whiteBgOriginal')) $('whiteBgOriginal').src = event.target.result;
+      if ($('whiteBgDropzone')) $('whiteBgDropzone').style.display = 'none';
+      if ($('whiteBgPreview')) $('whiteBgPreview').style.display = 'grid';
+      if ($('btnDownloadWhiteBg')) $('btnDownloadWhiteBg').disabled = false;
+      if ($('btnResetWhiteBg')) $('btnResetWhiteBg').disabled = false;
+      processWhiteBackgroundPhoto();
+    };
+    image.src = event.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function processWhiteBackgroundPhoto() {
+  const image = whiteBgSourceImage;
+  const canvas = $('whiteBgCanvas');
+  if (!image || !canvas) return;
+  try {
+    const maxDimension = 3000;
+    const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
+    const width = Math.max(1, Math.round(image.naturalWidth * scale));
+    const height = Math.max(1, Math.round(image.naturalHeight * scale));
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    context.drawImage(image, 0, 0, width, height);
+    const imageData = context.getImageData(0, 0, width, height);
+    replaceEdgeBackgroundWithWhite(imageData, width, height, Number($('whiteBgSensitivity')?.value || 55));
+    context.putImageData(imageData, 0, 0);
+    showStatus('Fondo blanco aplicado automáticamente', 'success');
+  } catch (error) {
+    console.error('White background processing error:', error);
+    showStatus('No se ha podido procesar esta fotografía', 'error');
+  }
+}
+
+function replaceEdgeBackgroundWithWhite(imageData, width, height, threshold) {
+  const pixels = imageData.data;
+  const bins = new Map();
+  const sampleStep = Math.max(1, Math.floor(Math.min(width, height) / 250));
+  const addSample = index => {
+    if (pixels[index + 3] < 20) return;
+    const key = `${pixels[index] >> 5},${pixels[index + 1] >> 5},${pixels[index + 2] >> 5}`;
+    const bin = bins.get(key) || { count: 0, r: 0, g: 0, b: 0 };
+    bin.count++;
+    bin.r += pixels[index];
+    bin.g += pixels[index + 1];
+    bin.b += pixels[index + 2];
+    bins.set(key, bin);
+  };
+  for (let x = 0; x < width; x += sampleStep) {
+    addSample(x * 4);
+    addSample(((height - 1) * width + x) * 4);
+  }
+  for (let y = 0; y < height; y += sampleStep) {
+    addSample((y * width) * 4);
+    addSample((y * width + width - 1) * 4);
+  }
+  const dominant = [...bins.values()].sort((a, b) => b.count - a.count)[0];
+  if (!dominant) return;
+  const bgR = dominant.r / dominant.count;
+  const bgG = dominant.g / dominant.count;
+  const bgB = dominant.b / dominant.count;
+  const distanceToBackground = pixelIndex => {
+    const offset = pixelIndex * 4;
+    const dr = pixels[offset] - bgR;
+    const dg = pixels[offset + 1] - bgG;
+    const db = pixels[offset + 2] - bgB;
+    return Math.sqrt(dr * dr + dg * dg + db * db);
+  };
+  const total = width * height;
+  const mask = new Uint8Array(total);
+  const queue = new Int32Array(total);
+  let head = 0;
+  let tail = 0;
+  const seed = index => {
+    if (!mask[index] && distanceToBackground(index) <= threshold * 1.15) {
+      mask[index] = 1;
+      queue[tail++] = index;
+    }
+  };
+  for (let x = 0; x < width; x++) {
+    seed(x);
+    seed((height - 1) * width + x);
+  }
+  for (let y = 1; y < height - 1; y++) {
+    seed(y * width);
+    seed(y * width + width - 1);
+  }
+  while (head < tail) {
+    const index = queue[head++];
+    const x = index % width;
+    const neighbors = [];
+    if (x > 0) neighbors.push(index - 1);
+    if (x + 1 < width) neighbors.push(index + 1);
+    if (index >= width) neighbors.push(index - width);
+    if (index + width < total) neighbors.push(index + width);
+    const sourceOffset = index * 4;
+    for (const neighbor of neighbors) {
+      if (mask[neighbor]) continue;
+      const offset = neighbor * 4;
+      const dr = pixels[offset] - pixels[sourceOffset];
+      const dg = pixels[offset + 1] - pixels[sourceOffset + 1];
+      const db = pixels[offset + 2] - pixels[sourceOffset + 2];
+      const localDistance = Math.sqrt(dr * dr + dg * dg + db * db);
+      const backgroundDistance = distanceToBackground(neighbor);
+      if (backgroundDistance <= threshold || (backgroundDistance <= threshold * 1.4 && localDistance <= threshold * 0.42)) {
+        mask[neighbor] = 1;
+        queue[tail++] = neighbor;
+      }
+    }
+  }
+  for (let index = 0; index < total; index++) {
+    if (!mask[index]) continue;
+    const offset = index * 4;
+    pixels[offset] = 255;
+    pixels[offset + 1] = 255;
+    pixels[offset + 2] = 255;
+    pixels[offset + 3] = 255;
+  }
+}
+
+function downloadWhiteBackgroundPhoto() {
+  const canvas = $('whiteBgCanvas');
+  if (!whiteBgSourceImage || !canvas) return;
+  canvas.toBlob(blob => {
+    if (!blob) return;
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.href = url;
+    link.download = whiteBgFileName;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }, 'image/jpeg', 0.95);
+}
+
+function resetWhiteBackgroundTool() {
+  clearTimeout(whiteBgProcessTimer);
+  whiteBgSourceImage = null;
+  const canvas = $('whiteBgCanvas');
+  if (canvas) {
+    canvas.width = 1;
+    canvas.height = 1;
+  }
+  if ($('whiteBgOriginal')) $('whiteBgOriginal').removeAttribute('src');
+  if ($('whiteBgPreview')) $('whiteBgPreview').style.display = 'none';
+  if ($('whiteBgDropzone')) $('whiteBgDropzone').style.display = '';
+  if ($('btnDownloadWhiteBg')) $('btnDownloadWhiteBg').disabled = true;
+  if ($('btnResetWhiteBg')) $('btnResetWhiteBg').disabled = true;
 }
 
 // ============================================
