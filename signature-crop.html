@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Recortar firma · AGENDA STAFF</title>
+  <link rel="stylesheet" href="signature-crop.css">
+</head>
+<body>
+  <header>
+    <div>
+      <strong id="title">Recortar firma</strong>
+      <span>Arrastra alrededor de la firma que aparece en el documento</span>
+    </div>
+    <button id="cancel" type="button">Cancelar</button>
+  </header>
+  <main>
+    <section id="crop-stage" aria-label="Documento capturado">
+      <img id="source" alt="Captura del documento">
+      <div id="selection" hidden></div>
+    </section>
+    <section id="preview" hidden>
+      <div class="preview-card">
+        <h1>Confirma el recorte</h1>
+        <p>El fondo blanco se ha eliminado. Comprueba el resultado antes de guardarlo.</p>
+        <div class="checker"><img id="preview-image" alt="Vista previa de la firma"></div>
+        <div class="actions">
+          <button id="repeat" type="button">Repetir recorte</button>
+          <button id="preview-cancel" type="button">Cancelar</button>
+          <button id="save" class="save" type="button">Guardar firma</button>
+        </div>
+      </div>
+    </section>
+    <div id="loading">Preparando el documento…</div>
+  </main>
+  <script src="signature-crop.js"></script>
+</body>
+</html>

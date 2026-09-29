@@ -155,8 +155,8 @@
   function createBadge(person, fallback = false) {
     const badge = document.createElement('span');
     badge.className = `${fallback ? 'agenda-signature-inline-fallback ' : ''}agenda-signature-badge ${person.saved ? 'saved' : 'missing'}`;
-    badge.textContent = person.saved ? '✓ Firma' : '✕ Sin firma · Subir';
-    badge.title = person.saved ? 'Firma guardada en Agenda Staff' : 'Pulsa para subir esta firma';
+    badge.textContent = person.saved ? '✓ Firma' : '✕ Sin firma · Añadir';
+    badge.title = person.saved ? 'Firma guardada en Agenda Staff' : 'Pulsa para subir o recortar esta firma';
     badge.setAttribute('aria-label', badge.title);
     if (!person.saved) {
       badge.classList.add('uploadable');
@@ -166,12 +166,122 @@
         if (event.type === 'keydown' && !['Enter', ' '].includes(event.key)) return;
         event.preventDefault();
         event.stopPropagation();
-        uploadMissingSignature(person);
+        openMissingSignatureActions(person);
       };
       badge.addEventListener('click', activate);
       badge.addEventListener('keydown', activate);
     }
     return badge;
+  }
+
+  function closeSignatureDialog() {
+    document.querySelector('.agenda-signature-dialog-backdrop')?.remove();
+  }
+
+  function createDialog(title, description = '') {
+    closeSignatureDialog();
+    const backdrop = document.createElement('div');
+    backdrop.className = 'agenda-signature-dialog-backdrop';
+    const dialog = document.createElement('div');
+    dialog.className = 'agenda-signature-dialog';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    const heading = document.createElement('h3');
+    heading.textContent = title;
+    dialog.appendChild(heading);
+    if (description) {
+      const paragraph = document.createElement('p');
+      paragraph.textContent = description;
+      dialog.appendChild(paragraph);
+    }
+    backdrop.addEventListener('mousedown', event => {
+      if (event.target === backdrop) closeSignatureDialog();
+    });
+    backdrop.appendChild(dialog);
+    document.body.appendChild(backdrop);
+    return dialog;
+  }
+
+  function createDialogButton(text, className, onClick) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = className;
+    button.textContent = text;
+    button.addEventListener('click', onClick);
+    return button;
+  }
+
+  function openMissingSignatureActions(person) {
+    const dialog = createDialog(`Añadir firma de ${person.name}`, 'Elige cómo quieres obtenerla.');
+    const actions = document.createElement('div');
+    actions.className = 'agenda-signature-dialog-actions vertical';
+    actions.append(
+      createDialogButton('Subir imagen', 'primary', () => {
+        closeSignatureDialog();
+        uploadMissingSignature(person);
+      }),
+      createDialogButton('Recortar desde otra pestaña', 'crop', () => openCropTabChooser(person)),
+      createDialogButton('Cancelar', 'secondary', closeSignatureDialog)
+    );
+    dialog.appendChild(actions);
+  }
+
+  async function openCropTabChooser(person) {
+    const dialog = createDialog('Selecciona el documento', 'Abre primero el documento y deja visible la zona donde está la firma.');
+    const loading = document.createElement('div');
+    loading.className = 'agenda-signature-dialog-loading';
+    loading.textContent = 'Buscando pestañas abiertas…';
+    dialog.appendChild(loading);
+    try {
+      const result = await chrome.runtime.sendMessage({ type: 'AGENDA_GET_CAPTURE_TABS' });
+      if (!result?.success) throw new Error(result?.error || 'No se han podido consultar las pestañas');
+      loading.remove();
+      if (!result.tabs?.length) {
+        const empty = document.createElement('div');
+        empty.className = 'agenda-signature-dialog-empty';
+        empty.textContent = 'No hay otra pestaña web disponible. Abre el documento en Chrome y vuelve a intentarlo.';
+        dialog.appendChild(empty);
+      } else {
+        const list = document.createElement('div');
+        list.className = 'agenda-signature-tab-list';
+        result.tabs.forEach(tab => {
+          const option = document.createElement('button');
+          option.type = 'button';
+          option.className = 'agenda-signature-tab-option';
+          const title = document.createElement('strong');
+          title.textContent = tab.title || 'Pestaña sin título';
+          const url = document.createElement('span');
+          try { url.textContent = new URL(tab.url).hostname || tab.url; }
+          catch (_) { url.textContent = tab.url || ''; }
+          option.append(title, url);
+          option.addEventListener('click', async () => {
+            option.disabled = true;
+            option.classList.add('loading');
+            const oldTitle = title.textContent;
+            title.textContent = 'Abriendo selector…';
+            try {
+              const start = await chrome.runtime.sendMessage({ type: 'AGENDA_START_SIGNATURE_CROP', name: person.name, tabId: tab.id });
+              if (!start?.success) throw new Error(start?.error || 'No se ha podido iniciar el recorte');
+              closeSignatureDialog();
+            } catch (error) {
+              option.disabled = false;
+              option.classList.remove('loading');
+              title.textContent = oldTitle;
+              showInlineNotice(error.message || 'No se ha podido abrir esa pestaña', 'error');
+            }
+          });
+          list.appendChild(option);
+        });
+        dialog.appendChild(list);
+      }
+      const footer = document.createElement('div');
+      footer.className = 'agenda-signature-dialog-actions';
+      footer.appendChild(createDialogButton('Volver', 'secondary', () => openMissingSignatureActions(person)));
+      dialog.appendChild(footer);
+    } catch (error) {
+      closeSignatureDialog();
+      showInlineNotice(error.message || 'No se han podido consultar las pestañas', 'error');
+    }
   }
 
   function showInlineNotice(text, type = 'success') {
@@ -345,6 +455,13 @@
       scanAndRender();
       observeGmail();
       startAutomaticRefresh();
+    }
+    if (message.type === 'AGENDA_SIGNATURE_CROP_SAVED') {
+      const savedName = message.name || '';
+      savedNames.add(nameKey(savedName));
+      savedNameTokens.add(nameTokenKey(savedName));
+      showInlineNotice(`✓ Firma recortada y guardada: ${savedName}`);
+      scanAndRender();
     }
     if (message.type === 'AGENDA_GMAIL_SCAN_ERROR') console.warn(message.error || 'No se ha podido analizar el correo');
   });

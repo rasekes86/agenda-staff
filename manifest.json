@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "AGENDA STAFF",
-  "version": "3.7.1",
-  "version_name": "3.7.1",
+  "version": "3.8.0",
+  "version_name": "3.8.0",
   "description": "Agenda colaborativa con autenticación, notificaciones, herramientas PDF, firmas",
   "permissions": [
     "sidePanel",
@@ -61,6 +61,9 @@
         "pdf.worker.min.js",
         "mammoth.browser.min.js",
         "screenshot-selector.js",
+        "signature-crop.html",
+        "signature-crop.js",
+        "signature-crop.css",
         "supabase-config.js",
         "offscreen.html",
         "offscreen.js"

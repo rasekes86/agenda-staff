@@ -68,3 +68,118 @@
 }
 
 .agenda-signature-notice.error { background: #991b1b; }
+
+.agenda-signature-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, .52);
+  font-family: Arial, sans-serif;
+}
+
+.agenda-signature-dialog {
+  width: min(480px, calc(100vw - 40px));
+  max-height: min(620px, calc(100vh - 40px));
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 20px;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  background: #fff;
+  color: #0f172a;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, .38);
+}
+
+.agenda-signature-dialog h3 {
+  margin: 0 0 6px;
+  color: #0f172a;
+  font: 700 18px/1.3 Arial, sans-serif;
+}
+
+.agenda-signature-dialog p {
+  margin: 0 0 16px;
+  color: #64748b;
+  font: 400 13px/1.45 Arial, sans-serif;
+}
+
+.agenda-signature-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 15px;
+}
+
+.agenda-signature-dialog-actions.vertical {
+  flex-direction: column;
+}
+
+.agenda-signature-dialog button {
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 9px;
+  padding: 11px 13px;
+  cursor: pointer;
+  color: #334155;
+  background: #e2e8f0;
+  font: 700 13px/1.25 Arial, sans-serif;
+}
+
+.agenda-signature-dialog button.primary { color: #fff; background: #2563eb; }
+.agenda-signature-dialog button.crop { color: #fff; background: #7c3aed; }
+.agenda-signature-dialog button:disabled { cursor: wait; opacity: .65; }
+
+.agenda-signature-dialog-loading,
+.agenda-signature-dialog-empty {
+  padding: 18px;
+  border-radius: 9px;
+  background: #f1f5f9;
+  color: #64748b;
+  text-align: center;
+  font: 600 12px/1.45 Arial, sans-serif;
+}
+
+.agenda-signature-tab-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  max-height: 390px;
+  overflow: auto;
+}
+
+.agenda-signature-tab-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  text-align: left;
+  border: 1px solid #cbd5e1 !important;
+  background: #f8fafc !important;
+}
+
+.agenda-signature-tab-option:hover,
+.agenda-signature-tab-option:focus {
+  border-color: #7c3aed !important;
+  background: #f5f3ff !important;
+  outline: none;
+}
+
+.agenda-signature-tab-option strong {
+  overflow: hidden;
+  width: 100%;
+  color: #1e293b;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agenda-signature-tab-option span {
+  overflow: hidden;
+  width: 100%;
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

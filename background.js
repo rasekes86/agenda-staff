@@ -23,6 +23,11 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && tab.url?.startsWith('https://mail.google.com/')) scanGmailPersonnel(tabId);
 });
 
+chrome.tabs.onRemoved.addListener(async tabId => {
+  const crop = await getPendingSignatureCrop();
+  if (crop?.cropperTabId === tabId) cancelSignatureCrop();
+});
+
 // ============================================
 // CONSTANTS
 // ============================================
@@ -39,6 +44,18 @@ const WHITE_TOLERANCE = 25;                    // Screenshot white removal toler
 let notificationCheckInterval = null;
 let scheduledEvents = [];
 let notifiedEvents = new Set();
+let pendingSignatureCrop = null;
+
+async function getPendingSignatureCrop() {
+  if (pendingSignatureCrop) return pendingSignatureCrop;
+  const stored = await chrome.storage.session.get('pendingSignatureCrop');
+  return stored.pendingSignatureCrop || null;
+}
+
+async function clearPendingSignatureCrop() {
+  pendingSignatureCrop = null;
+  await chrome.storage.session.remove('pendingSignatureCrop');
+}
 
 // Listen for messages from sidepanel
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -107,7 +124,113 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
+
+  if (message.type === 'AGENDA_GET_CAPTURE_TABS') {
+    getSignatureCaptureTabs(sender.tab?.id)
+      .then(tabs => sendResponse({ success: true, tabs }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'AGENDA_START_SIGNATURE_CROP') {
+    startSignatureCrop(message, sender.tab)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'AGENDA_GET_SIGNATURE_CROP_SOURCE') {
+    if (!pendingSignatureCrop || sender.tab?.id !== pendingSignatureCrop.cropperTabId) {
+      sendResponse({ success: false, error: 'La sesión de recorte ha caducado' });
+    } else {
+      sendResponse({ success: true, name: pendingSignatureCrop.name, dataUrl: pendingSignatureCrop.sourceDataUrl });
+    }
+    return true;
+  }
+
+  if (message.type === 'AGENDA_CONFIRM_SIGNATURE_CROP') {
+    confirmSignatureCrop(message, sender.tab)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (message.type === 'AGENDA_CANCEL_SIGNATURE_CROP') {
+    cancelSignatureCrop().then(() => sendResponse({ success: true }));
+    return true;
+  }
 });
+
+async function getSignatureCaptureTabs(sourceTabId) {
+  const tabs = await chrome.tabs.query({});
+  return tabs
+    .filter(tab => tab.id && tab.id !== sourceTabId && /^(https?|file):/i.test(tab.url || ''))
+    .map(tab => ({ id: tab.id, windowId: tab.windowId, title: tab.title || tab.url || 'Pestaña sin título', url: tab.url || '' }));
+}
+
+async function startSignatureCrop(message, sourceTab) {
+  const name = String(message.name || '').trim();
+  const targetTabId = Number(message.tabId);
+  if (!name || !targetTabId || !sourceTab?.id) throw new Error('No se ha podido preparar el recorte');
+  const targetTab = await chrome.tabs.get(targetTabId);
+  if (!targetTab?.id || !/^(https?|file):/i.test(targetTab.url || '')) throw new Error('Esta pestaña no permite realizar capturas');
+  pendingSignatureCrop = {
+    name,
+    sourceTabId: sourceTab.id,
+    sourceWindowId: sourceTab.windowId,
+    targetTabId: targetTab.id,
+    targetWindowId: targetTab.windowId
+  };
+  await chrome.windows.update(targetTab.windowId, { focused: true });
+  await chrome.tabs.update(targetTab.id, { active: true });
+  await new Promise(resolve => setTimeout(resolve, 250));
+  pendingSignatureCrop.sourceDataUrl = await chrome.tabs.captureVisibleTab(targetTab.windowId, { format: 'png' });
+  if (!pendingSignatureCrop.sourceDataUrl) throw new Error('No se ha podido capturar la pestaña seleccionada');
+  const cropperTab = await chrome.tabs.create({
+    windowId: targetTab.windowId,
+    url: 'about:blank',
+    active: true
+  });
+  pendingSignatureCrop.cropperTabId = cropperTab.id;
+  await chrome.storage.session.set({
+    pendingSignatureCrop: {
+      name: pendingSignatureCrop.name,
+      sourceTabId: pendingSignatureCrop.sourceTabId,
+      sourceWindowId: pendingSignatureCrop.sourceWindowId,
+      targetTabId: pendingSignatureCrop.targetTabId,
+      targetWindowId: pendingSignatureCrop.targetWindowId,
+      cropperTabId: pendingSignatureCrop.cropperTabId
+    }
+  });
+  await chrome.tabs.update(cropperTab.id, { url: chrome.runtime.getURL('signature-crop.html') });
+  return { success: true };
+}
+
+async function confirmSignatureCrop(message, senderTab) {
+  const activeCrop = await getPendingSignatureCrop();
+  if (!activeCrop || senderTab?.id !== activeCrop.cropperTabId) throw new Error('La sesión de recorte ha caducado');
+  const crop = { ...activeCrop };
+  const result = await uploadGmailSignature({ name: crop.name, imageUrl: message.imageUrl });
+  try {
+    await chrome.tabs.sendMessage(crop.sourceTabId, { type: 'AGENDA_SIGNATURE_CROP_SAVED', name: crop.name });
+    await chrome.windows.update(crop.sourceWindowId, { focused: true });
+    await chrome.tabs.update(crop.sourceTabId, { active: true });
+  } catch (_) {}
+  await clearPendingSignatureCrop();
+  if (crop.cropperTabId) setTimeout(() => chrome.tabs.remove(crop.cropperTabId).catch(() => {}), 250);
+  return result;
+}
+
+async function cancelSignatureCrop() {
+  const crop = await getPendingSignatureCrop();
+  await clearPendingSignatureCrop();
+  if (!crop) return;
+  try {
+    await chrome.windows.update(crop.sourceWindowId, { focused: true });
+    await chrome.tabs.update(crop.sourceTabId, { active: true });
+  } catch (_) {}
+  if (crop.cropperTabId) setTimeout(() => chrome.tabs.remove(crop.cropperTabId).catch(() => {}), 150);
+}
 
 async function uploadGmailSignature(message) {
   const name = String(message.name || '').trim();
