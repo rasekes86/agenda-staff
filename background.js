@@ -82,6 +82,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
+
+  if (message.type === 'AGENDA_REQUEST_GMAIL_SCAN' && sender.tab?.id) {
+    scanGmailPersonnel(sender.tab.id)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
 });
 
 async function scanActiveGmailTab() {

@@ -106,4 +106,6 @@
     }
     if (message.type === 'AGENDA_GMAIL_SCAN_ERROR') renderOverlay([], message.error || 'No se ha podido analizar el correo');
   });
+
+  chrome.runtime.sendMessage({ type: 'AGENDA_REQUEST_GMAIL_SCAN' }).catch(() => {});
 })();

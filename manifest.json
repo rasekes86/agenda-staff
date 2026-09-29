@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "AGENDA STAFF",
-  "version": "3.6.0",
-  "version_name": "3.6.0",
+  "version": "3.6.1",
+  "version_name": "3.6.1",
   "description": "Agenda colaborativa con autenticación, notificaciones, herramientas PDF, firmas",
   "permissions": [
     "sidePanel",
@@ -25,6 +25,14 @@
   "background": {
     "service_worker": "background.js"
   },
+  "content_scripts": [
+    {
+      "matches": ["https://mail.google.com/*"],
+      "js": ["gmail-signature-overlay.js"],
+      "css": ["gmail-signature-overlay.css"],
+      "run_at": "document_idle"
+    }
+  ],
   "action": {
     "default_icon": {
       "16": "icons/icon16.png",
