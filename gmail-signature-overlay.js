@@ -5,6 +5,8 @@
   let savedNames = new Set();
   let observer = null;
   let scanTimer = null;
+  let signatureDataLoaded = false;
+  const observerConfig = { childList: true, subtree: true };
 
   const normalize = value => String(value || '')
     .normalize('NFD')
@@ -51,40 +53,76 @@
         const key = `${nameKey(name)}|${normalize(dniMatch[0]).replace(/ /g, '')}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        people.push({ name, dni: normalize(dniMatch[0]).replace(/ /g, ''), saved: savedNames.has(nameKey(name)) });
+        people.push({ name, dni: normalize(dniMatch[0]).replace(/ /g, ''), saved: savedNames.has(nameKey(name)), body });
       }
     }
     return people;
   }
 
-  function renderOverlay(people, error = '') {
-    let panel = document.getElementById('agenda-signature-overlay');
-    if (!panel) {
-      panel = document.createElement('section');
-      panel.id = 'agenda-signature-overlay';
-      document.body.appendChild(panel);
-    }
-    if (error) {
-      panel.innerHTML = `<div class="agenda-signature-header"><strong>Agenda Staff · Firmas</strong><button data-close title="Cerrar">×</button></div><div class="agenda-signature-empty">${escapeHtml(error)}</div>`;
-    } else {
-      const saved = people.filter(person => person.saved).length;
-      const missing = people.length - saved;
-      const rows = people.map(person => `<div class="agenda-signature-row ${person.saved ? 'saved' : 'missing'}"><span class="agenda-signature-icon">${person.saved ? '✓' : '×'}</span><span class="agenda-signature-person"><span class="agenda-signature-name">${escapeHtml(person.name)}</span><span class="agenda-signature-state">${person.saved ? 'Firma guardada' : 'Firma no disponible'}</span></span></div>`).join('');
-      panel.innerHTML = `<div class="agenda-signature-header"><strong>Agenda Staff · Firmas</strong><button data-close title="Cerrar">×</button></div><div class="agenda-signature-summary"><span class="agenda-signature-count saved">✓ ${saved} guardadas</span><span class="agenda-signature-count missing">× ${missing} pendientes</span></div><div class="agenda-signature-list">${rows || '<div class="agenda-signature-empty">No se ha detectado ningún listado en el correo visible.</div>'}</div><div class="agenda-signature-footer"><button data-refresh>Actualizar</button><button data-hide>Ocultar</button></div>`;
-    }
-    panel.querySelector('[data-close]')?.addEventListener('click', () => panel.remove());
-    panel.querySelector('[data-hide]')?.addEventListener('click', () => panel.remove());
-    panel.querySelector('[data-refresh]')?.addEventListener('click', scanAndRender);
+  function clearInlineIndicators() {
+    document.querySelectorAll('.agenda-signature-inline').forEach(wrapper => {
+      const originalName = wrapper.dataset.agendaOriginalName || wrapper.querySelector('.agenda-signature-inline-name')?.textContent || '';
+      const text = document.createTextNode(originalName);
+      const parent = wrapper.parentNode;
+      wrapper.replaceWith(text);
+      parent?.normalize();
+    });
+    document.querySelectorAll('.agenda-signature-inline-fallback').forEach(badge => badge.remove());
   }
 
-  function escapeHtml(value) {
-    const element = document.createElement('div');
-    element.textContent = value;
-    return element.innerHTML;
+  function createBadge(saved, fallback = false) {
+    const badge = document.createElement('span');
+    badge.className = `${fallback ? 'agenda-signature-inline-fallback ' : ''}agenda-signature-badge ${saved ? 'saved' : 'missing'}`;
+    badge.textContent = saved ? '✓ Firma' : '✕ Sin firma';
+    badge.title = saved ? 'Firma guardada en Agenda Staff' : 'Firma no disponible en Agenda Staff';
+    badge.setAttribute('aria-label', badge.title);
+    return badge;
+  }
+
+  function findExactNameTextNode(body, name) {
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        if (!node.nodeValue?.trim() || node.parentElement?.closest('.agenda-signature-inline')) return NodeFilter.FILTER_REJECT;
+        return node.nodeValue.toLocaleUpperCase().includes(name.toLocaleUpperCase()) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      }
+    });
+    return walker.nextNode();
+  }
+
+  function injectIndicator(person) {
+    const textNode = findExactNameTextNode(person.body, person.name);
+    if (textNode) {
+      const rawText = textNode.nodeValue;
+      const start = rawText.toLocaleUpperCase().indexOf(person.name.toLocaleUpperCase());
+      if (start >= 0) {
+        const before = rawText.slice(0, start);
+        const originalName = rawText.slice(start, start + person.name.length);
+        const after = rawText.slice(start + person.name.length);
+        const wrapper = document.createElement('span');
+        wrapper.className = 'agenda-signature-inline';
+        wrapper.dataset.agendaOriginalName = originalName;
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'agenda-signature-inline-name';
+        nameSpan.textContent = originalName;
+        wrapper.append(nameSpan, createBadge(person.saved));
+        textNode.replaceWith(document.createTextNode(before), wrapper, document.createTextNode(after));
+        return;
+      }
+    }
+
+    const name = nameKey(person.name);
+    const candidates = [...person.body.querySelectorAll('span, div, td')]
+      .filter(element => !element.closest('.agenda-signature-inline') && nameKey(element.textContent).includes(name))
+      .sort((a, b) => a.textContent.length - b.textContent.length);
+    if (candidates[0]) candidates[0].append(createBadge(person.saved, true));
   }
 
   function scanAndRender() {
-    renderOverlay(extractPersonnel());
+    observer?.disconnect();
+    document.getElementById('agenda-signature-overlay')?.remove();
+    clearInlineIndicators();
+    extractPersonnel().forEach(injectIndicator);
+    if (observer) observer.observe(document.body, observerConfig);
   }
 
   function observeGmail() {
@@ -92,20 +130,22 @@
     observer = new MutationObserver(() => {
       clearTimeout(scanTimer);
       scanTimer = setTimeout(() => {
-        if (document.getElementById('agenda-signature-overlay')) scanAndRender();
+        if (signatureDataLoaded) scanAndRender();
       }, 700);
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, observerConfig);
   }
 
   chrome.runtime.onMessage.addListener(message => {
     if (message.type === 'AGENDA_SCAN_GMAIL_SIGNATURES') {
       savedNames = new Set((message.signatureNames || []).map(nameKey));
+      signatureDataLoaded = true;
       scanAndRender();
       observeGmail();
     }
-    if (message.type === 'AGENDA_GMAIL_SCAN_ERROR') renderOverlay([], message.error || 'No se ha podido analizar el correo');
+    if (message.type === 'AGENDA_GMAIL_SCAN_ERROR') console.warn(message.error || 'No se ha podido analizar el correo');
   });
 
+  document.getElementById('agenda-signature-overlay')?.remove();
   chrome.runtime.sendMessage({ type: 'AGENDA_REQUEST_GMAIL_SCAN' }).catch(() => {});
 })();
