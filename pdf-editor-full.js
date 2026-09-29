@@ -67,6 +67,7 @@ let signatureDrawHasInk = false;
 let signatureDrawLastPoint = null;
 let targetTemplateSignature = null;
 let pendingSignaturePosition = null;
+let activeSignatureCropDialog = null;
 
 // Session for authentication
 let session = null;
@@ -671,6 +672,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   applyLightMode(localStorage.getItem('pe_lightMode') === 'true');
   
   showStatus('Carga uno o más PDFs para comenzar');
+});
+
+chrome.runtime.onMessage.addListener(message => {
+  if (message.type === 'AGENDA_SIGNATURE_CROP_SAVED' && message.context === 'editor') {
+    handleEditorSignatureCropSaved(message);
+  }
 });
 
 function setupEventListeners() {
@@ -2378,6 +2385,7 @@ function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames
       html += `<div class="signature-item signature-missing">
         <span class="signature-missing-name">${escapeHtml(name)}</span>
         <div class="signature-missing-actions">
+          <button class="signature-crop-btn" data-name="${escapeHtml(name)}">✂️ Recortar</button>
           <button class="signature-draw-btn" data-name="${escapeHtml(name)}">✍️ Dibujar</button>
           <button class="signature-upload-btn" data-name="${escapeHtml(name)}">📤 Subir</button>
         </div>
@@ -2407,6 +2415,13 @@ function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       uploadMissingSignature(btn.dataset.name);
+    });
+  });
+
+  document.querySelectorAll('.signature-crop-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openSignatureCropTabChooser(btn.dataset.name, { kind: 'editor' });
     });
   });
 
@@ -2539,6 +2554,91 @@ async function saveMissingSignature(name, processedBase64) {
   showStatus('✓ Firma guardada: ' + name, 'success');
   selectSignature(processedBase64, name);
   searchSignatures();
+}
+
+function closeSignatureCropTabChooser() {
+  activeSignatureCropDialog?.remove();
+  activeSignatureCropDialog = null;
+}
+
+async function openSignatureCropTabChooser(name, target = { kind: 'editor' }) {
+  closeSignatureCropTabChooser();
+  const chooser = document.createElement('div');
+  chooser.className = 'modal-overlay show';
+  chooser.innerHTML = `<div class="modal" style="max-width:500px;">
+    <h3>✂️ Recortar firma desde otro documento</h3>
+    <p style="color:#94a3b8;font-size:12px;margin-bottom:5px;">${escapeHtml(name)}</p>
+    <p style="color:#cbd5e1;font-size:11px;margin-bottom:12px;">Deja visible la firma en otra pestaña y selecciónala en la lista.</p>
+    <div class="signature-crop-tab-list" data-tabs><div class="signature-loading">Buscando pestañas…</div></div>
+    <div class="modal-actions"><button class="btn-cancel" data-cancel>Cancelar</button></div>
+  </div>`;
+  document.body.appendChild(chooser);
+  activeSignatureCropDialog = chooser;
+  const close = () => closeSignatureCropTabChooser();
+  chooser.querySelector('[data-cancel]').onclick = close;
+  chooser.addEventListener('click', event => { if (event.target === chooser) close(); });
+
+  try {
+    const result = await chrome.runtime.sendMessage({ type: 'AGENDA_GET_CAPTURE_TABS' });
+    if (!result?.success) throw new Error(result?.error || 'No se han podido consultar las pestañas');
+    const list = chooser.querySelector('[data-tabs]');
+    if (!list || !chooser.isConnected) return;
+    list.innerHTML = '';
+    if (!result.tabs?.length) {
+      list.innerHTML = '<div class="signature-empty">Abre el documento en otra pestaña de Chrome y vuelve a intentarlo.</div>';
+      return;
+    }
+    result.tabs.forEach(tab => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'signature-crop-tab-option';
+      const title = document.createElement('strong');
+      title.textContent = tab.title || 'Pestaña sin título';
+      const location = document.createElement('span');
+      try { location.textContent = new URL(tab.url).hostname || tab.url; }
+      catch (_) { location.textContent = tab.url || ''; }
+      button.append(title, location);
+      button.onclick = async () => {
+        button.disabled = true;
+        const previousTitle = title.textContent;
+        title.textContent = 'Preparando recorte…';
+        try {
+          const response = await chrome.runtime.sendMessage({
+            type: 'AGENDA_START_SIGNATURE_CROP',
+            name,
+            tabId: tab.id,
+            context: 'editor',
+            target
+          });
+          if (!response?.success) throw new Error(response?.error || 'No se ha podido iniciar el recorte');
+          close();
+        } catch (error) {
+          button.disabled = false;
+          title.textContent = previousTitle;
+          showStatus(error.message || 'No se ha podido abrir el recortador', 'error');
+        }
+      };
+      list.appendChild(button);
+    });
+  } catch (error) {
+    close();
+    showStatus(error.message || 'No se han podido consultar las pestañas', 'error');
+  }
+}
+
+function handleEditorSignatureCropSaved(message) {
+  if (message.context !== 'editor' || !message.imageUrl || !message.name) return;
+  const target = message.target || { kind: 'editor' };
+  if (target.kind === 'template') {
+    targetTemplateSignature = {
+      docId: target.docId,
+      page: Number(target.page),
+      index: Number(target.index),
+      name: message.name
+    };
+  }
+  selectSignature(message.imageUrl, message.name);
+  if ($('signatureSearchInput')?.value.trim()) searchSignatures();
 }
 
 function setupSignatureDrawing() {
@@ -4002,14 +4102,10 @@ async function renderTemplatesList() {
     return;
   }
   list.innerHTML = visibleTemplates.map((template, index) => {
-    const groups = {};
-    (template.slots || []).forEach(slot => { groups[slot.label || 'TEXTO'] = (groups[slot.label || 'TEXTO'] || 0) + 1; });
-    const summary = Object.entries(groups).map(([label, count]) => `${label}×${count}`).join(' · ');
     const isLocal = String(template.id).startsWith('local_');
     return `<div class="template-card">
       <div class="template-card-info">
         <strong class="template-card-name">📄 ${escapeHtml(template.name)}</strong>
-        <span class="template-card-summary">${escapeHtml(summary || 'Sin campos')}</span>
         <span class="template-card-origin">${isLocal ? 'Guardada en este equipo' : `Plantilla compartida${template.user_name ? ` · ${escapeHtml(template.user_name)}` : ''}`}</span>
       </div>
       <div class="template-card-actions">
@@ -4303,9 +4399,10 @@ function openMissingTemplateSignature(page, index, name) {
     <h3>Firma no disponible</h3>
     <p style="color:#94a3b8;font-size:12px;margin-bottom:12px;">${escapeHtml(name)}</p>
     <p style="color:#cbd5e1;font-size:11px;margin-bottom:12px;">La firma se guardará con este nombre y se colocará en el hueco seleccionado.</p>
-    <div style="display:flex;gap:8px;">
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;">
       <button class="sidebar-btn" data-upload style="flex:1;background:#2563eb;color:white;justify-content:center;">📤 Subir</button>
       <button class="sidebar-btn" data-draw style="flex:1;background:#0f766e;color:white;justify-content:center;">✍️ Dibujar</button>
+      <button class="sidebar-btn" data-crop style="flex:1;background:#7c3aed;color:white;justify-content:center;">✂️ Recortar</button>
     </div>
     <div class="modal-actions"><button class="btn-cancel" data-cancel>Cancelar</button></div>
   </div>`;
@@ -4321,6 +4418,10 @@ function openMissingTemplateSignature(page, index, name) {
   chooser.querySelector('[data-upload]').onclick = () => {
     close();
     uploadTemplateSignature(page, index, name);
+  };
+  chooser.querySelector('[data-crop]').onclick = () => {
+    close();
+    openSignatureCropTabChooser(name, { kind: 'template', docId: activeDoc.id, page, index });
   };
 }
 
@@ -4364,8 +4465,8 @@ function applyLightMode(active) {
     btn.classList.toggle('primary', lightModeActive);
     btn.classList.toggle('secondary', !lightModeActive);
     btn.innerHTML = lightModeActive
-      ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg> Modo oscuro`
-      : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line></svg> Modo claro`;
+      ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg><span class="toolbar-label">Modo oscuro</span>`
+      : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line></svg><span class="toolbar-label">Modo claro</span>`;
   }
 }
 
@@ -5368,13 +5469,40 @@ function renderImgPreview() {
   
   imgFiles.forEach((img, idx) => {
     const item = document.createElement('div');
-    item.className = 'preview-item';
-    item.innerHTML = `<img src="${escapeHtml(img.src)}" alt=""><span class="name">${escapeHtml(img.name)}</span><button class="remove-btn" data-idx="${idx}">×</button>`;
+    item.className = 'preview-item image-preview-item';
+    item.draggable = true;
+    item.dataset.idx = idx;
+    item.title = 'Arrastra para cambiar el orden';
+    item.innerHTML = `<span class="image-order">${idx + 1}</span><div class="image-preview-frame"><img src="${escapeHtml(img.src)}" alt=""></div><span class="name">${escapeHtml(img.name)}</span><button class="remove-btn" data-idx="${idx}" title="Quitar imagen">×</button>`;
+    item.addEventListener('dragstart', event => {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(idx));
+      requestAnimationFrame(() => item.classList.add('dragging'));
+    });
+    item.addEventListener('dragover', event => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      item.classList.add('drag-over');
+    });
+    item.addEventListener('dragleave', () => item.classList.remove('drag-over'));
+    item.addEventListener('drop', event => {
+      event.preventDefault();
+      const sourceIndex = Number(event.dataTransfer.getData('text/plain'));
+      const targetIndex = Number(item.dataset.idx);
+      if (!Number.isInteger(sourceIndex) || sourceIndex === targetIndex || !imgFiles[sourceIndex]) return;
+      const [moved] = imgFiles.splice(sourceIndex, 1);
+      imgFiles.splice(targetIndex, 0, moved);
+      renderImgPreview();
+    });
+    item.addEventListener('dragend', () => {
+      list.querySelectorAll('.image-preview-item').forEach(card => card.classList.remove('dragging', 'drag-over'));
+    });
     list.appendChild(item);
   });
   
   list.querySelectorAll('.remove-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', event => {
+      event.stopPropagation();
       imgFiles.splice(parseInt(btn.dataset.idx), 1);
       renderImgPreview();
     });

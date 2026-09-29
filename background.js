@@ -176,6 +176,8 @@ async function startSignatureCrop(message, sourceTab) {
   if (!targetTab?.id || !/^(https?|file):/i.test(targetTab.url || '')) throw new Error('Esta pestaña no permite realizar capturas');
   pendingSignatureCrop = {
     name,
+    context: String(message.context || 'gmail'),
+    target: message.target || null,
     sourceTabId: sourceTab.id,
     sourceWindowId: sourceTab.windowId,
     targetTabId: targetTab.id,
@@ -195,6 +197,8 @@ async function startSignatureCrop(message, sourceTab) {
   await chrome.storage.session.set({
     pendingSignatureCrop: {
       name: pendingSignatureCrop.name,
+      context: pendingSignatureCrop.context,
+      target: pendingSignatureCrop.target,
       sourceTabId: pendingSignatureCrop.sourceTabId,
       sourceWindowId: pendingSignatureCrop.sourceWindowId,
       targetTabId: pendingSignatureCrop.targetTabId,
@@ -212,7 +216,13 @@ async function confirmSignatureCrop(message, senderTab) {
   const crop = { ...activeCrop };
   const result = await uploadGmailSignature({ name: crop.name, imageUrl: message.imageUrl });
   try {
-    await chrome.tabs.sendMessage(crop.sourceTabId, { type: 'AGENDA_SIGNATURE_CROP_SAVED', name: crop.name });
+    await chrome.tabs.sendMessage(crop.sourceTabId, {
+      type: 'AGENDA_SIGNATURE_CROP_SAVED',
+      name: crop.name,
+      imageUrl: message.imageUrl,
+      context: crop.context || 'gmail',
+      target: crop.target || null
+    });
     await chrome.windows.update(crop.sourceWindowId, { focused: true });
     await chrome.tabs.update(crop.sourceTabId, { active: true });
   } catch (_) {}

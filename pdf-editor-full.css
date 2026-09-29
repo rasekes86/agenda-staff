@@ -9,6 +9,8 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  width: 100%;
+  overflow-x: hidden;
 }
 
 .editor-header {
@@ -19,6 +21,8 @@ body {
   border-bottom: 1px solid #334155;
   gap: 12px;
   flex-wrap: wrap;
+  width: 100%;
+  min-width: 0;
 }
 
 .editor-title {
@@ -74,6 +78,7 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
 }
 
 .file-name {
@@ -86,6 +91,20 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+}
+
+@media (max-width: 1100px) and (min-width: 701px) {
+  .editor-header { padding: 12px; gap: 8px; }
+  .editor-logo { max-width: 155px; }
+  .file-name { max-width: 145px; }
+  .toolbar-btn:has(.toolbar-label) {
+    width: 40px;
+    min-width: 40px;
+    padding: 8px;
+    justify-content: center;
+  }
+  .toolbar-label { display: none; }
 }
 
 /* Document Tabs - Sticky */
@@ -406,12 +425,15 @@ body.multiple-documents .editor-sidebar { padding-top: 44px; }
 /* Tool Tabs Grid - 2 columns x 3 rows */
 .tool-tabs-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
   flex-direction: initial;
+  width: 100%;
 }
 
 .tool-tab-compact {
+  min-width: 0;
+  width: 100%;
   padding: 7px 8px;
   font-size: 11px;
   gap: 5px;
@@ -423,6 +445,8 @@ body.multiple-documents .editor-sidebar { padding-top: 44px; }
 }
 
 .tool-tab-label {
+  min-width: 0;
+  max-width: 100%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -466,6 +490,8 @@ body.multiple-documents .editor-sidebar { padding-top: 44px; }
   cursor: pointer;
   transition: all 0.2s;
   text-align: left;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .tool-tab:hover { background: #3d4f63; }
@@ -1087,7 +1113,17 @@ body.light-mode .recent-sig-btn:hover { background: #dbeafe; border-color: #2563
   background: #7c3aed;
 }
 
-.signature-missing-actions { display: flex; gap: 6px; }
+.signature-missing-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.signature-crop-btn {
+  background: #7c3aed;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.signature-crop-btn:hover { background: #6d28d9; }
 .signature-draw-btn {
   background: #0f766e;
   color: white;
@@ -1352,6 +1388,104 @@ body.light-mode .template-slot-builder input { background: #fff; color: #0f172a;
   cursor: pointer;
   font-size: 10px;
 }
+
+/* Image-to-PDF canvas: visual ordering before creating the PDF. */
+#workspaceImgToPdf {
+  width: min(1100px, 100%);
+  flex-direction: column;
+  gap: 16px;
+}
+
+.workspace-dropzone {
+  width: 100%;
+  min-height: 190px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 26px;
+  border: 2px dashed #64748b;
+  border-radius: 14px;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.workspace-dropzone:hover,
+.workspace-dropzone.drag-over { border-color: #3b82f6; background: rgba(59,130,246,.09); }
+.workspace-dropzone-text { color: #e2e8f0; font-size: 17px; font-weight: 700; }
+.workspace-dropzone-hint { color: #94a3b8; font-size: 12px; text-align: center; }
+
+#imgMainPreview {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+#imgMainPreview .image-preview-item {
+  position: relative;
+  min-width: 0;
+  min-height: 190px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+  margin: 0;
+  padding: 9px;
+  border: 2px solid transparent;
+  background: #0f172a;
+  cursor: grab;
+  user-select: none;
+}
+#imgMainPreview .image-preview-item:active { cursor: grabbing; }
+#imgMainPreview .image-preview-item.dragging { opacity: .4; }
+#imgMainPreview .image-preview-item.drag-over { border-color: #22c55e; background: #14352a; }
+#imgMainPreview .image-preview-frame {
+  height: 125px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #fff;
+}
+#imgMainPreview .image-preview-item img { width: 100%; height: 100%; object-fit: contain; border-radius: 0; }
+#imgMainPreview .image-order {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 27px;
+  height: 27px;
+  border-radius: 50%;
+  background: #2563eb;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  box-shadow: 0 2px 7px rgba(15,23,42,.35);
+}
+#imgMainPreview .image-preview-item .name { width: 100%; color: #cbd5e1; text-align: center; }
+#imgMainPreview .image-preview-item .remove-btn { position: absolute; top: 13px; right: 13px; width: 27px; height: 27px; font-size: 16px; }
+
+.signature-crop-tab-list { display: flex; flex-direction: column; gap: 7px; max-height: 330px; overflow-y: auto; }
+.signature-crop-tab-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #475569;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #f8fafc;
+  cursor: pointer;
+  text-align: left;
+}
+.signature-crop-tab-option:hover { border-color: #8b5cf6; background: #312e81; }
+.signature-crop-tab-option strong,
+.signature-crop-tab-option span { overflow: hidden; width: 100%; text-overflow: ellipsis; white-space: nowrap; }
+.signature-crop-tab-option span { margin-top: 3px; color: #94a3b8; font-size: 10px; }
 
 /* Options group */
 .options-group {
@@ -1683,6 +1817,32 @@ body.light-mode .modal-overlay { background: rgba(15, 23, 42, 0.42); }
 body.light-mode #btnDraw { background: #fef3c7 !important; color: #92400e !important; }
 body.light-mode #btnStampCheck { background: #dcfce7 !important; color: #166534 !important; }
 body.light-mode #btnStampX { background: #fee2e2 !important; color: #991b1b !important; }
+body.light-mode #btnAddWorkout { background: #dc2626 !important; color: #ffffff !important; }
+body.light-mode #btnAddSignature { background: #dcfce7 !important; color: #166534 !important; }
+body.light-mode #btnAddDate,
+body.light-mode #btnAddDateParts { background: #ede9fe !important; color: #5b21b6 !important; }
+body.light-mode #btnAddCity { background: #cffafe !important; color: #155e75 !important; }
+body.light-mode #btnAddCategory { background: #ede9fe !important; color: #5b21b6 !important; }
+body.light-mode #btnOpenTemplates { background: #e0e7ff !important; color: #3730a3 !important; }
+body.light-mode #btnFillTemplate { background: #d1fae5 !important; color: #065f46 !important; }
+body.light-mode .sidebar-btn.primary { background: #2563eb !important; color: #ffffff !important; }
+body.light-mode .toolbar-btn.primary { background: #2563eb; color: #ffffff; }
+body.light-mode .toolbar-btn.success { background: #047857; color: #ffffff; }
+body.light-mode .toolbar-btn.danger { background: #b91c1c; color: #ffffff; }
+body.light-mode .toolbar-btn.secondary { background: #e2e8f0; color: #0f172a; }
+body.light-mode .option-btn.active { background: #2563eb; color: #ffffff; border-color: #2563eb; }
+body.light-mode .template-card-actions button { color: #ffffff !important; }
+body.light-mode .signature-upload-btn,
+body.light-mode .signature-draw-btn,
+body.light-mode .signature-crop-btn { color: #ffffff; }
+body.light-mode .workspace-dropzone { background: #f8fafc; border-color: #94a3b8; }
+body.light-mode .workspace-dropzone-text { color: #1e293b; }
+body.light-mode .workspace-dropzone-hint { color: #475569; }
+body.light-mode #imgMainPreview .image-preview-item { background: #ffffff; border-color: #cbd5e1; }
+body.light-mode #imgMainPreview .image-preview-item.drag-over { background: #dcfce7; border-color: #16a34a; }
+body.light-mode #imgMainPreview .image-preview-item .name { color: #334155; }
+body.light-mode .signature-crop-tab-option { background: #ffffff; color: #0f172a; border-color: #cbd5e1; }
+body.light-mode .signature-crop-tab-option:hover { background: #f5f3ff; border-color: #7c3aed; }
 body.light-mode .copy-btn { background: #cffafe !important; color: #155e75 !important; }
 body.light-mode .paste-btn { background: #ede9fe !important; color: #5b21b6 !important; }
 
