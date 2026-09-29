@@ -3,9 +3,11 @@
   white-space: normal;
 }
 
-.agenda-signature-inline-name {
-  box-shadow: inset 0 -2px 0 rgba(37, 99, 235, .22);
-}
+.agenda-signature-inline.saved .agenda-signature-inline-name,
+.agenda-signature-name-state.saved { box-shadow: inset 0 -3px 0 rgba(22, 163, 74, .75); }
+
+.agenda-signature-inline.missing .agenda-signature-inline-name,
+.agenda-signature-name-state.missing { box-shadow: inset 0 -3px 0 rgba(220, 38, 38, .75); }
 
 .agenda-signature-badge {
   display: inline-flex;
@@ -34,6 +36,35 @@
   border-color: #fca5a5;
 }
 
+.agenda-signature-badge.uploadable {
+  cursor: pointer;
+  transition: transform .12s ease, box-shadow .12s ease, background .12s ease;
+}
+
+.agenda-signature-badge.uploadable:hover,
+.agenda-signature-badge.uploadable:focus {
+  background: #fecaca;
+  box-shadow: 0 2px 8px rgba(153, 27, 27, .24);
+  transform: translateY(-1px);
+  outline: none;
+}
+
 .agenda-signature-inline-fallback {
   margin-left: 7px;
 }
+
+.agenda-signature-notice {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 2147483647;
+  max-width: 360px;
+  padding: 11px 15px;
+  border-radius: 9px;
+  background: #166534;
+  color: #fff;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, .28);
+  font: 700 12px/1.35 Arial, sans-serif;
+}
+
+.agenda-signature-notice.error { background: #991b1b; }

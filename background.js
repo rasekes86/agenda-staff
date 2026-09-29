@@ -89,7 +89,42 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
+
+  if (message.type === 'AGENDA_UPLOAD_GMAIL_SIGNATURE') {
+    uploadGmailSignature(message)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
 });
+
+async function uploadGmailSignature(message) {
+  const name = String(message.name || '').trim();
+  const imageUrl = String(message.imageUrl || '');
+  if (!name || !imageUrl.startsWith('data:image/png;base64,')) throw new Error('La firma seleccionada no es válida');
+  const stored = await chrome.storage.local.get(['session', 'user']);
+  if (!stored.session?.access_token || !stored.user?.id) throw new Error('Abre Agenda Staff e inicia sesión');
+  const configUrl = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
+  const configKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1Z3V0Y3N1a3hreGxncGttenh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzc5OTExMjksImV4cCI6MjA1MzU2NzEyOX0.PpolAzqqXNBOhRlUVzplqkKeGQxzfed4gH377CidVJE';
+  const response = await fetch(`${configUrl}/rest/v1/signatures`, {
+    method: 'POST',
+    headers: {
+      apikey: configKey,
+      Authorization: `Bearer ${stored.session.access_token}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=representation'
+    },
+    body: JSON.stringify({
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+      name: name.toUpperCase(),
+      image_url: imageUrl,
+      user_id: stored.user.id,
+      user_name: stored.user.name || stored.user.email || 'Usuario'
+    })
+  });
+  if (!response.ok) throw new Error('No se ha podido guardar la firma');
+  return { success: true, name: name.toUpperCase() };
+}
 
 async function scanActiveGmailTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
