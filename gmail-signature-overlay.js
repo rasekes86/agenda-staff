@@ -7,6 +7,9 @@
   let observer = null;
   let scanTimer = null;
   let signatureDataLoaded = false;
+  let lastGmailLocation = location.href;
+  let localRefreshInterval = null;
+  let remoteRefreshInterval = null;
   const observerConfig = { childList: true, subtree: true };
 
   const normalize = value => String(value || '')
@@ -30,7 +33,9 @@
   }
 
   function extractPersonnel() {
-    const bodies = [...document.querySelectorAll('.a3s.aiL, [role="main"] .a3s')].filter(isVisible);
+    const messageBodies = [...document.querySelectorAll('.a3s.aiL, [role="main"] .a3s, [role="main"] .ii.gt')].filter(isVisible);
+    const mainArea = document.querySelector('[role="main"]');
+    const bodies = [...new Set([...messageBodies, ...(isVisible(mainArea) ? [mainArea] : [])])];
     const people = [];
     const seen = new Set();
     const dniPattern = /\b(?:[XYZ]\s?\d{7}\s?[A-Z]|\d{8}\s?[A-Z])\b/i;
@@ -121,13 +126,13 @@
 
       const standaloneCandidates = [];
       const standaloneLines = body.innerText.split(/\r?\n/);
+      const hasNamesHeading = standaloneLines.some(line => /\b(NOMBRES?|PERSONAL|LISTADO)\b/i.test(line));
       for (const rawLine of standaloneLines) {
-        const line = rawLine.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+        const line = rawLine.replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
         const match = line.match(standaloneNamePattern);
-        if (!match || line !== line.toLocaleUpperCase()) continue;
+        if (!match || (!hasNamesHeading && line !== line.toLocaleUpperCase())) continue;
         standaloneCandidates.push(match[1]);
       }
-      const hasNamesHeading = standaloneLines.some(line => /\b(NOMBRES?|PERSONAL|LISTADO)\b/i.test(line));
       if (hasNamesHeading || standaloneCandidates.length >= 2) {
         standaloneCandidates.forEach(name => addPerson(name, '', body));
       }
@@ -316,6 +321,22 @@
     observer.observe(document.body, observerConfig);
   }
 
+  function requestRemoteRefresh() {
+    chrome.runtime.sendMessage({ type: 'AGENDA_REQUEST_GMAIL_SCAN' }).catch(() => {});
+  }
+
+  function startAutomaticRefresh() {
+    if (!localRefreshInterval) {
+      localRefreshInterval = setInterval(() => {
+        const locationChanged = location.href !== lastGmailLocation;
+        if (locationChanged) lastGmailLocation = location.href;
+        if (signatureDataLoaded) scanAndRender();
+        if (locationChanged) requestRemoteRefresh();
+      }, 2500);
+    }
+    if (!remoteRefreshInterval) remoteRefreshInterval = setInterval(requestRemoteRefresh, 30000);
+  }
+
   chrome.runtime.onMessage.addListener(message => {
     if (message.type === 'AGENDA_SCAN_GMAIL_SIGNATURES') {
       savedNames = new Set((message.signatureNames || []).map(nameKey));
@@ -323,10 +344,13 @@
       signatureDataLoaded = true;
       scanAndRender();
       observeGmail();
+      startAutomaticRefresh();
     }
     if (message.type === 'AGENDA_GMAIL_SCAN_ERROR') console.warn(message.error || 'No se ha podido analizar el correo');
   });
 
   document.getElementById('agenda-signature-overlay')?.remove();
-  chrome.runtime.sendMessage({ type: 'AGENDA_REQUEST_GMAIL_SCAN' }).catch(() => {});
+  window.addEventListener('focus', requestRemoteRefresh);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) requestRemoteRefresh(); });
+  requestRemoteRefresh();
 })();

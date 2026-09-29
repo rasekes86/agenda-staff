@@ -12,6 +12,17 @@ chrome.action.onClicked.addListener((tab) => {
 // Set side panel behavior
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
+chrome.tabs.onActivated.addListener(async activeInfo => {
+  try {
+    const tab = await chrome.tabs.get(activeInfo.tabId);
+    if (tab.url?.startsWith('https://mail.google.com/')) scanGmailPersonnel(tab.id);
+  } catch (_) {}
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'complete' && tab.url?.startsWith('https://mail.google.com/')) scanGmailPersonnel(tabId);
+});
+
 // ============================================
 // CONSTANTS
 // ============================================
