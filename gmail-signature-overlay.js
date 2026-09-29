@@ -3,6 +3,7 @@
   window.__agendaGmailSignatureOverlayLoaded = true;
 
   let savedNames = new Set();
+  let savedNameTokens = new Set();
   let observer = null;
   let scanTimer = null;
   let signatureDataLoaded = false;
@@ -18,6 +19,8 @@
     .trim();
 
   const nameKey = value => normalize(value);
+  const nameTokenKey = value => normalize(value).replace(/,/g, ' ').split(' ').filter(Boolean).sort().join('|');
+  const hasSavedSignature = value => savedNames.has(nameKey(value)) || savedNameTokens.has(nameTokenKey(value));
 
   function isVisible(element) {
     if (!element) return false;
@@ -33,7 +36,69 @@
     const dniPattern = /\b(?:[XYZ]\s?\d{7}\s?[A-Z]|\d{8}\s?[A-Z])\b/i;
     const namePattern = /([A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ'´ -]{1,70},\s*[A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ'´ -]{1,55})/ig;
 
+    const addPerson = (name, dni, body, options = {}) => {
+      const cleanName = String(name || '').replace(/\s+/g, ' ').trim();
+      const cleanDni = normalize(dni).replace(/ /g, '');
+      if (!cleanName || !dniPattern.test(cleanDni)) return;
+      const key = `${nameKey(cleanName)}|${cleanDni}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      people.push({
+        name: cleanName,
+        dni: cleanDni,
+        saved: hasSavedSignature(cleanName),
+        body,
+        anchorText: options.anchorText || cleanName,
+        anchorElement: options.anchorElement || null
+      });
+    };
+
     for (const body of bodies) {
+      body.querySelectorAll('table').forEach(table => {
+        const rows = [...table.querySelectorAll('tr')];
+        if (rows.length < 2) return;
+        const headerRowIndex = rows.findIndex(row => {
+          const text = normalize(row.innerText);
+          return text.includes('NOMBRE') && text.includes('APELLIDO 1') && text.includes('DNI');
+        });
+        if (headerRowIndex < 0) return;
+        const headerCells = [...rows[headerRowIndex].querySelectorAll('th, td')];
+        const headers = headerCells.map(cell => normalize(cell.innerText));
+        const nameIndex = headers.findIndex(header => header === 'NOMBRE');
+        const surname1Index = headers.findIndex(header => header === 'APELLIDO 1' || header === 'PRIMER APELLIDO');
+        const surname2Index = headers.findIndex(header => header === 'APELLIDO 2' || header === 'SEGUNDO APELLIDO');
+        const dniIndex = headers.findIndex(header => header === 'DNI' || header.includes('DNI NIE'));
+        if (nameIndex < 0 || surname1Index < 0 || dniIndex < 0) return;
+        rows.slice(headerRowIndex + 1).forEach(row => {
+          const cells = [...row.querySelectorAll('th, td')];
+          const firstName = cells[nameIndex]?.innerText.trim() || '';
+          const surname1 = cells[surname1Index]?.innerText.trim() || '';
+          const surname2 = surname2Index >= 0 ? cells[surname2Index]?.innerText.trim() || '' : '';
+          const dni = cells[dniIndex]?.innerText.trim() || '';
+          const surnames = [surname1, surname2].filter(Boolean).join(' ');
+          if (firstName && surnames) addPerson(`${surnames}, ${firstName}`, dni, body, { anchorText: firstName, anchorElement: cells[nameIndex] });
+        });
+      });
+
+      const rawLines = body.innerText.split(/\r?\n/);
+      const tableHeaderIndex = rawLines.findIndex(line => {
+        const value = normalize(line);
+        return value.includes('NOMBRE') && value.includes('APELLIDO 1') && value.includes('DNI');
+      });
+      if (tableHeaderIndex >= 0) {
+        for (const rawLine of rawLines.slice(tableHeaderIndex + 1)) {
+          if (!rawLine.trim()) continue;
+          const columns = rawLine.trim().split(/\t+|\s{2,}/).map(value => value.trim()).filter(Boolean);
+          const dni = columns.at(-1) || '';
+          if (!dniPattern.test(dni) || columns.length < 3) continue;
+          const firstName = columns[0];
+          const surname1 = columns[1];
+          const surname2 = columns.length >= 4 ? columns.slice(2, -1).join(' ') : '';
+          const surnames = [surname1, surname2].filter(Boolean).join(' ');
+          addPerson(`${surnames}, ${firstName}`, dni, body, { anchorText: firstName });
+        }
+      }
+
       const lines = body.innerText.split(/\r?\n/).map(line => line.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean);
       for (let index = 0; index < lines.length; index++) {
         const line = lines[index];
@@ -50,10 +115,7 @@
           }
         }
         if (!name) continue;
-        const key = `${nameKey(name)}|${normalize(dniMatch[0]).replace(/ /g, '')}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        people.push({ name, dni: normalize(dniMatch[0]).replace(/ /g, ''), saved: savedNames.has(nameKey(name)), body });
+        addPerson(name, dniMatch[0], body);
       }
     }
     return people;
@@ -90,14 +152,20 @@
   }
 
   function injectIndicator(person) {
-    const textNode = findExactNameTextNode(person.body, person.name);
+    if (person.anchorElement?.isConnected) {
+      person.anchorElement.append(createBadge(person.saved, true));
+      return;
+    }
+
+    const markerText = person.anchorText || person.name;
+    const textNode = findExactNameTextNode(person.body, markerText);
     if (textNode) {
       const rawText = textNode.nodeValue;
-      const start = rawText.toLocaleUpperCase().indexOf(person.name.toLocaleUpperCase());
+      const start = rawText.toLocaleUpperCase().indexOf(markerText.toLocaleUpperCase());
       if (start >= 0) {
         const before = rawText.slice(0, start);
-        const originalName = rawText.slice(start, start + person.name.length);
-        const after = rawText.slice(start + person.name.length);
+        const originalName = rawText.slice(start, start + markerText.length);
+        const after = rawText.slice(start + markerText.length);
         const wrapper = document.createElement('span');
         wrapper.className = 'agenda-signature-inline';
         wrapper.dataset.agendaOriginalName = originalName;
@@ -110,7 +178,7 @@
       }
     }
 
-    const name = nameKey(person.name);
+    const name = nameKey(markerText);
     const candidates = [...person.body.querySelectorAll('span, div, td')]
       .filter(element => !element.closest('.agenda-signature-inline') && nameKey(element.textContent).includes(name))
       .sort((a, b) => a.textContent.length - b.textContent.length);
@@ -139,6 +207,7 @@
   chrome.runtime.onMessage.addListener(message => {
     if (message.type === 'AGENDA_SCAN_GMAIL_SIGNATURES') {
       savedNames = new Set((message.signatureNames || []).map(nameKey));
+      savedNameTokens = new Set((message.signatureNames || []).map(nameTokenKey));
       signatureDataLoaded = true;
       scanAndRender();
       observeGmail();
