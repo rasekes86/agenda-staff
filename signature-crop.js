@@ -151,7 +151,10 @@
   saveButton.addEventListener('click', async () => {
     saveButton.disabled = true;
     saveButton.textContent = 'Guardando…';
-    const result = await chrome.runtime.sendMessage({ type: 'AGENDA_CONFIRM_SIGNATURE_CROP', imageUrl: previewDataUrl });
+    let svgData = '';
+    try { svgData = (await AgendaSignatureVector.pngToSvg(previewDataUrl)).dataUrl; }
+    catch (error) { console.warn('No se pudo vectorizar el recorte; se conservará el PNG:', error); }
+    const result = await chrome.runtime.sendMessage({ type: 'AGENDA_CONFIRM_SIGNATURE_CROP', imageUrl: previewDataUrl, svgData });
     if (!result?.success) {
       saveButton.disabled = false;
       saveButton.textContent = 'Guardar firma';

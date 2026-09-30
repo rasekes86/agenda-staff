@@ -214,12 +214,13 @@ async function confirmSignatureCrop(message, senderTab) {
   const activeCrop = await getPendingSignatureCrop();
   if (!activeCrop || senderTab?.id !== activeCrop.cropperTabId) throw new Error('La sesión de recorte ha caducado');
   const crop = { ...activeCrop };
-  const result = await uploadGmailSignature({ name: crop.name, imageUrl: message.imageUrl });
+  const result = await uploadGmailSignature({ name: crop.name, imageUrl: message.imageUrl, svgData: message.svgData || '' });
   try {
     await chrome.tabs.sendMessage(crop.sourceTabId, {
       type: 'AGENDA_SIGNATURE_CROP_SAVED',
       name: crop.name,
       imageUrl: message.imageUrl,
+      svgData: message.svgData || '',
       context: crop.context || 'gmail',
       target: crop.target || null
     });
@@ -250,7 +251,16 @@ async function uploadGmailSignature(message) {
   if (!stored.session?.access_token || !stored.user?.id) throw new Error('Abre Agenda Staff e inicia sesión');
   const configUrl = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
   const configKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1Z3V0Y3N1a3hreGxncGttenh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzc5OTExMjksImV4cCI6MjA1MzU2NzEyOX0.PpolAzqqXNBOhRlUVzplqkKeGQxzfed4gH377CidVJE';
-  const response = await fetch(`${configUrl}/rest/v1/signatures`, {
+  const signatureBody = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+    name: name.toUpperCase(),
+    image_url: imageUrl,
+    svg_data: message.svgData || null,
+    vector_version: message.svgData ? 1 : 0,
+    user_id: stored.user.id,
+    user_name: stored.user.name || stored.user.email || 'Usuario'
+  };
+  let response = await fetch(`${configUrl}/rest/v1/signatures`, {
     method: 'POST',
     headers: {
       apikey: configKey,
@@ -258,14 +268,17 @@ async function uploadGmailSignature(message) {
       'Content-Type': 'application/json',
       Prefer: 'return=representation'
     },
-    body: JSON.stringify({
-      id: Date.now().toString(36) + Math.random().toString(36).slice(2),
-      name: name.toUpperCase(),
-      image_url: imageUrl,
-      user_id: stored.user.id,
-      user_name: stored.user.name || stored.user.email || 'Usuario'
-    })
+    body: JSON.stringify(signatureBody)
   });
+  if (!response.ok && message.svgData && /svg_data|vector_version|schema cache/i.test(await response.clone().text())) {
+    delete signatureBody.svg_data;
+    delete signatureBody.vector_version;
+    response = await fetch(`${configUrl}/rest/v1/signatures`, {
+      method: 'POST',
+      headers: { apikey: configKey, Authorization: `Bearer ${stored.session.access_token}`, 'Content-Type': 'application/json', Prefer: 'return=representation' },
+      body: JSON.stringify(signatureBody)
+    });
+  }
   if (!response.ok) throw new Error('No se ha podido guardar la firma');
   return { success: true, name: name.toUpperCase() };
 }

@@ -65,6 +65,8 @@ let signatureDrawName = '';
 let signatureDrawing = false;
 let signatureDrawHasInk = false;
 let signatureDrawLastPoint = null;
+let signatureDrawPaths = [];
+let signatureDrawCurrentPath = null;
 let targetTemplateSignature = null;
 let pendingSignaturePosition = null;
 let activeSignatureCropDialog = null;
@@ -2368,7 +2370,7 @@ function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames
       <button class="signature-add-all-btn" id="btnAddAllSignatures" title="Añadir todas las firmas al PDF">✓ Añadir todas</button>
     </div>`;
     signatures.forEach(sig => {
-      html += `<div class="signature-item signature-found" data-id="${sig.id}" data-url="${sig.image_url}" data-name="${escapeHtml(sig.name)}">
+      html += `<div class="signature-item signature-found" data-id="${sig.id}" data-url="${sig.image_url}" data-vector="${escapeHtml(sig.svg_data || '')}" data-name="${escapeHtml(sig.name)}">
         <span class="signature-name">${escapeHtml(sig.name)}</span>
         <div class="signature-actions">
           <button class="signature-delete-btn" data-id="${sig.id}" data-name="${escapeHtml(sig.name)}" title="Eliminar">🗑️</button>
@@ -2395,9 +2397,16 @@ function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames
   signatureResults.innerHTML = html;
   
   document.querySelectorAll('.signature-item.signature-found').forEach(item => {
-    item.addEventListener('click', (e) => {
+    item.addEventListener('click', async (e) => {
       if (e.target.classList.contains('signature-delete-btn')) return;
-      selectSignature(item.dataset.url, item.dataset.name);
+      let vectorUrl = item.dataset.vector || '';
+      if (!vectorUrl) {
+        const signature = signatures.find(candidate => String(candidate.id) === item.dataset.id);
+        const migrated = await ensureSignatureVector(signature);
+        vectorUrl = migrated?.svg_data || '';
+        if (vectorUrl) item.dataset.vector = vectorUrl;
+      }
+      selectSignature(item.dataset.url, item.dataset.name, vectorUrl);
     });
   });
   
@@ -2434,13 +2443,13 @@ function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames
   // Add All Signatures button
   const btnAddAll = $('btnAddAllSignatures');
   if (btnAddAll && signatures.length > 0) {
-    btnAddAll.addEventListener('click', (e) => {
+    btnAddAll.addEventListener('click', async (e) => {
       e.stopPropagation();
-      signatures.forEach((sig, i) => {
-        setTimeout(() => {
-          selectSignature(sig.image_url, sig.name);
-        }, i * 100); // Stagger adds to see each one
-      });
+      for (const sig of signatures) {
+        const migrated = await ensureSignatureVector(sig);
+        selectSignature(migrated.image_url, migrated.name, migrated.svg_data || '');
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
     });
   }
 }
@@ -2512,8 +2521,16 @@ async function uploadMissingSignature(name) {
   input.click();
 }
 
-async function saveMissingSignature(name, processedBase64) {
+async function saveMissingSignature(name, processedBase64, suppliedSvg = '') {
   const storageImage = await createHighResolutionSignatureMaster(processedBase64);
+  let vectorImage = suppliedSvg;
+  if (!vectorImage) {
+    try {
+      vectorImage = (await AgendaSignatureVector.pngToSvg(storageImage)).dataUrl;
+    } catch (error) {
+      console.warn('La firma se guardará solo con respaldo PNG:', error);
+    }
+  }
   const headers = {
     'apikey': SUPABASE_KEY,
     'Content-Type': 'application/json',
@@ -2540,20 +2557,30 @@ async function saveMissingSignature(name, processedBase64) {
   const bodyData = {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2),
     name: upperName,
-    image_url: storageImage
+    image_url: storageImage,
+    svg_data: vectorImage || null,
+    vector_version: vectorImage ? 1 : 0
   };
   if (currentUser) {
     bodyData.user_id = currentUser.id;
     bodyData.user_name = currentUser.name;
   }
 
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures`, {
+  let response = await fetch(`${SUPABASE_URL}/rest/v1/signatures`, {
     method: 'POST', headers, body: JSON.stringify(bodyData)
   });
+  // Compatibility while the database migration is being rolled out.
+  if (!response.ok && vectorImage && /svg_data|vector_version|schema cache/i.test(await response.clone().text())) {
+    delete bodyData.svg_data;
+    delete bodyData.vector_version;
+    response = await fetch(`${SUPABASE_URL}/rest/v1/signatures`, {
+      method: 'POST', headers, body: JSON.stringify(bodyData)
+    });
+  }
   if (!response.ok) throw new Error('Error al guardar: ' + await response.text());
 
   showStatus('✓ Firma guardada: ' + name, 'success');
-  selectSignature(storageImage, name);
+  selectSignature(storageImage, name, vectorImage);
   searchSignatures();
 }
 
@@ -2638,7 +2665,7 @@ function handleEditorSignatureCropSaved(message) {
       name: message.name
     };
   }
-  selectSignature(message.imageUrl, message.name);
+  selectSignature(message.imageUrl, message.name, message.svgData || '');
   if ($('signatureSearchInput')?.value.trim()) searchSignatures();
 }
 
@@ -2662,6 +2689,8 @@ function setupSignatureDrawing() {
   canvas.addEventListener('pointerdown', (e) => {
     signatureDrawing = true;
     signatureDrawLastPoint = pointFromEvent(e);
+    signatureDrawCurrentPath = [signatureDrawLastPoint];
+    signatureDrawPaths.push(signatureDrawCurrentPath);
     ctx.beginPath();
     ctx.arc(signatureDrawLastPoint.x, signatureDrawLastPoint.y, ctx.lineWidth / 2, 0, Math.PI * 2);
     ctx.fillStyle = ctx.strokeStyle;
@@ -2673,6 +2702,7 @@ function setupSignatureDrawing() {
   canvas.addEventListener('pointermove', (e) => {
     if (!signatureDrawing) return;
     const point = pointFromEvent(e);
+    signatureDrawCurrentPath?.push(point);
     ctx.beginPath();
     ctx.moveTo(signatureDrawLastPoint.x, signatureDrawLastPoint.y);
     ctx.lineTo(point.x, point.y);
@@ -2681,7 +2711,7 @@ function setupSignatureDrawing() {
     signatureDrawHasInk = true;
     e.preventDefault();
   });
-  const stopDrawing = () => { signatureDrawing = false; signatureDrawLastPoint = null; };
+  const stopDrawing = () => { signatureDrawing = false; signatureDrawLastPoint = null; signatureDrawCurrentPath = null; };
   canvas.addEventListener('pointerup', stopDrawing);
   canvas.addEventListener('pointercancel', stopDrawing);
 
@@ -2702,6 +2732,8 @@ function clearDrawSignatureCanvas() {
   const canvas = $('drawSignatureCanvas');
   canvas?.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
   signatureDrawHasInk = false;
+  signatureDrawPaths = [];
+  signatureDrawCurrentPath = null;
 }
 
 function closeDrawSignatureModal(clearTarget = true) {
@@ -2723,7 +2755,8 @@ async function saveDrawnSignature() {
   const name = signatureDrawName;
   try {
     const processedBase64 = await processSignatureImage(canvas.toDataURL('image/png'));
-    await saveMissingSignature(name, processedBase64);
+    const svg = AgendaSignatureVector.pathsToSvg(signatureDrawPaths, { strokeWidth: 7, color: '#111827' });
+    await saveMissingSignature(name, processedBase64, AgendaSignatureVector.svgToDataUrl(svg));
     closeDrawSignatureModal(false);
   } catch (err) {
     console.error('Draw signature save error:', err);
@@ -2733,7 +2766,7 @@ async function saveDrawnSignature() {
   }
 }
 
-function selectSignature(url, name) {
+function selectSignature(url, name, vectorUrl = '') {
   const activeDoc = getActiveDoc();
   if (!activeDoc) return;
   
@@ -2765,7 +2798,7 @@ function selectSignature(url, name) {
         imgHeight = Math.round(imgHeight * ratio);
       }
       
-      placeSignatureInTemplateOrPage(activeDoc, processedSrc, name, imgWidth, imgHeight, offset);
+      placeSignatureInTemplateOrPage(activeDoc, vectorUrl || processedSrc, name, imgWidth, imgHeight, offset, processedSrc, vectorUrl);
       
       addedSignaturesCount++;
       updateTabModified(activeDoc.id, true);
@@ -2792,7 +2825,7 @@ function selectSignature(url, name) {
         imgWidth = Math.round(imgWidth * ratio);
         imgHeight = Math.round(imgHeight * ratio);
       }
-      placeSignatureInTemplateOrPage(activeDoc, processedSrc, name, imgWidth, imgHeight, offset);
+      placeSignatureInTemplateOrPage(activeDoc, vectorUrl || processedSrc, name, imgWidth, imgHeight, offset, processedSrc, vectorUrl);
       addedSignaturesCount++;
       updateTabModified(activeDoc.id, true);
       renderPage();
@@ -2804,11 +2837,13 @@ function selectSignature(url, name) {
   img.src = url;
 }
 
-function placeSignatureInTemplateOrPage(activeDoc, src, name, width, height, offset = 0) {
+function placeSignatureInTemplateOrPage(activeDoc, src, name, width, height, offset = 0, pngFallback = '', vectorSrc = '') {
   if (targetTemplateSignature?.docId === activeDoc.id) {
     const target = activeDoc.elements[targetTemplateSignature.page]?.[targetTemplateSignature.index];
     if (target?.isPlaceholder && target.type === 'signature') {
       target.src = src;
+      target.pngFallback = pngFallback || src;
+      target.vectorSrc = vectorSrc || '';
       target.name = name;
       const ratio = Math.min((target.width || width) / width, (target.height || height) / height);
       target.width = Math.max(1, width * ratio);
@@ -2826,6 +2861,7 @@ function placeSignatureInTemplateOrPage(activeDoc, src, name, width, height, off
     activeDoc.currentPage = position.page;
     pushElement(activeDoc, position.page, {
       type: 'signature', src,
+      pngFallback: pngFallback || src, vectorSrc: vectorSrc || '',
       x: Math.max(0, position.x - width / 2),
       y: Math.max(0, position.y - height / 2),
       width, height, name
@@ -2838,6 +2874,8 @@ function placeSignatureInTemplateOrPage(activeDoc, src, name, width, height, off
     if (!placeholder) continue;
 
     placeholder.src = src;
+    placeholder.pngFallback = pngFallback || src;
+    placeholder.vectorSrc = vectorSrc || '';
     placeholder.name = name;
     // The template dimensions are intentional; fit the signature inside them.
     const boxWidth = placeholder.width || width;
@@ -2852,6 +2890,7 @@ function placeSignatureInTemplateOrPage(activeDoc, src, name, width, height, off
 
   pushElement(activeDoc, activeDoc.currentPage, {
     type: 'signature', src,
+    pngFallback: pngFallback || src, vectorSrc: vectorSrc || '',
     x: activeDoc.pageWidth / 2 - width / 2 + offset,
     y: activeDoc.pageHeight / 2 - height / 2 + offset,
     width, height, name
@@ -3445,12 +3484,20 @@ async function savePdf() {
           try {
             let imageSrc = el.src;
             let isPng = false;
+            let drawX = el.x;
+            let drawY = height - el.y - el.height;
+            let drawWidth = el.width;
+            let drawHeight = el.height;
             
             // Process signatures: remove white bg, feather edges, ink variance
             if (el.type === 'signature') {
               try {
-                const processedSrc = await processSignatureImage(el.src);
-                imageSrc = processedSrc;
+                const prepared = await prepareSignatureForPdf(el.vectorSrc || el.src, el.width, el.height);
+                imageSrc = prepared.src;
+                drawWidth = prepared.width;
+                drawHeight = prepared.height;
+                drawX = el.x + (el.width - drawWidth) / 2;
+                drawY = height - el.y - (el.height + drawHeight) / 2;
                 isPng = true; // Processed signatures are always PNG (preserves transparency)
               } catch (procErr) {
                 console.warn('Signature processing failed, using original:', procErr);
@@ -3475,10 +3522,10 @@ async function savePdf() {
             const image = isPng ? await newPdfDoc.embedPng(imageBytes) : await newPdfDoc.embedJpg(imageBytes);
             
             page.drawImage(image, {
-              x: el.x,
-              y: height - el.y - el.height,
-              width: el.width,
-              height: el.height
+              x: drawX,
+              y: drawY,
+              width: drawWidth,
+              height: drawHeight
             });
           } catch (imgErr) {
             console.error('Error embedding image:', imgErr);
@@ -4444,7 +4491,9 @@ async function fillTemplatePeople(rawText) {
       try {
         const signature = await findSignatureForPerson(person.name);
         if (signature?.image_url) {
-          signatureSlots[index].el.src = signature.image_url;
+          signatureSlots[index].el.src = signature.svg_data || signature.image_url;
+          signatureSlots[index].el.vectorSrc = signature.svg_data || '';
+          signatureSlots[index].el.pngFallback = signature.image_url;
           signatureSlots[index].el.name = person.name;
           clearPlaceholderMetadata(signatureSlots[index].el);
           signaturesFilled++;
@@ -4492,7 +4541,7 @@ function signatureNameMatches(searchedName, storedName) {
 async function findSignaturesForPeople(people) {
   const headers = { apikey: SUPABASE_KEY };
   if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=id,name,image_url&order=name.asc&limit=5000`, { headers });
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=*&order=name.asc&limit=5000`, { headers });
   if (!response.ok) throw new Error('No se ha podido consultar la base de firmas');
   const signatures = await response.json();
   const exact = new Map();
@@ -4503,10 +4552,29 @@ async function findSignaturesForPeople(people) {
     const tokenKey = signatureTokenKey(signature.name);
     if (!byTokens.has(tokenKey)) byTokens.set(tokenKey, signature);
   });
-  return people.map(person => ({
-    person,
-    signature: exact.get(signatureMatchKey(person.name)) || byTokens.get(signatureTokenKey(person.name)) || null
+  return Promise.all(people.map(async person => {
+    const signature = exact.get(signatureMatchKey(person.name)) || byTokens.get(signatureTokenKey(person.name)) || null;
+    return { person, signature: signature ? await ensureSignatureVector(signature) : null };
   }));
+}
+
+async function ensureSignatureVector(signature) {
+  if (!signature || signature.svg_data || !signature.image_url) return signature;
+  try {
+    const vectorized = await AgendaSignatureVector.pngToSvg(signature.image_url);
+    signature.svg_data = vectorized.dataUrl;
+    signature.vector_version = 1;
+    const headers = { apikey: SUPABASE_KEY, 'Content-Type': 'application/json', Prefer: 'return=minimal' };
+    if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?id=eq.${encodeURIComponent(signature.id)}`, {
+      method: 'PATCH', headers,
+      body: JSON.stringify({ svg_data: signature.svg_data, vector_version: 1 })
+    });
+    if (!response.ok) console.warn('La firma se vectorizó para este PDF, pero todavía no se pudo persistir la migración.');
+  } catch (error) {
+    console.warn(`No se pudo vectorizar la firma ${signature.name}:`, error);
+  }
+  return signature;
 }
 
 function cloneElementsForIndividual(activeDoc, person, signature) {
@@ -4524,7 +4592,9 @@ function cloneElementsForIndividual(activeDoc, person, signature) {
         clearPlaceholderMetadata(element);
       } else if (field === 'FIRMA') {
         element.type = 'signature';
-        element.src = signature.image_url;
+        element.src = signature.svg_data || signature.image_url;
+        element.vectorSrc = signature.svg_data || '';
+        element.pngFallback = signature.image_url;
         element.name = person.name;
         clearPlaceholderMetadata(element);
       }
@@ -4573,7 +4643,7 @@ async function buildIndividualPdf(activeDoc, elements) {
         let drawWidth = element.width;
         let drawHeight = element.height;
         if (element.type === 'signature') {
-          const prepared = await prepareSignatureForPdf(source, element.width, element.height);
+          const prepared = await prepareSignatureForPdf(element.vectorSrc || source, element.width, element.height);
           if (prepared.qualityLimited) qualityWarnings++;
           source = prepared.src;
           drawWidth = prepared.width;
@@ -4611,6 +4681,18 @@ async function buildIndividualPdf(activeDoc, elements) {
  * by the PDF viewer.
  */
 async function prepareSignatureForPdf(src, boxWidth, boxHeight) {
+  const svgMarkup = AgendaSignatureVector?.dataUrlToSvg(src) || '';
+  if (svgMarkup) {
+    const vectorSize = AgendaSignatureVector.dimensions(svgMarkup);
+    const fit = Math.min(boxWidth / vectorSize.width, boxHeight / vectorSize.height);
+    const width = Math.max(1, vectorSize.width * fit);
+    const height = Math.max(1, vectorSize.height * fit);
+    // pdf-lib cannot embed SVG paths directly. Rasterize only for this exact
+    // PDF placement at 600 DPI; the stored master remains fully vectorial.
+    const pixelsPerPoint = 600 / 72;
+    const png = await AgendaSignatureVector.renderSvg(svgMarkup, Math.ceil(width * pixelsPerPoint), Math.ceil(height * pixelsPerPoint));
+    return { src: png, width, height, qualityLimited: false, vector: true };
+  }
   const processedSrc = await processSignatureImage(src);
   const image = await new Promise((resolve, reject) => {
     const loaded = new Image();

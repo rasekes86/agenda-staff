@@ -3226,6 +3226,9 @@ async function quickUploadMissingSignature(name) {
       } catch (err) {
         console.warn('Signature processing failed, using original:', err);
       }
+      let svgData = '';
+      try { svgData = (await AgendaSignatureVector.pngToSvg(processedImage)).dataUrl; }
+      catch (error) { console.warn('Vectorization failed, keeping PNG fallback:', error); }
       
       // Upload to Supabase
       const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -3241,6 +3244,8 @@ async function quickUploadMissingSignature(name) {
           id,
           name: name.toUpperCase(),
           image_url: processedImage,
+          svg_data: svgData || null,
+          vector_version: svgData ? 1 : 0,
           user_id: currentUser.id,
           user_name: currentUser.name
         })
@@ -3594,6 +3599,9 @@ async function uploadSignature() {
     } catch (err) {
       console.warn('Signature processing failed, using original:', err);
     }
+    let svgData = '';
+    try { svgData = (await AgendaSignatureVector.pngToSvg(processedImage)).dataUrl; }
+    catch (error) { console.warn('Vectorization failed, keeping PNG fallback:', error); }
 
     console.log('Subiendo firma:', name);
     console.log('User ID:', currentUser?.id);
@@ -3613,6 +3621,8 @@ async function uploadSignature() {
         id,
         name: name.toUpperCase(),
         image_url: processedImage,
+        svg_data: svgData || null,
+        vector_version: svgData ? 1 : 0,
         user_id: currentUser.id,
         user_name: currentUser.name
       })
@@ -3809,6 +3819,9 @@ async function handleBulkUpload(files) {
       } catch (err) {
         console.warn('Bulk signature processing failed for', fileName, ':', err);
       }
+      let svgData = '';
+      try { svgData = (await AgendaSignatureVector.pngToSvg(processedImage)).dataUrl; }
+      catch (error) { console.warn('Bulk vectorization failed for', fileName, ':', error); }
 
       // Generate unique ID
       const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -3826,6 +3839,8 @@ async function handleBulkUpload(files) {
           id,
           name: fileName.toUpperCase(),
           image_url: processedImage,
+          svg_data: svgData || null,
+          vector_version: svgData ? 1 : 0,
           user_id: currentUser.id,
           user_name: currentUser.name
         })
