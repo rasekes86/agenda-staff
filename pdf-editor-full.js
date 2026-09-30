@@ -4160,6 +4160,7 @@ function applyTemplate(template, options = {}) {
       size: (slot.size || DEFAULT_FONT_SIZE) * Math.min(scaleX, scaleY),
       color: slot.color || '#000000', bold: Boolean(slot.bold), italic: Boolean(slot.italic), underline: Boolean(slot.underline),
       isPlaceholder: true, fieldGroup: label,
+      templateFieldKey: label,
       templateFixedValue: slot.fixedValue || '',
       placeholderLabel: `${label} (${groupIndexes[label]}/${groupTotals[label]})`,
       text: '', src: '', name: ''
@@ -4230,7 +4231,11 @@ function showFillTemplateModal() {
     <strong>👥 Rellenar listado de personal</strong>
     <p style="font-size:10px;color:#bfdbfe;margin:5px 0 7px;">Una persona por línea: APELLIDO 1 APELLIDO 2, NOMBRE&nbsp;&nbsp;&nbsp;DNI</p>
     <textarea id="templatePeopleInput" rows="6" placeholder="GARCÍA LÓPEZ, ANA    12345678A&#10;PÉREZ MARTÍN, LUIS    87654321B" style="width:100%;padding:7px;background:#0f172a;border:1px solid #3b82f6;border-radius:6px;color:#f1f5f9;resize:vertical;"></textarea>
-    <button class="sidebar-btn fill-template-people" style="width:100%;margin-top:6px;background:#2563eb;color:white;justify-content:center;">Rellenar nombres, DNI y firmas</button>
+    <div class="template-people-modes">
+      <button class="sidebar-btn fill-template-people" style="background:#2563eb;color:white;justify-content:center;">📋 Documento colectivo</button>
+      <button class="sidebar-btn generate-individual-documents" style="background:#047857;color:white;justify-content:center;">📄 Un PDF por persona</button>
+    </div>
+    <p class="individual-documents-hint">El modo individual solo genera documentos para las personas que tengan una firma guardada.</p>
   </div>` : '';
   content.innerHTML = peopleFill + names.map(name => {
     const items = groups[name];
@@ -4241,6 +4246,9 @@ function showFillTemplateModal() {
   }).join('');
   content.querySelector('.fill-template-people')?.addEventListener('click', () => {
     fillTemplatePeople($('templatePeopleInput')?.value || '');
+  });
+  content.querySelector('.generate-individual-documents')?.addEventListener('click', () => {
+    generateIndividualTemplatePdfs($('templatePeopleInput')?.value || '');
   });
   content.querySelectorAll('.fill-template-text').forEach(button => {
     button.onclick = () => {
@@ -4307,14 +4315,17 @@ async function findSignatureForPerson(name) {
   return signatures.find(signature => normalizeText(signature.name).toUpperCase().replace(/\s+/g, ' ').trim() === normalizedName) || signatures[0];
 }
 
+function parseTemplatePeople(rawText) {
+  return rawText.split(/\r?\n/).map(line => line.trim()).filter(Boolean).map(line => {
+    const { foundDni, textWithoutDni } = extractDniFromLine(line);
+    return { name: textWithoutDni.replace(/\s+/g, ' ').trim(), dni: (foundDni || '').toUpperCase() };
+  }).filter(person => person.name);
+}
+
 async function fillTemplatePeople(rawText) {
   const activeDoc = getActiveDoc();
-  const lines = rawText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-  if (!activeDoc || !lines.length) { showStatus('Pega al menos una persona', 'error'); return; }
-  const people = lines.map(line => {
-    const { foundDni, textWithoutDni } = extractDniFromLine(line);
-    return { name: textWithoutDni.replace(/\s+/g, ' ').trim(), dni: foundDni || '' };
-  }).filter(person => person.name);
+  const people = parseTemplatePeople(rawText);
+  if (!activeDoc || !people.length) { showStatus('Pega al menos una persona', 'error'); return; }
   if (!people.length) { showStatus('No se han podido interpretar los nombres', 'error'); return; }
 
   const groups = getTemplateGroups();
@@ -4365,6 +4376,293 @@ async function fillTemplatePeople(rawText) {
   $('fillTemplateModal')?.classList.remove('show');
   const missingText = missingSignatures.length ? ` · Sin firma: ${missingSignatures.join(', ')}` : '';
   showStatus(`${namesFilled} nombres · ${dniFilled} DNI · ${signaturesFilled} firmas${missingText}`, missingSignatures.length ? 'error' : 'success');
+}
+
+function signatureMatchKey(value) {
+  return normalizeText(value).toUpperCase().replace(/,/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function signatureTokenKey(value) {
+  return signatureMatchKey(value).split(' ').filter(Boolean).sort().join('|');
+}
+
+async function findSignaturesForPeople(people) {
+  const headers = { apikey: SUPABASE_KEY };
+  if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=id,name,image_url&order=name.asc&limit=5000`, { headers });
+  if (!response.ok) throw new Error('No se ha podido consultar la base de firmas');
+  const signatures = await response.json();
+  const exact = new Map();
+  const byTokens = new Map();
+  signatures.forEach(signature => {
+    if (!signature?.name || !signature?.image_url) return;
+    exact.set(signatureMatchKey(signature.name), signature);
+    const tokenKey = signatureTokenKey(signature.name);
+    if (!byTokens.has(tokenKey)) byTokens.set(tokenKey, signature);
+  });
+  return people.map(person => ({
+    person,
+    signature: exact.get(signatureMatchKey(person.name)) || byTokens.get(signatureTokenKey(person.name)) || null
+  }));
+}
+
+function cloneElementsForIndividual(activeDoc, person, signature) {
+  const cloned = JSON.parse(JSON.stringify(activeDoc.elements || {}));
+  for (let page = 1; page <= activeDoc.totalPages; page++) {
+    (cloned[page] || []).forEach(element => {
+      const field = normalizeText(element.templateFieldKey || element.fieldGroup || '').toUpperCase();
+      if (field === 'NOMBRE') {
+        element.type = 'text';
+        element.text = person.name;
+        clearPlaceholderMetadata(element);
+      } else if (field === 'DNI') {
+        element.type = 'text';
+        element.text = person.dni || '';
+        clearPlaceholderMetadata(element);
+      } else if (field === 'FIRMA') {
+        element.type = 'signature';
+        element.src = signature.image_url;
+        element.name = person.name;
+        clearPlaceholderMetadata(element);
+      }
+    });
+  }
+  return cloned;
+}
+
+async function buildIndividualPdf(activeDoc, elements) {
+  const { PDFDocument, rgb, StandardFonts } = window.PDFLib;
+  const pdfDoc = await PDFDocument.load(activeDoc.originalPdfBytes, { ignoreEncryption: true });
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const fontItalic = await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
+  const fontBoldItalic = await pdfDoc.embedFont(StandardFonts.HelveticaBoldOblique);
+
+  for (let pageNum = 1; pageNum <= activeDoc.totalPages; pageNum++) {
+    const page = pdfDoc.getPage(pageNum - 1);
+    const { height } = page.getSize();
+    for (const element of elements[pageNum] || []) {
+      if (element.isPlaceholder) continue;
+      if (element.type === 'text') {
+        const text = String(element.text || '');
+        if (!text) continue;
+        const size = element.size || 14;
+        const color = hexToRgb(element.color || '#000000');
+        const selectedFont = element.bold && element.italic ? fontBoldItalic : element.bold ? fontBold : element.italic ? fontItalic : font;
+        const y = height - element.y - size;
+        page.drawText(text, {
+          x: element.x, y, size, font: selectedFont,
+          color: rgb(color.r / 255, color.g / 255, color.b / 255)
+        });
+        if (element.underline) {
+          page.drawLine({
+            start: { x: element.x, y: y - 2 },
+            end: { x: element.x + selectedFont.widthOfTextAtSize(text, size), y: y - 2 },
+            thickness: 1,
+            color: rgb(color.r / 255, color.g / 255, color.b / 255)
+          });
+        }
+      } else if (['image', 'signature', 'drawing'].includes(element.type) && element.src) {
+        let source = element.src;
+        if (element.type === 'signature') source = await processSignatureImage(source);
+        let bytes;
+        let isPng = source.startsWith('data:image/png');
+        if (source.startsWith('data:')) {
+          bytes = Uint8Array.from(atob(source.split(',')[1]), character => character.charCodeAt(0));
+        } else {
+          const imageResponse = await fetch(source);
+          const blob = await imageResponse.blob();
+          bytes = new Uint8Array(await blob.arrayBuffer());
+          isPng = isPng || blob.type === 'image/png' || /\.png(?:$|\?)/i.test(source);
+        }
+        const image = isPng ? await pdfDoc.embedPng(bytes) : await pdfDoc.embedJpg(bytes);
+        page.drawImage(image, {
+          x: element.x,
+          y: height - element.y - element.height,
+          width: element.width,
+          height: element.height
+        });
+      }
+    }
+  }
+  return flattenPdf(await pdfDoc.save());
+}
+
+function sanitizeDownloadName(value) {
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, ' ').trim() || 'Sin nombre';
+}
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function createStoredZip(files) {
+  const encoder = new TextEncoder();
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+  const now = new Date();
+  const dosTime = ((now.getHours() & 31) << 11) | ((now.getMinutes() & 63) << 5) | ((Math.floor(now.getSeconds() / 2)) & 31);
+  const dosDate = (((now.getFullYear() - 1980) & 127) << 9) | (((now.getMonth() + 1) & 15) << 5) | (now.getDate() & 31);
+
+  files.forEach(file => {
+    const name = encoder.encode(file.name);
+    const data = file.data instanceof Uint8Array ? file.data : new Uint8Array(file.data);
+    const checksum = crc32(data);
+    const local = new Uint8Array(30 + name.length);
+    const localView = new DataView(local.buffer);
+    localView.setUint32(0, 0x04034b50, true);
+    localView.setUint16(4, 20, true);
+    localView.setUint16(6, 0x0800, true);
+    localView.setUint16(8, 0, true);
+    localView.setUint16(10, dosTime, true);
+    localView.setUint16(12, dosDate, true);
+    localView.setUint32(14, checksum, true);
+    localView.setUint32(18, data.length, true);
+    localView.setUint32(22, data.length, true);
+    localView.setUint16(26, name.length, true);
+    local.set(name, 30);
+    localParts.push(local, data);
+
+    const central = new Uint8Array(46 + name.length);
+    const centralView = new DataView(central.buffer);
+    centralView.setUint32(0, 0x02014b50, true);
+    centralView.setUint16(4, 20, true);
+    centralView.setUint16(6, 20, true);
+    centralView.setUint16(8, 0x0800, true);
+    centralView.setUint16(10, 0, true);
+    centralView.setUint16(12, dosTime, true);
+    centralView.setUint16(14, dosDate, true);
+    centralView.setUint32(16, checksum, true);
+    centralView.setUint32(20, data.length, true);
+    centralView.setUint32(24, data.length, true);
+    centralView.setUint16(28, name.length, true);
+    centralView.setUint32(42, offset, true);
+    central.set(name, 46);
+    centralParts.push(central);
+    offset += local.length + data.length;
+  });
+
+  const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+  const end = new Uint8Array(22);
+  const endView = new DataView(end.buffer);
+  endView.setUint32(0, 0x06054b50, true);
+  endView.setUint16(8, files.length, true);
+  endView.setUint16(10, files.length, true);
+  endView.setUint32(12, centralSize, true);
+  endView.setUint32(16, offset, true);
+  return new Blob([...localParts, ...centralParts, end], { type: 'application/zip' });
+}
+
+function showIndividualGenerationProgress(total) {
+  document.querySelector('.individual-generation-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay show individual-generation-overlay';
+  overlay.innerHTML = `<div class="modal individual-generation-modal">
+    <h3>📄 Generando documentos individuales</h3>
+    <p>No cierres esta ventana mientras se preparan los PDF.</p>
+    <div class="individual-progress-track"><div class="individual-progress-bar"></div></div>
+    <strong class="individual-progress-text">Consultando firmas…</strong>
+  </div>`;
+  document.body.appendChild(overlay);
+  return {
+    update(done, name) {
+      const percent = total ? Math.round((done / total) * 100) : 0;
+      overlay.querySelector('.individual-progress-bar').style.width = `${percent}%`;
+      overlay.querySelector('.individual-progress-text').textContent = `${done} de ${total} · ${name || ''}`;
+    },
+    close() { overlay.remove(); }
+  };
+}
+
+function showIndividualGenerationReport(generated, missing, failed, zipName = '') {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay show individual-generation-report';
+  const missingItems = missing.map(person => `<li>${escapeHtml(person.name)}</li>`).join('');
+  const failedItems = failed.map(item => `<li>${escapeHtml(item.person.name)} — ${escapeHtml(item.error)}</li>`).join('');
+  overlay.innerHTML = `<div class="modal individual-generation-modal">
+    <h3>✅ Proceso finalizado</h3>
+    <div class="individual-result-summary"><strong>${generated}</strong><span>PDF generados</span></div>
+    ${zipName ? `<p>Se ha descargado <strong>${escapeHtml(zipName)}</strong>.</p>` : ''}
+    ${missing.length ? `<div class="individual-missing-list"><strong>⚠ Sin documento por no tener firma (${missing.length})</strong><ul>${missingItems}</ul></div>` : '<p class="individual-all-generated">✓ Todos los documentos se han generado correctamente.</p>'}
+    ${failed.length ? `<div class="individual-failed-list"><strong>Errores durante la generación (${failed.length})</strong><ul>${failedItems}</ul></div>` : ''}
+    <div class="modal-actions"><button class="btn-add" data-close>Cerrar</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('[data-close]').onclick = close;
+  overlay.addEventListener('click', event => { if (event.target === overlay) close(); });
+}
+
+async function generateIndividualTemplatePdfs(rawText) {
+  const activeDoc = getActiveDoc();
+  const people = parseTemplatePeople(rawText);
+  if (!activeDoc?.originalPdfBytes || !activeDoc.activeTemplate) { showStatus('Aplica primero una plantilla al PDF', 'error'); return; }
+  if (!people.length) { showStatus('Pega al menos una persona', 'error'); return; }
+  const hasSignatureField = Object.values(activeDoc.elements).some(page => page.some(element => normalizeText(element.templateFieldKey || element.fieldGroup || '').toUpperCase() === 'FIRMA'));
+  if (!hasSignatureField) { showStatus('La plantilla necesita al menos un campo FIRMA', 'error'); return; }
+
+  $('fillTemplateModal')?.classList.remove('show');
+  const progress = showIndividualGenerationProgress(people.length);
+  const generatedFiles = [];
+  const missing = [];
+  const failed = [];
+  try {
+    const matches = await findSignaturesForPeople(people);
+    const usedNames = new Map();
+    for (let index = 0; index < matches.length; index++) {
+      const { person, signature } = matches[index];
+      progress.update(index, person.name);
+      if (!signature) {
+        missing.push(person);
+        progress.update(index + 1, person.name);
+        continue;
+      }
+      try {
+        const elements = cloneElementsForIndividual(activeDoc, person, signature);
+        const bytes = await buildIndividualPdf(activeDoc, elements);
+        const base = `${sanitizeDownloadName(activeDoc.fileName.replace(/\.pdf$/i, ''))}_${sanitizeDownloadName(person.name)}`;
+        const occurrence = (usedNames.get(base) || 0) + 1;
+        usedNames.set(base, occurrence);
+        generatedFiles.push({ name: `${base}${occurrence > 1 ? `_${occurrence}` : ''}.pdf`, data: bytes });
+      } catch (error) {
+        failed.push({ person, error: error.message || 'Error desconocido' });
+      }
+      progress.update(index + 1, person.name);
+    }
+
+    let zipName = '';
+    if (generatedFiles.length) {
+      const reportLines = [
+        'AGENDA STAFF - INFORME DE GENERACIÓN INDIVIDUAL',
+        `Fecha: ${new Date().toLocaleString('es-ES')}`,
+        `Documentos generados: ${generatedFiles.length}`,
+        `Sin firma: ${missing.length}`,
+        '',
+        ...(missing.length ? ['PERSONAS SIN FIRMA:', ...missing.map(person => `- ${person.name}${person.dni ? ` · ${person.dni}` : ''}`)] : ['Todas las personas disponían de firma.']),
+        ...(failed.length ? ['', 'ERRORES:', ...failed.map(item => `- ${item.person.name}: ${item.error}`)] : [])
+      ];
+      generatedFiles.push({ name: 'INFORME_GENERACION.txt', data: new TextEncoder().encode(reportLines.join('\r\n')) });
+      const zip = createStoredZip(generatedFiles);
+      const url = URL.createObjectURL(zip);
+      const link = document.createElement('a');
+      zipName = `${sanitizeDownloadName(activeDoc.fileName.replace(/\.pdf$/i, ''))}_DOCUMENTOS_INDIVIDUALES.zip`;
+      link.href = url;
+      link.download = zipName;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    }
+    progress.close();
+    showIndividualGenerationReport(generatedFiles.filter(file => file.name.endsWith('.pdf')).length, missing, failed, zipName);
+  } catch (error) {
+    progress.close();
+    showStatus(`No se pudieron generar los documentos: ${error.message}`, 'error');
+  }
 }
 
 function fillImagePlaceholder(page, index) {

@@ -1843,6 +1843,38 @@ body.light-mode #imgMainPreview .image-preview-item.drag-over { background: #dcf
 body.light-mode #imgMainPreview .image-preview-item .name { color: #334155; }
 body.light-mode .signature-crop-tab-option { background: #ffffff; color: #0f172a; border-color: #cbd5e1; }
 body.light-mode .signature-crop-tab-option:hover { background: #f5f3ff; border-color: #7c3aed; }
+
+.template-people-modes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 7px;
+}
+.template-people-modes .sidebar-btn { min-height: 42px; margin: 0; text-align: center; }
+.individual-documents-hint { margin: 7px 0 0; color: #bfdbfe; font-size: 10px; line-height: 1.35; }
+.individual-generation-modal { width: min(560px, 92vw); }
+.individual-generation-modal > p { margin: 0 0 14px; color: #94a3b8; font-size: 12px; line-height: 1.45; }
+.individual-progress-track { overflow: hidden; width: 100%; height: 12px; margin: 14px 0 9px; border-radius: 999px; background: #0f172a; }
+.individual-progress-bar { width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #2563eb, #22c55e); transition: width .2s ease; }
+.individual-progress-text { display: block; overflow: hidden; color: #cbd5e1; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.individual-result-summary { display: flex; align-items: baseline; gap: 9px; margin-bottom: 12px; padding: 12px; border-radius: 9px; background: #064e3b; color: #d1fae5; }
+.individual-result-summary strong { font-size: 26px; }
+.individual-result-summary span { font-size: 12px; font-weight: 700; }
+.individual-missing-list,
+.individual-failed-list { margin-top: 12px; padding: 11px; border: 1px solid #b45309; border-radius: 9px; background: #451a03; color: #fde68a; }
+.individual-failed-list { border-color: #b91c1c; background: #450a0a; color: #fecaca; }
+.individual-missing-list ul,
+.individual-failed-list ul { max-height: 190px; margin: 8px 0 0 20px; overflow-y: auto; font-size: 12px; line-height: 1.55; }
+.individual-all-generated { padding: 11px; border-radius: 9px; background: #064e3b; color: #d1fae5 !important; font-weight: 700; }
+body.light-mode .individual-documents-hint { color: #1e40af; }
+body.light-mode .individual-progress-track { background: #cbd5e1; }
+body.light-mode .individual-progress-text { color: #334155; }
+body.light-mode .individual-missing-list { border-color: #f59e0b; background: #fffbeb; color: #92400e; }
+body.light-mode .individual-failed-list { border-color: #ef4444; background: #fef2f2; color: #991b1b; }
+
+@media (max-width: 520px) {
+  .template-people-modes { grid-template-columns: 1fr; }
+}
 body.light-mode .copy-btn { background: #cffafe !important; color: #155e75 !important; }
 body.light-mode .paste-btn { background: #ede9fe !important; color: #5b21b6 !important; }
 
