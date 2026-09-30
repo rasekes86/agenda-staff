@@ -66,7 +66,30 @@
     output.width = right - left + 1;
     output.height = bottom - top + 1;
     output.getContext('2d').drawImage(canvas, left, top, output.width, output.height, 0, 0, output.width, output.height);
-    return output.toDataURL('image/png');
+    return exportHighResolutionSignature(output);
+  }
+
+  function exportHighResolutionSignature(sourceCanvas) {
+    // A screen crop can be physically small even when its strokes are clean.
+    // Keep the native crop, then create a lossless high-resolution master so
+    // it can occupy a normal signature field at 300 DPI without pixelation.
+    const minWidth = 1200;
+    const minHeight = 400;
+    const maxWidth = 3200;
+    const maxHeight = 1200;
+    const requestedScale = Math.max(1, minWidth / sourceCanvas.width, minHeight / sourceCanvas.height);
+    const safeScale = Math.min(8, requestedScale, maxWidth / sourceCanvas.width, maxHeight / sourceCanvas.height);
+    if (safeScale <= 1.01) return sourceCanvas.toDataURL('image/png');
+
+    const highResolution = document.createElement('canvas');
+    highResolution.width = Math.max(1, Math.round(sourceCanvas.width * safeScale));
+    highResolution.height = Math.max(1, Math.round(sourceCanvas.height * safeScale));
+    const context = highResolution.getContext('2d');
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = 'high';
+    context.clearRect(0, 0, highResolution.width, highResolution.height);
+    context.drawImage(sourceCanvas, 0, 0, highResolution.width, highResolution.height);
+    return highResolution.toDataURL('image/png');
   }
 
   stage.addEventListener('pointerdown', event => {

@@ -29,6 +29,55 @@
   }
 
   if (!isAndroid) return;
+
+  // The shared editor also runs as a Chrome extension. Provide the small
+  // runtime surface it expects so Android never aborts during startup.
+  if (!window.chrome.runtime) {
+    window.chrome.runtime = {
+      onMessage: { addListener() {} },
+      async sendMessage() {
+        return { success: false, error: 'Esta acción solo está disponible en la extensión de Chrome' };
+      }
+    };
+  }
+
+  let sessionRefreshPromise = null;
+  window.ensureAndroidSession = async function ensureAndroidSession(force = false) {
+    if (sessionRefreshPromise) return sessionRefreshPromise;
+    sessionRefreshPromise = (async () => {
+      const stored = await chrome.storage.local.get(['session', 'user']);
+      const savedSession = stored.session || null;
+      if (!savedSession?.refresh_token) return savedSession;
+      const expiresAt = Number(savedSession.expires_at || 0);
+      const stillValid = savedSession.access_token && expiresAt > (Date.now() / 1000) + 300;
+      if (!force && stillValid) return savedSession;
+
+      try {
+        const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+          method: 'POST',
+          headers: { apikey: SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: savedSession.refresh_token })
+        });
+        const refreshed = await response.json();
+        if (!response.ok) throw new Error(refreshed.error_description || refreshed.msg || 'No se pudo renovar la sesión');
+        const meta = refreshed.user?.user_metadata || {};
+        const user = refreshed.user ? {
+          id: refreshed.user.id,
+          email: refreshed.user.email,
+          name: meta.name || meta.full_name || refreshed.user.email
+        } : stored.user;
+        await chrome.storage.local.set({ session: refreshed, user });
+        window.dispatchEvent(new CustomEvent('agenda-android-session', { detail: { session: refreshed, user } }));
+        return refreshed;
+      } catch (error) {
+        console.warn('No se pudo renovar la sesión de Android:', error);
+        return savedSession;
+      }
+    })();
+    try { return await sessionRefreshPromise; }
+    finally { sessionRefreshPromise = null; }
+  };
+
   document.documentElement.classList.add('android-app');
   document.addEventListener('DOMContentLoaded', () => {
     document.body.classList.add('android-app');
@@ -45,12 +94,22 @@
         ['📝', 'Texto', 'btnAddText'],
         ['🖼️', 'Imagen', 'btnAddImage'],
         ['✍️', 'Firma', 'btnAddSignature'],
-        ['📅', 'Fecha', 'btnAddDate'],
+        ['📅', 'Fecha completa', 'btnAddDate'],
+        ['🗓️', 'Fecha separada', 'btnAddDateParts'],
+        ['W', 'Workout Events', 'btnAddWorkout'],
+        ['📍', 'Ciudad', 'btnAddCity'],
+        ['🏷️', 'Categoría', 'btnAddCategory'],
         ['✏️', 'Dibujar', 'btnDraw'],
         ['✅', 'Check', 'btnStampCheck'],
         ['❌', 'X', 'btnStampX'],
         ['📐', 'Plantillas', 'btnOpenTemplates'],
         ['📋', 'Rellenar', 'btnFillTemplate'],
+        ['🖼️', 'Imágenes → PDF', 'tool:imgToPdf'],
+        ['W', 'Word → PDF', 'tool:wordToPdf'],
+        ['🔗', 'Juntar PDFs', 'tool:merge'],
+        ['✂️', 'Separar PDF', 'tool:split'],
+        ['🔢', 'Ordenar páginas', 'tool:pages'],
+        ['⬜', 'Fondo blanco', 'tool:whiteBackground'],
         ['💾', 'Guardar PDF', 'btnSave']
       ];
       actions.forEach(([icon, label, targetId]) => {
@@ -90,7 +149,10 @@
       quickActions.addEventListener('click', event => {
         const action = event.target.closest('[data-mobile-target]');
         if (!action) return;
-        const target = document.getElementById(action.dataset.mobileTarget);
+        const actionTarget = action.dataset.mobileTarget;
+        const target = actionTarget.startsWith('tool:')
+          ? document.querySelector(`.tool-tab[data-tool="${actionTarget.slice(5)}"]`)
+          : document.getElementById(actionTarget);
         if (target && !target.disabled) target.click();
         setOpen(false);
       });
@@ -103,6 +165,12 @@
       await chrome.storage.local.remove(['session', 'user']);
       location.href = 'mobile-index.html';
     });
+
+    window.ensureAndroidSession();
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) window.ensureAndroidSession();
+    });
+    setInterval(() => window.ensureAndroidSession(), 5 * 60 * 1000);
 
     let touchDragTarget = null;
     const forwardTouch = (type, touch, target) => target.dispatchEvent(new MouseEvent(type, {

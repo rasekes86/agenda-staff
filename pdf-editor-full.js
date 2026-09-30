@@ -593,6 +593,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   console.log('PDF Editor initializing...');
   
   try {
+    if (window.AndroidBridge && window.ensureAndroidSession) await window.ensureAndroidSession();
     const stored = await chrome.storage.local.get(['session', 'user']);
     session = stored.session;
     currentUser = stored.user;
@@ -674,7 +675,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   showStatus('Carga uno o más PDFs para comenzar');
 });
 
-chrome.runtime.onMessage.addListener(message => {
+window.addEventListener('agenda-android-session', event => {
+  session = event.detail?.session || session;
+  currentUser = event.detail?.user || currentUser;
+});
+
+chrome.runtime?.onMessage?.addListener(message => {
   if (message.type === 'AGENDA_SIGNATURE_CROP_SAVED' && message.context === 'editor') {
     handleEditorSignatureCropSaved(message);
   }
@@ -2190,7 +2196,11 @@ function showQuickInsertPicker(point) {
       <div class="mobile-quick-insert-grid">
         <button data-action="text">📝<span>Texto</span></button>
         <button data-action="signature">✍️<span>Firma</span></button>
-        <button data-action="date">📅<span>Fecha</span></button>
+        <button data-action="date">📅<span>Fecha completa</span></button>
+        <button data-action="dateParts">🗓️<span>Fecha separada</span></button>
+        <button data-action="workout">W<span>Workout Events</span></button>
+        <button data-action="city">📍<span>Ciudad</span></button>
+        <button data-action="category">🏷️<span>Categoría</span></button>
         <button data-action="check">✅<span>Check</span></button>
         <button data-action="x">❌<span>X</span></button>
         <button data-action="draw">✏️<span>Dibujar</span></button>
@@ -2214,6 +2224,8 @@ function showQuickInsertPicker(point) {
       if (activeDoc) pendingSignaturePosition = { docId: activeDoc.id, page: point.page, x: point.x, y: point.y };
       showSignatureModal();
     } else if (action === 'draw') enterDrawMode();
+    else if (action === 'city') showCityPicker(value => placeStampAtPdfPoint('city', point.x, point.y, value));
+    else if (action === 'category') showCategoryPicker(value => placeStampAtPdfPoint('category', point.x, point.y, value));
     else placeStampAtPdfPoint(action, point.x, point.y);
   });
 }
@@ -2372,7 +2384,7 @@ function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames
       html += `<div class="signature-item signature-missing">
         <span class="signature-missing-name">${escapeHtml(name)}</span>
         <div class="signature-missing-actions">
-          <button class="signature-crop-btn" data-name="${escapeHtml(name)}">✂️ Recortar</button>
+          ${window.AndroidBridge ? '' : `<button class="signature-crop-btn" data-name="${escapeHtml(name)}">✂️ Recortar</button>`}
           <button class="signature-draw-btn" data-name="${escapeHtml(name)}">✍️ Dibujar</button>
           <button class="signature-upload-btn" data-name="${escapeHtml(name)}">📤 Subir</button>
         </div>
@@ -4503,6 +4515,7 @@ async function buildIndividualPdf(activeDoc, elements) {
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const fontItalic = await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
   const fontBoldItalic = await pdfDoc.embedFont(StandardFonts.HelveticaBoldOblique);
+  let qualityWarnings = 0;
 
   for (let pageNum = 1; pageNum <= activeDoc.totalPages; pageNum++) {
     const page = pdfDoc.getPage(pageNum - 1);
@@ -4530,7 +4543,19 @@ async function buildIndividualPdf(activeDoc, elements) {
         }
       } else if (['image', 'signature', 'drawing'].includes(element.type) && element.src) {
         let source = element.src;
-        if (element.type === 'signature') source = await processSignatureImage(source);
+        let drawX = element.x;
+        let drawY = height - element.y - element.height;
+        let drawWidth = element.width;
+        let drawHeight = element.height;
+        if (element.type === 'signature') {
+          const prepared = await prepareSignatureForPdf(source, element.width, element.height);
+          if (prepared.qualityLimited) qualityWarnings++;
+          source = prepared.src;
+          drawWidth = prepared.width;
+          drawHeight = prepared.height;
+          drawX = element.x + (element.width - drawWidth) / 2;
+          drawY = height - element.y - (element.height + drawHeight) / 2;
+        }
         let bytes;
         let isPng = source.startsWith('data:image/png');
         if (source.startsWith('data:')) {
@@ -4543,15 +4568,48 @@ async function buildIndividualPdf(activeDoc, elements) {
         }
         const image = isPng ? await pdfDoc.embedPng(bytes) : await pdfDoc.embedJpg(bytes);
         page.drawImage(image, {
-          x: element.x,
-          y: height - element.y - element.height,
-          width: element.width,
-          height: element.height
+          x: drawX,
+          y: drawY,
+          width: drawWidth,
+          height: drawHeight
         });
       }
     }
   }
-  return flattenPdf(await pdfDoc.save());
+  return { bytes: await flattenPdf(await pdfDoc.save()), qualityWarnings };
+}
+
+/**
+ * Preserve a signature's aspect ratio and ensure enough bitmap resolution for
+ * its final physical size in the PDF. Low-resolution sources are resampled
+ * once with high-quality interpolation at 300 DPI instead of being stretched
+ * by the PDF viewer.
+ */
+async function prepareSignatureForPdf(src, boxWidth, boxHeight) {
+  const processedSrc = await processSignatureImage(src);
+  const image = await new Promise((resolve, reject) => {
+    const loaded = new Image();
+    loaded.crossOrigin = 'anonymous';
+    loaded.onload = () => resolve(loaded);
+    loaded.onerror = () => reject(new Error('No se pudo preparar la firma'));
+    loaded.src = processedSrc;
+  });
+  const naturalWidth = Math.max(1, image.naturalWidth || image.width);
+  const naturalHeight = Math.max(1, image.naturalHeight || image.height);
+  const boxFit = Math.min(boxWidth / naturalWidth, boxHeight / naturalHeight);
+  // One image pixel may occupy at most 1/300 inch in the finished PDF.
+  // Refusing to exceed this scale is the only honest way to guarantee that a
+  // low-resolution raster signature is never enlarged into visible pixels.
+  const maxPrintScale = 72 / 300;
+  const fit = Math.min(boxFit, maxPrintScale);
+  const width = Math.max(1, naturalWidth * fit);
+  const height = Math.max(1, naturalHeight * fit);
+  return {
+    src: processedSrc,
+    width,
+    height,
+    qualityLimited: boxFit > maxPrintScale + 0.0001
+  };
 }
 
 function sanitizeDownloadName(value) {
@@ -4646,6 +4704,34 @@ function showIndividualGenerationProgress(total) {
   };
 }
 
+function confirmIndividualPdfPreview(pdfBytes, personName, qualityWarnings = 0) {
+  return new Promise(resolve => {
+    document.querySelector('.individual-preview-overlay')?.remove();
+    const url = URL.createObjectURL(new Blob([pdfBytes], { type: 'application/pdf' }));
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay show individual-preview-overlay';
+    overlay.innerHTML = `<div class="modal individual-preview-modal">
+      <h3>🔎 Revisa la firma antes de generar el ZIP</h3>
+      <p>Esta es una vista del PDF real de <strong>${escapeHtml(personName)}</strong>. Amplía la zona de la firma y confirma solo si se ve correctamente.</p>
+      ${qualityWarnings ? '<p class="signature-quality-notice">⚠️ La firma se ha mantenido más pequeña que el hueco para garantizar 300 DPI y evitar cualquier pixelación.</p>' : '<p class="signature-quality-ok">✓ La firma tiene resolución suficiente para el tamaño de la plantilla.</p>'}
+      <iframe title="Vista previa del primer documento"></iframe>
+      <div class="modal-actions">
+        <button class="btn-cancel" data-cancel>Cancelar</button>
+        <button class="btn-add" data-confirm>La firma se ve bien · Generar ZIP</button>
+      </div>
+    </div>`;
+    overlay.querySelector('iframe').src = `${url}#toolbar=1&zoom=page-width`;
+    document.body.appendChild(overlay);
+    const finish = accepted => {
+      URL.revokeObjectURL(url);
+      overlay.remove();
+      resolve(accepted);
+    };
+    overlay.querySelector('[data-cancel]').onclick = () => finish(false);
+    overlay.querySelector('[data-confirm]').onclick = () => finish(true);
+  });
+}
+
 function showIndividualGenerationReport(generated, missing, failed, zipName = '') {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay show individual-generation-report';
@@ -4674,12 +4760,26 @@ async function generateIndividualTemplatePdfs(rawText) {
   if (!hasSignatureField) { showStatus('La plantilla necesita al menos un campo FIRMA', 'error'); return; }
 
   $('fillTemplateModal')?.classList.remove('show');
-  const progress = showIndividualGenerationProgress(people.length);
   const generatedFiles = [];
   const missing = [];
   const failed = [];
   try {
     const matches = await findSignaturesForPeople(people);
+    const firstMatchIndex = matches.findIndex(match => match.signature);
+    const previewCache = new Map();
+    if (firstMatchIndex >= 0) {
+      showStatus('Preparando una vista previa con calidad de impresión…');
+      const firstMatch = matches[firstMatchIndex];
+      const previewElements = cloneElementsForIndividual(activeDoc, firstMatch.person, firstMatch.signature);
+      const previewResult = await buildIndividualPdf(activeDoc, previewElements);
+      previewCache.set(firstMatchIndex, previewResult.bytes);
+      const accepted = await confirmIndividualPdfPreview(previewResult.bytes, firstMatch.person.name, previewResult.qualityWarnings);
+      if (!accepted) {
+        showStatus('Generación cancelada para que puedas ajustar la plantilla', 'error');
+        return;
+      }
+    }
+    const progress = showIndividualGenerationProgress(people.length);
     const usedNames = new Map();
     for (let index = 0; index < matches.length; index++) {
       const { person, signature } = matches[index];
@@ -4691,7 +4791,8 @@ async function generateIndividualTemplatePdfs(rawText) {
       }
       try {
         const elements = cloneElementsForIndividual(activeDoc, person, signature);
-        const bytes = await buildIndividualPdf(activeDoc, elements);
+        const cachedBytes = previewCache.get(index);
+        const bytes = cachedBytes || (await buildIndividualPdf(activeDoc, elements)).bytes;
         const base = `${sanitizeDownloadName(activeDoc.fileName.replace(/\.pdf$/i, ''))}_${sanitizeDownloadName(person.name)}`;
         const occurrence = (usedNames.get(base) || 0) + 1;
         usedNames.set(base, occurrence);
@@ -4726,7 +4827,7 @@ async function generateIndividualTemplatePdfs(rawText) {
     progress.close();
     showIndividualGenerationReport(generatedFiles.filter(file => file.name.endsWith('.pdf')).length, missing, failed, zipName);
   } catch (error) {
-    progress.close();
+    document.querySelector('.individual-generation-overlay')?.remove();
     showStatus(`No se pudieron generar los documentos: ${error.message}`, 'error');
   }
 }
@@ -4763,10 +4864,10 @@ function openMissingTemplateSignature(page, index, name) {
     <h3>Firma no disponible</h3>
     <p style="color:#94a3b8;font-size:12px;margin-bottom:12px;">${escapeHtml(name)}</p>
     <p style="color:#cbd5e1;font-size:11px;margin-bottom:12px;">La firma se guardará con este nombre y se colocará en el hueco seleccionado.</p>
-    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;">
+    <div style="display:grid;grid-template-columns:repeat(${window.AndroidBridge ? 2 : 3},minmax(0,1fr));gap:8px;">
       <button class="sidebar-btn" data-upload style="flex:1;background:#2563eb;color:white;justify-content:center;">📤 Subir</button>
       <button class="sidebar-btn" data-draw style="flex:1;background:#0f766e;color:white;justify-content:center;">✍️ Dibujar</button>
-      <button class="sidebar-btn" data-crop style="flex:1;background:#7c3aed;color:white;justify-content:center;">✂️ Recortar</button>
+      ${window.AndroidBridge ? '' : '<button class="sidebar-btn" data-crop style="flex:1;background:#7c3aed;color:white;justify-content:center;">✂️ Recortar</button>'}
     </div>
     <div class="modal-actions"><button class="btn-cancel" data-cancel>Cancelar</button></div>
   </div>`;
@@ -4783,10 +4884,11 @@ function openMissingTemplateSignature(page, index, name) {
     close();
     uploadTemplateSignature(page, index, name);
   };
-  chooser.querySelector('[data-crop]').onclick = () => {
-    close();
-    openSignatureCropTabChooser(name, { kind: 'template', docId: activeDoc.id, page, index });
-  };
+  const cropButton = chooser.querySelector('[data-crop]');
+  if (cropButton) cropButton.onclick = () => {
+      close();
+      openSignatureCropTabChooser(name, { kind: 'template', docId: activeDoc.id, page, index });
+    };
 }
 
 function uploadTemplateSignature(page, index, name) {
@@ -5837,7 +5939,8 @@ function renderImgPreview() {
     item.draggable = true;
     item.dataset.idx = idx;
     item.title = 'Arrastra para cambiar el orden';
-    item.innerHTML = `<span class="image-order">${idx + 1}</span><div class="image-preview-frame"><img src="${escapeHtml(img.src)}" alt=""></div><span class="name">${escapeHtml(img.name)}</span><button class="remove-btn" data-idx="${idx}" title="Quitar imagen">×</button>`;
+    const mobileOrder = window.AndroidBridge ? `<span class="mobile-order-actions"><button type="button" data-move="up" data-idx="${idx}" ${idx === 0 ? 'disabled' : ''} aria-label="Mover antes">↑</button><button type="button" data-move="down" data-idx="${idx}" ${idx === imgFiles.length - 1 ? 'disabled' : ''} aria-label="Mover después">↓</button></span>` : '';
+    item.innerHTML = `<span class="image-order">${idx + 1}</span><div class="image-preview-frame"><img src="${escapeHtml(img.src)}" alt=""></div><span class="name">${escapeHtml(img.name)}</span>${mobileOrder}<button class="remove-btn" data-idx="${idx}" title="Quitar imagen">×</button>`;
     item.addEventListener('dragstart', event => {
       event.dataTransfer.effectAllowed = 'move';
       event.dataTransfer.setData('text/plain', String(idx));
@@ -5868,6 +5971,16 @@ function renderImgPreview() {
     btn.addEventListener('click', event => {
       event.stopPropagation();
       imgFiles.splice(parseInt(btn.dataset.idx), 1);
+      renderImgPreview();
+    });
+  });
+  list.querySelectorAll('[data-move]').forEach(btn => {
+    btn.addEventListener('click', event => {
+      event.stopPropagation();
+      const sourceIndex = Number(btn.dataset.idx);
+      const targetIndex = sourceIndex + (btn.dataset.move === 'up' ? -1 : 1);
+      if (!imgFiles[sourceIndex] || targetIndex < 0 || targetIndex >= imgFiles.length) return;
+      [imgFiles[sourceIndex], imgFiles[targetIndex]] = [imgFiles[targetIndex], imgFiles[sourceIndex]];
       renderImgPreview();
     });
   });

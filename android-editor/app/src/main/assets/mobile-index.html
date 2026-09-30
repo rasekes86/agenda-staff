@@ -23,7 +23,7 @@
   <script src="supabase-config.js"></script>
   <script src="android-bridge.js"></script>
   <script>
-    (async()=>{const saved=await chrome.storage.local.get('session');if(saved.session?.access_token)location.replace('pdf-editor-full.html')})();
+    (async()=>{await window.ensureAndroidSession?.();const saved=await chrome.storage.local.get('session');if(saved.session?.access_token)location.replace('pdf-editor-full.html')})();
     loginForm.addEventListener('submit',async event=>{event.preventDefault();error.textContent='';loginButton.disabled=true;loginButton.textContent='Entrando…';try{const response=await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`,{method:'POST',headers:{apikey:SUPABASE_ANON_KEY,'Content-Type':'application/json'},body:JSON.stringify({email:email.value.trim(),password:password.value})});const data=await response.json();if(!response.ok)throw new Error(data.error_description||data.msg||'No se pudo iniciar sesión');const meta=data.user?.user_metadata||{};await chrome.storage.local.set({session:data,user:{id:data.user.id,email:data.user.email,name:meta.name||meta.full_name||data.user.email}});location.replace('pdf-editor-full.html')}catch(err){error.textContent=err.message;loginButton.disabled=false;loginButton.textContent='Entrar'}});
   </script>
 </body>

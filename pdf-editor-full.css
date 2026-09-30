@@ -1863,6 +1863,13 @@ body.light-mode .signature-crop-tab-option:hover { background: #f5f3ff; border-c
 .individual-progress-track { overflow: hidden; width: 100%; height: 12px; margin: 14px 0 9px; border-radius: 999px; background: #0f172a; }
 .individual-progress-bar { width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #2563eb, #22c55e); transition: width .2s ease; }
 .individual-progress-text { display: block; overflow: hidden; color: #cbd5e1; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.individual-preview-modal { width: min(920px, 96vw) !important; }
+.individual-preview-modal > p { margin: 0 0 10px; color: #cbd5e1; font-size: 12px; line-height: 1.45; }
+.individual-preview-modal .signature-quality-notice { padding: 9px 11px; border: 1px solid #f59e0b; border-radius: 8px; background: #451a03; color: #fde68a; }
+.individual-preview-modal .signature-quality-ok { padding: 9px 11px; border-radius: 8px; background: #064e3b; color: #d1fae5; }
+.individual-preview-modal iframe { display: block; width: 100%; height: min(68vh, 720px); border: 1px solid #475569; border-radius: 8px; background: #fff; }
+.individual-preview-modal .modal-actions { flex-wrap: wrap; }
+.individual-preview-modal .btn-add { min-width: 250px; }
 .individual-result-summary { display: flex; align-items: baseline; gap: 9px; margin-bottom: 12px; padding: 12px; border-radius: 9px; background: #064e3b; color: #d1fae5; }
 .individual-result-summary strong { font-size: 26px; }
 .individual-result-summary span { font-size: 12px; font-weight: 700; }
@@ -1879,6 +1886,9 @@ body.light-mode .template-variable-grid label { color: #075985; }
 body.light-mode .template-variable-grid input { border-color: #7dd3fc; background: white; color: #0f172a; }
 body.light-mode .individual-progress-track { background: #cbd5e1; }
 body.light-mode .individual-progress-text { color: #334155; }
+body.light-mode .individual-preview-modal > p { color: #475569; }
+body.light-mode .individual-preview-modal .signature-quality-notice { background: #fffbeb; color: #92400e; }
+body.light-mode .individual-preview-modal .signature-quality-ok { background: #ecfdf5; color: #065f46; }
 body.light-mode .individual-missing-list { border-color: #f59e0b; background: #fffbeb; color: #92400e; }
 body.light-mode .individual-failed-list { border-color: #ef4444; background: #fef2f2; color: #991b1b; }
 
