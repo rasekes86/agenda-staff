@@ -2887,6 +2887,20 @@ async function processSignatureImage(src) {
       
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const data = imageData.data;
+
+      // A signature stored by AGENDA STAFF is already a lossless PNG with a
+      // transparent background. Reprocessing it here used to quantize its
+      // antialiasing, alter the original ink colour and encode the bitmap a
+      // second time. Embed the stored source unchanged so the PDF receives
+      // exactly the same pixels and colour as the signature database.
+      let transparentPixels = 0;
+      for (let i = 3; i < data.length; i += 4) {
+        if (data[i] < 245) transparentPixels++;
+      }
+      if (transparentPixels > canvas.width * canvas.height * 0.005) {
+        resolve(src);
+        return;
+      }
       
       // Remove the paper background once and reinforce the surviving ink.
       // The fixed opacity levels make this idempotent: processing the same
