@@ -1852,6 +1852,12 @@ body.light-mode .signature-crop-tab-option:hover { background: #f5f3ff; border-c
 }
 .template-people-modes .sidebar-btn { min-height: 42px; margin: 0; text-align: center; }
 .individual-documents-hint { margin: 7px 0 0; color: #bfdbfe; font-size: 10px; line-height: 1.35; }
+.template-variable-fields { margin-bottom: 12px; padding: 11px; border: 1px solid #0ea5e9; border-radius: 9px; background: #0c3144; }
+.template-variable-fields > p { margin: 4px 0 9px; color: #bae6fd; font-size: 10px; }
+.template-variable-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.template-variable-grid label { color: #e0f2fe; font-size: 11px; font-weight: 600; }
+.template-variable-grid input { width: 100%; margin-top: 4px; padding: 8px; border: 1px solid #0284c7; border-radius: 6px; background: #0f172a; color: #f8fafc; }
+.apply-template-variables { width: 100%; margin-top: 8px; justify-content: center; background: #0369a1; color: white; }
 .individual-generation-modal { width: min(560px, 92vw); }
 .individual-generation-modal > p { margin: 0 0 14px; color: #94a3b8; font-size: 12px; line-height: 1.45; }
 .individual-progress-track { overflow: hidden; width: 100%; height: 12px; margin: 14px 0 9px; border-radius: 999px; background: #0f172a; }
@@ -1867,6 +1873,10 @@ body.light-mode .signature-crop-tab-option:hover { background: #f5f3ff; border-c
 .individual-failed-list ul { max-height: 190px; margin: 8px 0 0 20px; overflow-y: auto; font-size: 12px; line-height: 1.55; }
 .individual-all-generated { padding: 11px; border-radius: 9px; background: #064e3b; color: #d1fae5 !important; font-weight: 700; }
 body.light-mode .individual-documents-hint { color: #1e40af; }
+body.light-mode .template-variable-fields { border-color: #38bdf8; background: #e0f2fe; }
+body.light-mode .template-variable-fields > p,
+body.light-mode .template-variable-grid label { color: #075985; }
+body.light-mode .template-variable-grid input { border-color: #7dd3fc; background: white; color: #0f172a; }
 body.light-mode .individual-progress-track { background: #cbd5e1; }
 body.light-mode .individual-progress-text { color: #334155; }
 body.light-mode .individual-missing-list { border-color: #f59e0b; background: #fffbeb; color: #92400e; }
@@ -1874,6 +1884,7 @@ body.light-mode .individual-failed-list { border-color: #ef4444; background: #fe
 
 @media (max-width: 520px) {
   .template-people-modes { grid-template-columns: 1fr; }
+  .template-variable-grid { grid-template-columns: 1fr; }
 }
 body.light-mode .copy-btn { background: #cffafe !important; color: #155e75 !important; }
 body.light-mode .paste-btn { background: #ede9fe !important; color: #5b21b6 !important; }

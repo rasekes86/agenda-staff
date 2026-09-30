@@ -4233,6 +4233,52 @@ function getTemplateGroups() {
   return groups;
 }
 
+function getTemplateFieldElements(fieldName) {
+  const activeDoc = getActiveDoc();
+  const normalizedField = normalizeText(fieldName).toUpperCase();
+  const matches = [];
+  if (!activeDoc) return matches;
+  for (let page = 1; page <= activeDoc.totalPages; page++) {
+    (activeDoc.elements[page] || []).forEach((element, index) => {
+      if (normalizeText(element.templateFieldKey || element.fieldGroup || '').toUpperCase() === normalizedField) {
+        matches.push({ page, index, el: element });
+      }
+    });
+  }
+  return matches;
+}
+
+function applyTemplateVariableFields(container, options = {}) {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc || !container) return false;
+  const cityInput = container.querySelector('#templateQuickCity');
+  const categoryInput = container.querySelector('#templateQuickCategory');
+  const updates = [
+    { field: 'CIUDAD', value: cityInput?.value.trim() || '', storage: 'pe_lastCity' },
+    { field: 'CATEGORIA', value: categoryInput?.value.trim() || '', storage: 'pe_lastCategory' }
+  ];
+  let changed = 0;
+  updates.forEach(update => {
+    if (!update.value) return;
+    const items = getTemplateFieldElements(update.field);
+    items.forEach(item => {
+      item.el.type = 'text';
+      item.el.text = update.value;
+      clearPlaceholderMetadata(item.el);
+      changed++;
+    });
+    if (items.length) localStorage.setItem(update.storage, update.value);
+  });
+  if (cityInput?.value.trim()) selectedCity = cityInput.value.trim();
+  if (categoryInput?.value.trim()) selectedCategory = categoryInput.value.trim();
+  if (changed) {
+    updateTabModified(activeDoc.id, true);
+    renderPage();
+    if (!options.silent) showStatus('Ciudad y puesto actualizados', 'success');
+  }
+  return changed > 0;
+}
+
 function showFillTemplateModal() {
   const modal = $('fillTemplateModal');
   const content = $('fillTemplateContent');
@@ -4240,6 +4286,19 @@ function showFillTemplateModal() {
   if (!modal || !content) return;
   const names = Object.keys(groups).sort();
   if (!names.length) { showStatus('No quedan huecos por rellenar', 'error'); return; }
+  const cityFields = getTemplateFieldElements('CIUDAD');
+  const categoryFields = getTemplateFieldElements('CATEGORIA');
+  const currentCity = cityFields[0]?.el.text || localStorage.getItem('pe_lastCity') || selectedCity || 'Madrid';
+  const currentCategory = categoryFields[0]?.el.text || localStorage.getItem('pe_lastCategory') || selectedCategory || CATEGORY_OPTIONS[0];
+  const variableFields = cityFields.length || categoryFields.length ? `<div class="template-variable-fields">
+    <strong>⚡ Datos variables de este documento</strong>
+    <p>Cámbialos aquí antes de rellenar la plantilla. Se aplicarán a todos sus campos.</p>
+    <div class="template-variable-grid">
+      ${cityFields.length ? `<label>📍 Ciudad<input id="templateQuickCity" type="text" list="spanishProvinceOptions" value="${escapeHtml(currentCity)}" autocomplete="off"></label>` : ''}
+      ${categoryFields.length ? `<label>🏷️ Puesto / categoría<input id="templateQuickCategory" type="text" list="categoryOptions" value="${escapeHtml(currentCategory)}" autocomplete="off"></label>` : ''}
+    </div>
+    <button class="sidebar-btn apply-template-variables">Aplicar cambios</button>
+  </div>` : '';
   const hasPeopleFields = groups.NOMBRE?.length || groups.DNI?.length || groups.FIRMA?.length;
   const peopleFill = hasPeopleFields ? `<div style="background:#172554;border:1px solid #3b82f6;border-radius:8px;padding:10px;margin-bottom:12px;">
     <strong>👥 Rellenar listado de personal</strong>
@@ -4251,17 +4310,22 @@ function showFillTemplateModal() {
     </div>
     <p class="individual-documents-hint">El modo individual solo genera documentos para las personas que tengan una firma guardada.</p>
   </div>` : '';
-  content.innerHTML = peopleFill + names.map(name => {
+  content.innerHTML = variableFields + peopleFill + names.map(name => {
     const items = groups[name];
     const type = items[0].el.type;
     if (type === 'text') return `<div style="background:#1e293b;border-radius:8px;padding:10px;margin-bottom:8px;"><strong>📝 ${escapeHtml(name)}</strong> <small>(${items.length})</small><textarea class="fill-template-values" data-group="${escapeHtml(name)}" rows="${Math.min(5, items.length + 1)}" placeholder="Un valor por línea" style="width:100%;margin-top:7px;padding:7px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#f1f5f9;"></textarea><button class="sidebar-btn fill-template-text" data-group="${escapeHtml(name)}" style="width:100%;margin-top:5px;background:#4338ca;color:white;">Rellenar</button>${['FECHA','DATE'].includes(name) ? `<button class="sidebar-btn fill-template-date" data-group="${escapeHtml(name)}" style="width:100%;margin-top:5px;background:#8b5cf6;color:white;">Usar fecha de hoy</button>` : ''}</div>`;
     if (type === 'signature') return `<div style="background:#1e293b;border-radius:8px;padding:10px;margin-bottom:8px;"><strong>✍️ ${escapeHtml(name)}</strong> <small>(${items.length})</small><button class="sidebar-btn fill-template-signature" style="width:100%;margin-top:7px;background:#7c3aed;color:white;">Buscar firmas</button></div>`;
     return `<div style="background:#1e293b;border-radius:8px;padding:10px;margin-bottom:8px;"><strong>🖼️ ${escapeHtml(name)}</strong> <small>(${items.length})</small><p style="font-size:10px;color:#94a3b8;margin-top:5px;">Haz doble clic sobre cada hueco para elegir su imagen.</p></div>`;
   }).join('');
+  content.querySelector('.apply-template-variables')?.addEventListener('click', () => {
+    applyTemplateVariableFields(content);
+  });
   content.querySelector('.fill-template-people')?.addEventListener('click', () => {
+    applyTemplateVariableFields(content, { silent: true });
     fillTemplatePeople($('templatePeopleInput')?.value || '');
   });
   content.querySelector('.generate-individual-documents')?.addEventListener('click', () => {
+    applyTemplateVariableFields(content, { silent: true });
     generateIndividualTemplatePdfs($('templatePeopleInput')?.value || '');
   });
   content.querySelectorAll('.fill-template-text').forEach(button => {
