@@ -478,7 +478,7 @@ async function captureAndProcessArea(rect) {
     const img = await createImageBitmap(blob);
     
     const canvas = new OffscreenCanvas(rect.width, rect.height);
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     
     ctx.drawImage(
       img,

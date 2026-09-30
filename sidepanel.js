@@ -8,6 +8,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 // State
 let currentUser = null;
 let session = null;
+let refreshSessionPromise = null;
 let events = {};
 let collapsed = new Set();
 let manuallyExpanded = new Set(); // Days manually expanded by user
@@ -72,8 +73,6 @@ async function checkSession() {
       if (isExpired && stored.session.refresh_token) {
         const refreshed = await refreshSession(stored.session.refresh_token);
         if (refreshed) {
-          session = stored.session;
-          currentUser = stored.user;
           showMainScreen();
           return;
         } else {
@@ -118,7 +117,8 @@ async function checkSession() {
 }
 
 async function refreshSession(refreshToken) {
-  try {
+  if (refreshSessionPromise) return refreshSessionPromise;
+  refreshSessionPromise = (async () => {
     console.log('Refreshing session...');
     const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
       method: 'POST',
@@ -133,23 +133,36 @@ async function refreshSession(refreshToken) {
       console.log('Refresh failed:', res.status);
       return false;
     }
-    
+
     const data = await res.json();
-    
+    if (!data?.access_token || !data?.refresh_token) return false;
+    if (!data.expires_at && data.expires_in) {
+      data.expires_at = Math.floor(Date.now() / 1000) + Number(data.expires_in);
+    }
+    const stored = await chrome.storage.local.get(['user']);
+    const refreshedUser = data.user ? {
+      id: data.user.id,
+      email: data.user.email,
+      name: data.user.user_metadata?.name || data.user.email?.split('@')[0] || stored.user?.name
+    } : stored.user;
+    if (!refreshedUser?.id) return false;
+
     await chrome.storage.local.set({
       session: data,
-      user: {
-        id: data.user.id,
-        email: data.user.email,
-        name: data.user.user_metadata?.name || data.user.email.split('@')[0]
-      }
+      user: refreshedUser
     });
-    
+    session = data;
+    currentUser = refreshedUser;
     console.log('Session refreshed successfully');
     return true;
+  })();
+  try {
+    return await refreshSessionPromise;
   } catch (err) {
     console.error('Refresh error:', err);
     return false;
+  } finally {
+    refreshSessionPromise = null;
   }
 }
 
@@ -402,6 +415,15 @@ async function api(method, body, query = '') {
       throw new Error('No hay sesión activa. Por favor, inicia sesión de nuevo.');
     }
   }
+
+  const now = Math.floor(Date.now() / 1000);
+  if (session.expires_at && session.expires_at - now < 60 && session.refresh_token) {
+    const refreshed = await refreshSession(session.refresh_token);
+    if (!refreshed) {
+      await handleLogout();
+      throw new Error('Sesión expirada. Por favor, inicia sesión de nuevo.');
+    }
+  }
   
   const url = `${SUPABASE_URL}/rest/v1/calendar_events${query}`;
   const opts = {
@@ -422,7 +444,6 @@ async function api(method, body, query = '') {
   
   if (!res.ok) {
     const errText = await res.text();
-    console.error('API Error:', errText);
     if (res.status === 401 || res.status === 403) {
       if (session.refresh_token) {
         const refreshed = await refreshSession(session.refresh_token);
@@ -435,11 +456,13 @@ async function api(method, body, query = '') {
             if (method === 'DELETE') return {};
             return retryRes.json();
           }
+          console.error('API retry error:', await retryRes.text());
         }
       }
       await handleLogout();
       throw new Error('Sesión expirada. Por favor, inicia sesión de nuevo.');
     }
+    console.error('API Error:', errText);
     throw new Error(errText || `Error ${res.status}: ${res.statusText}`);
   }
   if (method === 'DELETE') return {};
@@ -2656,7 +2679,7 @@ async function processAndTrimSignature(src) {
       const canvas = document.createElement('canvas');
       canvas.width = img.width;
       canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
       ctx.drawImage(img, 0, 0);
       
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -2705,7 +2728,7 @@ async function processAndTrimSignature(src) {
       
       // Step 2: Trim transparent borders
       const trimmedSrc = (function trimCanvas(cv) {
-        const c = cv.getContext('2d');
+        const c = cv.getContext('2d', { willReadFrequently: true });
         const cw = cv.width, ch = cv.height;
         if (cw === 0 || ch === 0) return cv.toDataURL('image/png');
         const id = c.getImageData(0, 0, cw, ch);
@@ -2916,6 +2939,31 @@ function removeDniNie(text) {
 }
 
 // Search signatures in Supabase (one name per line - commas are part of the name)
+function signatureNameTokenKey(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean)
+    .sort()
+    .join('|');
+}
+
+function signatureNamesMatch(searchedName, storedName) {
+  const searchedKey = signatureNameTokenKey(searchedName);
+  const storedKey = signatureNameTokenKey(storedName);
+  if (!searchedKey || !storedKey) return false;
+  if (searchedKey === storedKey) return true;
+  const searchedTokens = searchedKey.split('|');
+  const storedTokens = storedKey.split('|');
+  if (searchedTokens.length === 1) return storedTokens.some(token => token.startsWith(searchedTokens[0]));
+  return searchedTokens.length === storedTokens.length && searchedTokens.every(token => storedTokens.includes(token));
+}
+
 async function searchSignatures() {
   const searchInput = $('signatureSearchInput').value.trim();
 
@@ -2945,33 +2993,20 @@ async function searchSignatures() {
     let allSignatures = [];
     const foundNames = [];
 
-    // Search for each term
-    for (const term of searchTerms) {
-      // Query signatures table - search for exact or partial match
-      const query = `?select=*&name=ilike.*${encodeURIComponent(term)}*&order=name.asc`;
-      const url = `${SUPABASE_URL}/rest/v1/signatures${query}`;
-
-      const res = await fetch(url, {
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': `Bearer ${session.access_token}`
-        }
-      });
-
-      if (res.ok) {
-        const signatures = await res.json();
-        if (signatures && signatures.length > 0) {
-          // Add to results, avoiding duplicates by id
-          signatures.forEach(sig => {
-            if (!allSignatures.find(s => s.id === sig.id)) {
-              allSignatures.push(sig);
-              // Store in uppercase for comparison
-              foundNames.push(sig.name.toUpperCase());
-            }
-          });
-        }
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=*&order=name.asc&limit=5000`, {
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${session.access_token}`
       }
-    }
+    });
+    if (!res.ok) throw new Error('No se ha podido consultar la base de firmas');
+    const storedSignatures = await res.json();
+    searchTerms.forEach(term => {
+      storedSignatures.filter(sig => signatureNamesMatch(term, sig.name)).forEach(sig => {
+        if (!allSignatures.some(item => item.id === sig.id)) allSignatures.push(sig);
+        foundNames.push(sig.name);
+      });
+    });
 
     // Sort alphabetically by name
     allSignatures.sort((a, b) => a.name.localeCompare(b.name));
@@ -2988,13 +3023,8 @@ async function searchSignatures() {
 
 // Render signatures with missing names in red (for sidepanel)
 function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames) {
-  // Determine which searched terms were NOT found
-  const normalizedFoundNames = foundNames.map(n => n.toUpperCase());
   const missingNames = searchedTerms.filter(term => {
-    // Normalize term to uppercase for comparison
-    const normalizedTerm = term.toUpperCase();
-    // Check if term matches any found name (partial match)
-    return !normalizedFoundNames.some(found => found.includes(normalizedTerm) || normalizedTerm.includes(found));
+    return !foundNames.some(found => signatureNamesMatch(term, found));
   });
   
   let html = '';
@@ -3869,10 +3899,11 @@ async function checkExistingSignatures(names) {
     if (response.ok) {
       const allSigs = await response.json();
       
-      // Create a map of uppercase names to signature info
-      allSigs.forEach(sig => {
-        const upperName = sig.name.toUpperCase();
-        existing[upperName] = sig;
+      // Return matches keyed by the incoming filename, regardless of whether
+      // it uses "APELLIDOS NOMBRE" or "NOMBRE APELLIDOS".
+      names.forEach(name => {
+        const match = allSigs.find(sig => signatureNameTokenKey(sig.name) === signatureNameTokenKey(name));
+        if (match) existing[name.toUpperCase()] = match;
       });
     }
   } catch (err) {

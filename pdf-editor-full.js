@@ -2318,29 +2318,18 @@ async function searchSignatures() {
       headers['Authorization'] = `Bearer ${session.access_token}`;
     }
     
-    for (const term of searchTerms) {
-      // Search with original term AND normalized (no accents) term for better matching
-      const normalizedTerm = normalizeText(term);
-      const searchValues = [term];
-      if (normalizedTerm !== term) searchValues.push(normalizedTerm);
-      
-      for (const searchTerm of searchValues) {
-        const query = `?select=*&name=ilike.*${encodeURIComponent(searchTerm)}*&order=name.asc`;
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/signatures${query}`, { headers });
-        
-        if (res.ok) {
-          const signatures = await res.json();
-          if (signatures && signatures.length > 0) {
-            signatures.forEach(sig => {
-              if (!allSignatures.find(s => s.id === sig.id)) {
-                allSignatures.push(sig);
-                foundNames.push(normalizeText(sig.name).toLowerCase());
-              }
-            });
-          }
-        }
-      }
-    }
+    // Fetch once and compare normalized token sets locally. Supabase `ilike`
+    // only matches the literal word order, so it misses "NOMBRE APELLIDOS"
+    // when the stored signature is "APELLIDOS NOMBRE".
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=*&order=name.asc&limit=5000`, { headers });
+    if (!res.ok) throw new Error('No se ha podido consultar la base de firmas');
+    const storedSignatures = await res.json();
+    searchTerms.forEach(term => {
+      storedSignatures.filter(sig => signatureNameMatches(term, sig.name)).forEach(sig => {
+        if (!allSignatures.some(item => item.id === sig.id)) allSignatures.push(sig);
+        foundNames.push(sig.name);
+      });
+    });
     
     allSignatures.sort((a, b) => a.name.localeCompare(b.name));
     renderSignatureResultsWithMissing(allSignatures, searchTerms, foundNames);
@@ -2355,10 +2344,8 @@ function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames
   const signatureResults = $('signatureResults');
   if (!signatureResults) return;
   
-  const normalizedFoundNames = foundNames.map(n => n.toLowerCase());
   const missingNames = searchedTerms.filter(term => {
-    const normalizedTerm = normalizeText(term).toLowerCase();
-    return !normalizedFoundNames.some(found => found.includes(normalizedTerm) || normalizedTerm.includes(found));
+    return !foundNames.some(found => signatureNameMatches(term, found));
   });
   
   let html = '';
@@ -2522,14 +2509,15 @@ async function saveMissingSignature(name, processedBase64) {
   if (session && session.access_token) headers.Authorization = `Bearer ${session.access_token}`;
 
   const upperName = name.toUpperCase();
-  const checkResponse = await fetch(`${SUPABASE_URL}/rest/v1/signatures?name=eq.${encodeURIComponent(upperName)}&select=id`, {
+  const checkResponse = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=id,name&limit=5000`, {
     method: 'GET', headers
   });
 
   if (checkResponse.ok) {
     const existing = await checkResponse.json();
-    if (existing?.length) {
-      const deleteResponse = await fetch(`${SUPABASE_URL}/rest/v1/signatures?id=eq.${existing[0].id}`, {
+    const matchingSignature = existing.find(signature => signatureTokenKey(signature.name) === signatureTokenKey(upperName));
+    if (matchingSignature) {
+      const deleteResponse = await fetch(`${SUPABASE_URL}/rest/v1/signatures?id=eq.${matchingSignature.id}`, {
         method: 'DELETE', headers
       });
       if (!deleteResponse.ok) throw new Error('No se pudo reemplazar la firma existente');
@@ -2882,7 +2870,7 @@ async function processSignatureImage(src) {
       const canvas = document.createElement('canvas');
       canvas.width = img.width;
       canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
       ctx.drawImage(img, 0, 0);
       
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -3004,7 +2992,7 @@ function reinforceSignatureInk(data) {
  * adds padding, and returns a new trimmed canvas as PNG data URL.
  */
 function trimSignatureCanvas(canvas) {
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const w = canvas.width, h = canvas.height;
   if (w === 0 || h === 0) return canvas.toDataURL('image/png');
   
@@ -4376,21 +4364,8 @@ function fillTemplateDateGroup(groupName) {
 }
 
 async function findSignatureForPerson(name) {
-  const headers = { apikey: SUPABASE_KEY };
-  if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
-  const searchValues = [...new Set([name, normalizeText(name)])];
-  const signatures = [];
-  for (const value of searchValues) {
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=*&name=ilike.*${encodeURIComponent(value)}*&order=name.asc`, { headers });
-    if (!response.ok) continue;
-    const matches = await response.json();
-    matches.forEach(match => {
-      if (!signatures.some(signature => signature.id === match.id)) signatures.push(match);
-    });
-  }
-  if (!signatures.length) return null;
-  const normalizedName = normalizeText(name).toUpperCase().replace(/\s+/g, ' ').trim();
-  return signatures.find(signature => normalizeText(signature.name).toUpperCase().replace(/\s+/g, ' ').trim() === normalizedName) || signatures[0];
+  const [match] = await findSignaturesForPeople([{ name }]);
+  return match?.signature || null;
 }
 
 function parseTemplatePeople(rawText) {
@@ -4462,6 +4437,19 @@ function signatureMatchKey(value) {
 
 function signatureTokenKey(value) {
   return signatureMatchKey(value).split(' ').filter(Boolean).sort().join('|');
+}
+
+function signatureNameMatches(searchedName, storedName) {
+  const searchedKey = signatureTokenKey(searchedName);
+  const storedKey = signatureTokenKey(storedName);
+  if (!searchedKey || !storedKey) return false;
+  if (searchedKey === storedKey) return true;
+  const searchedTokens = searchedKey.split('|');
+  const storedTokens = storedKey.split('|');
+  // Preserve partial search when the user types a single token, but require
+  // the complete token set for a full person name to avoid wrong signatures.
+  if (searchedTokens.length === 1) return storedTokens.some(token => token.startsWith(searchedTokens[0]));
+  return searchedTokens.length === storedTokens.length && searchedTokens.every(token => storedTokens.includes(token));
 }
 
 async function findSignaturesForPeople(people) {

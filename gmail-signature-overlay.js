@@ -12,6 +12,30 @@
   let remoteRefreshInterval = null;
   const observerConfig = { childList: true, subtree: true };
 
+  function stopAutomaticRefresh() {
+    clearTimeout(scanTimer);
+    if (localRefreshInterval) clearInterval(localRefreshInterval);
+    if (remoteRefreshInterval) clearInterval(remoteRefreshInterval);
+    localRefreshInterval = null;
+    remoteRefreshInterval = null;
+    observer?.disconnect();
+  }
+
+  async function sendRuntimeMessage(message) {
+    if (!chrome?.runtime?.id) {
+      stopAutomaticRefresh();
+      throw new Error('La extensión se ha actualizado. Recarga esta pestaña de Gmail.');
+    }
+    try {
+      return await chrome.runtime.sendMessage(message);
+    } catch (error) {
+      if (!chrome?.runtime?.id || /context invalidated|receiving end does not exist/i.test(error?.message || '')) {
+        stopAutomaticRefresh();
+      }
+      throw error;
+    }
+  }
+
   const normalize = value => String(value || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -233,7 +257,7 @@
     loading.textContent = 'Buscando pestañas abiertas…';
     dialog.appendChild(loading);
     try {
-      const result = await chrome.runtime.sendMessage({ type: 'AGENDA_GET_CAPTURE_TABS' });
+      const result = await sendRuntimeMessage({ type: 'AGENDA_GET_CAPTURE_TABS' });
       if (!result?.success) throw new Error(result?.error || 'No se han podido consultar las pestañas');
       loading.remove();
       if (!result.tabs?.length) {
@@ -260,7 +284,7 @@
             const oldTitle = title.textContent;
             title.textContent = 'Abriendo selector…';
             try {
-              const start = await chrome.runtime.sendMessage({ type: 'AGENDA_START_SIGNATURE_CROP', name: person.name, tabId: tab.id });
+              const start = await sendRuntimeMessage({ type: 'AGENDA_START_SIGNATURE_CROP', name: person.name, tabId: tab.id });
               if (!start?.success) throw new Error(start?.error || 'No se ha podido iniciar el recorte');
               closeSignatureDialog();
             } catch (error) {
@@ -351,7 +375,7 @@
       showInlineNotice(`Preparando firma de ${person.name}…`);
       try {
         const imageUrl = await prepareSignatureImage(file);
-        const result = await chrome.runtime.sendMessage({ type: 'AGENDA_UPLOAD_GMAIL_SIGNATURE', name: person.name, imageUrl });
+        const result = await sendRuntimeMessage({ type: 'AGENDA_UPLOAD_GMAIL_SIGNATURE', name: person.name, imageUrl });
         if (!result?.success) throw new Error(result?.error || 'No se ha podido guardar la firma');
         savedNames.add(nameKey(person.name));
         savedNameTokens.add(nameTokenKey(person.name));
@@ -432,7 +456,7 @@
   }
 
   function requestRemoteRefresh() {
-    chrome.runtime.sendMessage({ type: 'AGENDA_REQUEST_GMAIL_SCAN' }).catch(() => {});
+    sendRuntimeMessage({ type: 'AGENDA_REQUEST_GMAIL_SCAN' }).catch(() => {});
   }
 
   function startAutomaticRefresh() {
