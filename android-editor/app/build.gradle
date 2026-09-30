@@ -8,8 +8,8 @@ android {
         applicationId 'com.workoutevents.agendastaff.pdf'
         minSdk 26
         targetSdk 35
-        versionCode 401
-        versionName '4.0.1'
+        versionCode 410
+        versionName '4.1.0'
     }
 
     buildTypes {
@@ -26,7 +26,7 @@ def generatedAssets = layout.buildDirectory.dir('generated/editorAssets')
 tasks.register('prepareEditorAssets', Copy) {
     from(editorRoot) {
         include 'pdf-editor-full.html', 'pdf-editor-full.css', 'pdf-editor-full.js'
-        include 'android-mobile.css', 'android-bridge.js', 'shared-utils.js', 'supabase-config.js'
+        include 'android-mobile.css', 'android-bridge.js', 'shared-utils.js', 'signature-vector.js', 'supabase-config.js'
         include 'jspdf.umd.min.js', 'pdf-lib.min.js', 'pdf.min.js', 'pdf.worker.min.js', 'mammoth.browser.min.js'
         include 'icons/workout-events-logo.png'
     }
