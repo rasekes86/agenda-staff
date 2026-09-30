@@ -2513,6 +2513,7 @@ async function uploadMissingSignature(name) {
 }
 
 async function saveMissingSignature(name, processedBase64) {
+  const storageImage = await createHighResolutionSignatureMaster(processedBase64);
   const headers = {
     'apikey': SUPABASE_KEY,
     'Content-Type': 'application/json',
@@ -2539,7 +2540,7 @@ async function saveMissingSignature(name, processedBase64) {
   const bodyData = {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2),
     name: upperName,
-    image_url: processedBase64
+    image_url: storageImage
   };
   if (currentUser) {
     bodyData.user_id = currentUser.id;
@@ -2552,7 +2553,7 @@ async function saveMissingSignature(name, processedBase64) {
   if (!response.ok) throw new Error('Error al guardar: ' + await response.text());
 
   showStatus('✓ Firma guardada: ' + name, 'success');
-  selectSignature(processedBase64, name);
+  selectSignature(storageImage, name);
   searchSignatures();
 }
 
@@ -2924,6 +2925,30 @@ async function processSignatureImage(src) {
     };
     img.src = src;
   });
+}
+
+async function createHighResolutionSignatureMaster(src) {
+  const image = await new Promise((resolve, reject) => {
+    const loaded = new Image();
+    loaded.crossOrigin = 'anonymous';
+    loaded.onload = () => resolve(loaded);
+    loaded.onerror = () => reject(new Error('No se pudo preparar la firma en alta resolución'));
+    loaded.src = src;
+  });
+  const width = Math.max(1, image.naturalWidth || image.width);
+  const height = Math.max(1, image.naturalHeight || image.height);
+  const requestedScale = Math.max(1, 1200 / width, 400 / height);
+  const scale = Math.min(8, requestedScale, 3200 / width, 1200 / height);
+  if (scale <= 1.01) return src;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
+  const context = canvas.getContext('2d');
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/png');
 }
 
 /**
@@ -4704,7 +4729,7 @@ function showIndividualGenerationProgress(total) {
   };
 }
 
-function confirmIndividualPdfPreview(pdfBytes, personName, qualityWarnings = 0) {
+function confirmIndividualPdfPreview(pdfBytes, personName, qualityWarnings = 0, previewPage = 1) {
   return new Promise(resolve => {
     document.querySelector('.individual-preview-overlay')?.remove();
     const url = URL.createObjectURL(new Blob([pdfBytes], { type: 'application/pdf' }));
@@ -4714,14 +4739,30 @@ function confirmIndividualPdfPreview(pdfBytes, personName, qualityWarnings = 0) 
       <h3>🔎 Revisa la firma antes de generar el ZIP</h3>
       <p>Esta es una vista del PDF real de <strong>${escapeHtml(personName)}</strong>. Amplía la zona de la firma y confirma solo si se ve correctamente.</p>
       ${qualityWarnings ? '<p class="signature-quality-notice">⚠️ La firma se ha mantenido más pequeña que el hueco para garantizar 300 DPI y evitar cualquier pixelación.</p>' : '<p class="signature-quality-ok">✓ La firma tiene resolución suficiente para el tamaño de la plantilla.</p>'}
-      <iframe title="Vista previa del primer documento"></iframe>
+      ${window.AndroidBridge ? '<div class="individual-preview-canvas-wrap"><canvas title="Vista previa del primer documento"></canvas></div>' : '<iframe title="Vista previa del primer documento"></iframe>'}
       <div class="modal-actions">
         <button class="btn-cancel" data-cancel>Cancelar</button>
         <button class="btn-add" data-confirm>La firma se ve bien · Generar ZIP</button>
       </div>
     </div>`;
-    overlay.querySelector('iframe').src = `${url}#toolbar=1&zoom=page-width`;
     document.body.appendChild(overlay);
+    const iframe = overlay.querySelector('iframe');
+    if (iframe) iframe.src = `${url}#toolbar=1&zoom=page-width`;
+    const previewCanvas = overlay.querySelector('canvas');
+    if (previewCanvas) {
+      window.pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise
+        .then(document => document.getPage(Math.min(Math.max(1, previewPage), document.numPages)))
+        .then(page => {
+          const viewport = page.getViewport({ scale: 2 });
+          previewCanvas.width = viewport.width;
+          previewCanvas.height = viewport.height;
+          return page.render({ canvasContext: previewCanvas.getContext('2d'), viewport }).promise;
+        })
+        .catch(error => {
+          const wrap = overlay.querySelector('.individual-preview-canvas-wrap');
+          if (wrap) wrap.textContent = `No se pudo mostrar la vista previa: ${error.message}`;
+        });
+    }
     const finish = accepted => {
       URL.revokeObjectURL(url);
       overlay.remove();
@@ -4773,7 +4814,8 @@ async function generateIndividualTemplatePdfs(rawText) {
       const previewElements = cloneElementsForIndividual(activeDoc, firstMatch.person, firstMatch.signature);
       const previewResult = await buildIndividualPdf(activeDoc, previewElements);
       previewCache.set(firstMatchIndex, previewResult.bytes);
-      const accepted = await confirmIndividualPdfPreview(previewResult.bytes, firstMatch.person.name, previewResult.qualityWarnings);
+      const signaturePage = Number(Object.keys(previewElements).find(page => previewElements[page].some(element => element.type === 'signature')) || 1);
+      const accepted = await confirmIndividualPdfPreview(previewResult.bytes, firstMatch.person.name, previewResult.qualityWarnings, signaturePage);
       if (!accepted) {
         showStatus('Generación cancelada para que puedas ajustar la plantilla', 'error');
         return;
