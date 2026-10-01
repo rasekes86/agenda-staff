@@ -137,12 +137,28 @@
       body.querySelectorAll('table').forEach(table => {
         if (isIgnoredMessageContent(table)) return;
         const rows = [...table.querySelectorAll('tr')];
-        if (rows.length < 2) return;
+        if (!rows.length) return;
         const headerRowIndex = rows.findIndex(row => {
           const text = normalize(row.innerText);
           return text.includes('NOMBRE') && text.includes('APELLIDO 1');
         });
-        if (headerRowIndex < 0) return;
+        if (headerRowIndex < 0) {
+          // Common email format: NAME SURNAME, FIRST NAME | DNI/NIE | ROLE,
+          // without any header row. Requiring a valid identity document keeps
+          // corporate signatures and ordinary prose out of this path.
+          rows.forEach(row => {
+            const cells = [...row.querySelectorAll(':scope > th, :scope > td')];
+            const dniIndex = cells.findIndex(cell => dniPattern.test(normalize(cell.innerText).replace(/ /g, '')));
+            if (dniIndex < 0) return;
+            const nameCell = cells.slice(0, dniIndex).find(cell => looksLikePersonnelName(cell.innerText.trim()));
+            if (!nameCell) return;
+            addPerson(nameCell.innerText.trim(), cells[dniIndex].innerText.trim(), body, {
+              anchorText: nameCell.innerText.trim(),
+              anchorElement: nameCell
+            });
+          });
+          return;
+        }
         const headerCells = [...rows[headerRowIndex].querySelectorAll('th, td')];
         const headers = headerCells.map(cell => normalize(cell.innerText));
         const nameIndex = headers.findIndex(header => header === 'NOMBRE');
