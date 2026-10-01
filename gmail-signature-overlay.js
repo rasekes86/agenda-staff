@@ -74,6 +74,38 @@
     )].some(isVisible);
   }
 
+  const ignoredMessageSelector = [
+    '.gmail_signature',
+    '[data-smartmail="gmail_signature"]',
+    '.gmail_quote',
+    '.gmail_attr',
+    'blockquote',
+    '[data-agenda-ignore]',
+    '.agenda-signature-inline',
+    '.agenda-signature-inline-fallback'
+  ].join(',');
+
+  function isIgnoredMessageContent(value) {
+    return Boolean(editableElement(value)?.closest(ignoredMessageSelector));
+  }
+
+  function messageBodyText(body) {
+    const cleanBody = body.cloneNode(true);
+    cleanBody.querySelectorAll(ignoredMessageSelector).forEach(element => element.remove());
+    return cleanBody.innerText || cleanBody.textContent || '';
+  }
+
+  function looksLikePersonnelName(value) {
+    const name = String(value || '').replace(/\s+/g, ' ').trim();
+    const parts = name.split(',');
+    if (parts.length !== 2 || !parts[0].trim() || !parts[1].trim()) return false;
+    if (/\d|@|https?:|www\./i.test(name)) return false;
+    const leftTokens = parts[0].trim().split(/\s+/).filter(Boolean);
+    const rightTokens = parts[1].trim().split(/\s+/).filter(Boolean);
+    if (leftTokens.length > 6 || rightTokens.length > 4) return false;
+    return !/\b(?:WORKOUT EVENTS?|RECURSOS HUMANOS|RRHH|DEPARTAMENTO|EQUIPO|COORDINACI[ÓO]N|INFORMACI[ÓO]N|ATENTAMENTE|SALUDOS|AVISO|CONFIDENCIAL|EMPRESA|PRODUCCI[ÓO]N|ADMINISTRACI[ÓO]N|S\.?\s*[LA]\.?)\b/i.test(name);
+  }
+
   function extractPersonnel() {
     const messageBodies = [...document.querySelectorAll('.a3s.aiL, [role="main"] .a3s, [role="main"] .ii.gt')]
       .filter(body => isVisible(body) && !isEditableContext(body));
@@ -87,7 +119,7 @@
     const addPerson = (name, dni = '', body, options = {}) => {
       const cleanName = String(name || '').replace(/\s+/g, ' ').trim();
       const cleanDni = normalize(dni).replace(/ /g, '');
-      if (!cleanName || (cleanDni && !dniPattern.test(cleanDni))) return;
+      if (!cleanName || !looksLikePersonnelName(cleanName) || (cleanDni && !dniPattern.test(cleanDni))) return;
       const key = nameKey(cleanName);
       if (seen.has(key)) return;
       seen.add(key);
@@ -103,6 +135,7 @@
 
     for (const body of bodies) {
       body.querySelectorAll('table').forEach(table => {
+        if (isIgnoredMessageContent(table)) return;
         const rows = [...table.querySelectorAll('tr')];
         if (rows.length < 2) return;
         const headerRowIndex = rows.findIndex(row => {
@@ -128,7 +161,8 @@
         });
       });
 
-      const rawLines = body.innerText.split(/\r?\n/);
+      const usefulBodyText = messageBodyText(body);
+      const rawLines = usefulBodyText.split(/\r?\n/);
       const tableHeaderIndex = rawLines.findIndex(line => {
         const value = normalize(line);
         return value.includes('NOMBRE') && value.includes('APELLIDO 1');
@@ -147,7 +181,7 @@
         }
       }
 
-      const lines = body.innerText.split(/\r?\n/).map(line => line.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean);
+      const lines = usefulBodyText.split(/\r?\n/).map(line => line.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean);
       for (let index = 0; index < lines.length; index++) {
         const line = lines[index];
         const dniMatch = line.match(dniPattern);
@@ -167,7 +201,7 @@
       }
 
       const standaloneCandidates = [];
-      const standaloneLines = body.innerText.split(/\r?\n/);
+      const standaloneLines = usefulBodyText.split(/\r?\n/);
       const hasNamesHeading = standaloneLines.some(line => /\b(NOMBRES?|PERSONAL|LISTADO)\b/i.test(line));
       for (const rawLine of standaloneLines) {
         const line = rawLine.replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
@@ -409,7 +443,7 @@
   function findExactNameTextNode(body, name) {
     const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
-        if (!node.nodeValue?.trim() || node.parentElement?.closest('.agenda-signature-inline') || isEditableContext(node)) return NodeFilter.FILTER_REJECT;
+        if (!node.nodeValue?.trim() || node.parentElement?.closest('.agenda-signature-inline') || isEditableContext(node) || isIgnoredMessageContent(node)) return NodeFilter.FILTER_REJECT;
         return node.nodeValue.toLocaleUpperCase().includes(name.toLocaleUpperCase()) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
       }
     });
@@ -447,7 +481,7 @@
 
     const name = nameKey(markerText);
     const candidates = [...person.body.querySelectorAll('span, div, td')]
-      .filter(element => !element.closest('.agenda-signature-inline') && nameKey(element.textContent).includes(name))
+      .filter(element => !element.closest('.agenda-signature-inline') && !isIgnoredMessageContent(element) && nameKey(element.textContent).includes(name))
       .sort((a, b) => a.textContent.length - b.textContent.length);
     if (candidates[0]) {
       candidates[0].classList.add('agenda-signature-name-state', person.saved ? 'saved' : 'missing');
