@@ -385,6 +385,14 @@
               </button>
             </div>
           </div>
+          <button class="btn-download-all-signatures" id="btnDownloadAllSignatures" title="Descargar todas con su nombre">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            Descargar todas las firmas (.ZIP)
+          </button>
           
           <!-- Results Section -->
           <div class="signatures-results" id="signaturesResults">
@@ -411,8 +419,8 @@
               <div class="signatures-bulk-dropzone" id="bulkDropzone">
                 <div class="signatures-bulk-icon">📁</div>
                 <div class="signatures-bulk-text">Arrastra imágenes o haz clic</div>
-                <div class="signatures-bulk-hint-detail">PNG, JPG, WEBP (múltiples)</div>
-                <input type="file" id="bulkFileInput" accept="image/*" multiple hidden>
+                <div class="signatures-bulk-hint-detail">PNG, JPG, WEBP o SVG real (múltiples)</div>
+                <input type="file" id="bulkFileInput" accept=".png,.jpg,.jpeg,.webp,.svg,image/png,image/jpeg,image/webp,image/svg+xml" multiple hidden>
               </div>
               <div class="bulk-progress" id="bulkProgress" style="display: none;">
                 <div class="bulk-progress-bar">
@@ -431,8 +439,8 @@
             <div class="signatures-dropzone" id="signatureDropzone">
               <div class="signatures-dropzone-icon">📝</div>
               <div class="signatures-dropzone-text">Arrastra una imagen o haz clic</div>
-              <div class="signatures-dropzone-hint">PNG con fondo transparente (recomendado)</div>
-              <input type="file" id="signatureFileInput" accept="image/*" hidden>
+              <div class="signatures-dropzone-hint">PNG transparente o SVG con paths reales</div>
+              <input type="file" id="signatureFileInput" accept=".png,.jpg,.jpeg,.webp,.svg,image/png,image/jpeg,image/webp,image/svg+xml" hidden>
             </div>
             <div class="signature-preview-area" id="signaturePreviewArea" style="display: none;">
               <img id="signaturePreviewImg" src="" alt="Preview">

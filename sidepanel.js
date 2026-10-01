@@ -2816,6 +2816,9 @@ function setupSignatureListeners() {
   // Preview all signatures button
   on('btnPreviewSignatures', 'click', previewAllSignatures);
 
+  // Export every original signature in one ZIP, preserving its database name.
+  on('btnDownloadAllSignatures', 'click', downloadAllSignatures);
+
   // Dropzone click
   on('signatureDropzone', 'click', () => {
     const fi = $('signatureFileInput');
@@ -3537,7 +3540,7 @@ function handleSignatureFile(file) {
   const fileType = file.type || '';
   const fileName = file.name || '';
   const isImage = fileType.startsWith('image/') || 
-                  /\.(png|jpg|jpeg|gif|webp|bmp)$/i.test(fileName);
+                  /\.(png|jpg|jpeg|gif|webp|bmp|svg)$/i.test(fileName);
   
   if (!isImage) {
     showToast('Por favor, selecciona una imagen');
@@ -3555,6 +3558,61 @@ function handleSignatureFile(file) {
     $('signatureDropzone').style.display = 'none';
   };
   reader.readAsDataURL(file);
+}
+
+function isSvgSignatureFile(file) {
+  return file?.type === 'image/svg+xml' || /\.svg$/i.test(file?.name || '');
+}
+
+async function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function sanitizeSignatureSvg(file) {
+  const source = await file.text();
+  const documentSvg = new DOMParser().parseFromString(source, 'image/svg+xml');
+  if (documentSvg.querySelector('parsererror') || documentSvg.documentElement?.localName !== 'svg') {
+    throw new Error('El archivo SVG no es válido');
+  }
+  if (!documentSvg.querySelector('path')) throw new Error('El SVG no contiene paths vectoriales reales');
+  if (documentSvg.querySelector('image')) throw new Error('El SVG contiene una imagen raster incrustada');
+  documentSvg.querySelectorAll('script,foreignObject,iframe,object,embed').forEach(node => node.remove());
+  documentSvg.querySelectorAll('*').forEach(node => {
+    [...node.attributes].forEach(attribute => {
+      if (/^on/i.test(attribute.name) || /^(?:href|xlink:href)$/i.test(attribute.name)) node.removeAttribute(attribute.name);
+    });
+  });
+  const svg = new XMLSerializer().serializeToString(documentSvg.documentElement);
+  return { svg, dataUrl: AgendaSignatureVector.svgToDataUrl(svg) };
+}
+
+async function prepareSignatureFile(file) {
+  if (isSvgSignatureFile(file)) {
+    const vector = await sanitizeSignatureSvg(file);
+    const dimensions = AgendaSignatureVector.dimensions(vector.svg);
+    const scale = Math.min(1, 1600 / Math.max(dimensions.width, dimensions.height));
+    const fallbackWidth = Math.max(32, Math.round(dimensions.width * scale));
+    const fallbackHeight = Math.max(32, Math.round(dimensions.height * scale));
+    return {
+      processedImage: await AgendaSignatureVector.renderSvg(vector.svg, fallbackWidth, fallbackHeight),
+      svgData: vector.dataUrl,
+      vectorVersion: 2,
+      isSvg: true
+    };
+  }
+  const base64 = await readFileAsDataUrl(file);
+  let processedImage = base64;
+  try { processedImage = await processAndTrimSignature(base64); }
+  catch (error) { console.warn('Signature processing failed, using original:', error); }
+  let svgData = '';
+  try { svgData = (await AgendaSignatureVector.pngToSvg(processedImage)).dataUrl; }
+  catch (error) { console.warn('Vectorization failed, keeping PNG fallback:', error); }
+  return { processedImage, svgData, vectorVersion: svgData ? 1 : 0, isSvg: false };
 }
 
 function clearSignaturePreview() {
@@ -3584,48 +3642,34 @@ async function uploadSignature() {
   btn.querySelector('.btn-loader').style.display = 'inline-block';
 
   try {
-    // Convert image to base64
-    const base64Image = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(signatureFile);
-    });
-
-    // Process signature: remove white background and trim transparent borders
-    let processedImage = base64Image;
-    try {
-      processedImage = await processAndTrimSignature(base64Image);
-    } catch (err) {
-      console.warn('Signature processing failed, using original:', err);
-    }
-    let svgData = '';
-    try { svgData = (await AgendaSignatureVector.pngToSvg(processedImage)).dataUrl; }
-    catch (error) { console.warn('Vectorization failed, keeping PNG fallback:', error); }
+    const { processedImage, svgData, vectorVersion, isSvg } = await prepareSignatureFile(signatureFile);
 
     console.log('Subiendo firma:', name);
     console.log('User ID:', currentUser?.id);
 
-    // Insert into signatures table
+    const existing = await checkExistingSignatures([name.toUpperCase()]);
+    const existingSignature = existing[name.toUpperCase()];
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
-    
-    const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/signatures`, {
-      method: 'POST',
+    const payload = {
+      name: name.toUpperCase(),
+      svg_data: svgData || null,
+      vector_version: vectorVersion,
+      user_id: currentUser.id,
+      user_name: currentUser.name
+    };
+    // When replacing an old PNG with an SVG, retain its PNG as fallback.
+    if (!existingSignature || !isSvg) payload.image_url = processedImage;
+    const insertRes = await fetch(existingSignature
+      ? `${SUPABASE_URL}/rest/v1/signatures?id=eq.${existingSignature.id}`
+      : `${SUPABASE_URL}/rest/v1/signatures`, {
+      method: existingSignature ? 'PATCH' : 'POST',
       headers: {
         'apikey': SUPABASE_KEY,
         'Authorization': `Bearer ${session.access_token}`,
         'Content-Type': 'application/json',
         'Prefer': 'return=representation'
       },
-      body: JSON.stringify({
-        id,
-        name: name.toUpperCase(),
-        image_url: processedImage,
-        svg_data: svgData || null,
-        vector_version: svgData ? 1 : 0,
-        user_id: currentUser.id,
-        user_name: currentUser.name
-      })
+      body: JSON.stringify(existingSignature ? payload : { id, image_url: processedImage, ...payload })
     });
 
     console.log('Response status:', insertRes.status);
@@ -3646,7 +3690,7 @@ async function uploadSignature() {
     const result = await insertRes.json();
     console.log('Firma guardada:', result);
 
-    showToast('✅ Firma guardada correctamente');
+    showToast(existingSignature ? '✅ Firma sustituida correctamente' : '✅ Firma guardada correctamente');
     
     // Reset and close
     resetSignatureState();
@@ -3683,6 +3727,142 @@ async function downloadSignature(url, name) {
   } catch (err) {
     console.error('Download error:', err);
     showToast('Error al descargar la firma');
+  }
+}
+
+function safeSignatureFileName(name) {
+  return String(name || 'SIN NOMBRE')
+    .normalize('NFC')
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
+    .replace(/[. ]+$/g, '')
+    .trim() || 'SIN NOMBRE';
+}
+
+function makeCrc32Table() {
+  const table = new Uint32Array(256);
+  for (let index = 0; index < 256; index++) {
+    let value = index;
+    for (let bit = 0; bit < 8; bit++) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    table[index] = value >>> 0;
+  }
+  return table;
+}
+
+const signatureZipCrcTable = makeCrc32Table();
+function signatureCrc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) crc = signatureZipCrcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function zipHeader(size) {
+  return new Uint8Array(size);
+}
+
+function setZip16(target, offset, value) { new DataView(target.buffer).setUint16(offset, value, true); }
+function setZip32(target, offset, value) { new DataView(target.buffer).setUint32(offset, value >>> 0, true); }
+
+function signatureDosDate(date = new Date()) {
+  return {
+    time: (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2),
+    date: ((Math.max(1980, date.getFullYear()) - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate()
+  };
+}
+
+function createStoredZip(files) {
+  const encoder = new TextEncoder();
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+  const dos = signatureDosDate();
+  files.forEach(file => {
+    const name = encoder.encode(file.name);
+    const data = file.bytes;
+    const crc = signatureCrc32(data);
+    const local = zipHeader(30);
+    setZip32(local, 0, 0x04034b50); setZip16(local, 4, 20); setZip16(local, 6, 0x0800);
+    setZip16(local, 8, 0); setZip16(local, 10, dos.time); setZip16(local, 12, dos.date);
+    setZip32(local, 14, crc); setZip32(local, 18, data.length); setZip32(local, 22, data.length);
+    setZip16(local, 26, name.length); setZip16(local, 28, 0);
+    localParts.push(local, name, data);
+
+    const central = zipHeader(46);
+    setZip32(central, 0, 0x02014b50); setZip16(central, 4, 20); setZip16(central, 6, 20);
+    setZip16(central, 8, 0x0800); setZip16(central, 10, 0); setZip16(central, 12, dos.time); setZip16(central, 14, dos.date);
+    setZip32(central, 16, crc); setZip32(central, 20, data.length); setZip32(central, 24, data.length);
+    setZip16(central, 28, name.length); setZip16(central, 30, 0); setZip16(central, 32, 0);
+    setZip16(central, 34, 0); setZip16(central, 36, 0); setZip32(central, 38, 0); setZip32(central, 42, offset);
+    centralParts.push(central, name);
+    offset += local.length + name.length + data.length;
+  });
+  const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+  const end = zipHeader(22);
+  setZip32(end, 0, 0x06054b50); setZip16(end, 4, 0); setZip16(end, 6, 0);
+  setZip16(end, 8, files.length); setZip16(end, 10, files.length);
+  setZip32(end, 12, centralSize); setZip32(end, 16, offset); setZip16(end, 20, 0);
+  return new Blob([...localParts, ...centralParts, end], { type: 'application/zip' });
+}
+
+async function signatureSourceBytes(source) {
+  if (!source) throw new Error('Firma sin imagen de respaldo');
+  const response = await fetch(source);
+  if (!response.ok && !source.startsWith('data:')) throw new Error(`No se pudo descargar (${response.status})`);
+  const blob = await response.blob();
+  return { bytes: new Uint8Array(await blob.arrayBuffer()), type: blob.type || '' };
+}
+
+function signatureFileExtension(source, mimeType) {
+  if (/svg/i.test(mimeType) || /^data:image\/svg/i.test(source)) return 'svg';
+  if (/jpe?g/i.test(mimeType) || /^data:image\/jpe?g/i.test(source)) return 'jpg';
+  if (/webp/i.test(mimeType) || /^data:image\/webp/i.test(source)) return 'webp';
+  return 'png';
+}
+
+async function downloadAllSignatures() {
+  const button = $('btnDownloadAllSignatures');
+  if (button) button.disabled = true;
+  showToast('Preparando copia de todas las firmas…');
+  try {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=name,image_url&order=name.asc&limit=10000`, {
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${session.access_token}` }
+    });
+    if (!response.ok) throw new Error('No se ha podido consultar la base de firmas');
+    const signatures = await response.json();
+    if (!signatures.length) throw new Error('No hay firmas para descargar');
+    const files = [];
+    const usedNames = new Map();
+    let failed = 0;
+    for (let index = 0; index < signatures.length; index++) {
+      const signature = signatures[index];
+      try {
+        const source = await signatureSourceBytes(signature.image_url);
+        const base = safeSignatureFileName(signature.name);
+        const count = (usedNames.get(base) || 0) + 1;
+        usedNames.set(base, count);
+        const uniqueName = count === 1 ? base : `${base} (${count})`;
+        files.push({ name: `${uniqueName}.${signatureFileExtension(signature.image_url, source.type)}`, bytes: source.bytes });
+      } catch (error) {
+        failed++;
+        console.warn(`No se pudo exportar ${signature.name}:`, error);
+      }
+      if (index % 10 === 0) showToast(`Preparando firmas: ${index + 1}/${signatures.length}`);
+    }
+    if (!files.length) throw new Error('No se pudo preparar ninguna firma');
+    const zip = createStoredZip(files);
+    const url = URL.createObjectURL(zip);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `firmas-agenda-staff-${new Date().toISOString().slice(0, 10)}.zip`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    showToast(`✅ ${files.length} firmas descargadas${failed ? ` · ${failed} con error` : ''}`);
+  } catch (error) {
+    console.error('Bulk signature download error:', error);
+    showToast(`Error: ${error.message}`);
+  } finally {
+    if (button) button.disabled = false;
   }
 }
 
@@ -3787,63 +3967,39 @@ async function handleBulkUpload(files) {
           </div>
         `;
         continue;
-      } else if (actionForDuplicates === 'replace') {
-        // Will replace - delete old first
-        try {
-          await fetch(`${SUPABASE_URL}/rest/v1/signatures?id=eq.${existing.id}`, {
-            method: 'DELETE',
-            headers: {
-              'apikey': SUPABASE_KEY,
-              'Authorization': `Bearer ${session.access_token}`
-            }
-          });
-        } catch (err) {
-          console.error('Error deleting old signature:', err);
-        }
       }
     }
 
     try {
-      // Convert to base64
-      const base64 = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-
-      // Process signature: remove white background and trim transparent borders
-      let processedImage = base64;
-      try {
-        processedImage = await processAndTrimSignature(base64);
-      } catch (err) {
-        console.warn('Bulk signature processing failed for', fileName, ':', err);
-      }
-      let svgData = '';
-      try { svgData = (await AgendaSignatureVector.pngToSvg(processedImage)).dataUrl; }
-      catch (error) { console.warn('Bulk vectorization failed for', fileName, ':', error); }
+      const { processedImage, svgData, vectorVersion, isSvg } = await prepareSignatureFile(file);
 
       // Generate unique ID
       const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
 
+      const payload = {
+        name: fileName.toUpperCase(),
+        svg_data: svgData || null,
+        vector_version: vectorVersion,
+        user_id: currentUser.id,
+        user_name: currentUser.name
+      };
+      // SVG replacements update the vector master but deliberately retain the
+      // old PNG in image_url as a compatibility fallback.
+      if (!existing || !isSvg) payload.image_url = processedImage;
+
       // Upload to Supabase
-      const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures`, {
-        method: 'POST',
+      const replacing = Boolean(existing && actionForDuplicates === 'replace');
+      const response = await fetch(replacing
+        ? `${SUPABASE_URL}/rest/v1/signatures?id=eq.${existing.id}`
+        : `${SUPABASE_URL}/rest/v1/signatures`, {
+        method: replacing ? 'PATCH' : 'POST',
         headers: {
           'apikey': SUPABASE_KEY,
           'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
           'Prefer': 'return=representation'
         },
-        body: JSON.stringify({
-          id,
-          name: fileName.toUpperCase(),
-          image_url: processedImage,
-          svg_data: svgData || null,
-          vector_version: svgData ? 1 : 0,
-          user_id: currentUser.id,
-          user_name: currentUser.name
-        })
+        body: JSON.stringify(replacing ? payload : { id, image_url: processedImage, ...payload })
       });
 
       if (!response.ok) {

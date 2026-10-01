@@ -1837,7 +1837,8 @@ body {
 }
 
 .btn-search-signature,
-.btn-view-all-signatures {
+.btn-view-all-signatures,
+.btn-preview-signatures {
   width: 38px;
   height: 38px;
   border: none;
@@ -1858,6 +1859,25 @@ body {
 }
 
 .btn-view-all-signatures:hover { background: #475569; }
+
+.btn-download-all-signatures {
+  display: flex;
+  width: 100%;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin: -4px 0 12px;
+  border: 1px solid #10b981;
+  border-radius: 8px;
+  background: #047857;
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn-download-all-signatures:hover { background: #059669; }
+.btn-download-all-signatures:disabled { opacity: .55; cursor: wait; }
 
 /* Results */
 .signatures-results {
