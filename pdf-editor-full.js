@@ -2370,7 +2370,7 @@ function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames
       <button class="signature-add-all-btn" id="btnAddAllSignatures" title="Añadir todas las firmas al PDF">✓ Añadir todas</button>
     </div>`;
     signatures.forEach(sig => {
-      html += `<div class="signature-item signature-found" data-id="${sig.id}" data-url="${sig.image_url}" data-vector="${escapeHtml(sig.svg_data || '')}" data-name="${escapeHtml(sig.name)}">
+      html += `<div class="signature-item signature-found" data-id="${sig.id}" data-url="${escapeHtml(sig.image_url || sig.svg_data || '')}" data-vector="${escapeHtml(sig.svg_data || '')}" data-name="${escapeHtml(sig.name)}">
         <span class="signature-name">${escapeHtml(sig.name)}</span>
         <div class="signature-actions">
           <button class="signature-delete-btn" data-id="${sig.id}" data-name="${escapeHtml(sig.name)}" title="Eliminar">🗑️</button>
@@ -2806,7 +2806,7 @@ function selectSignature(url, name, vectorUrl = '') {
       showStatus(`✓ Firma añadida: ${name}`, 'success');
       
       // #19 Add to recent signatures
-      addRecentSignature(name, url);
+      addRecentSignature(name, url, vectorUrl);
       
       const countEl = $('signatureCount');
       if (countEl) {
@@ -4490,7 +4490,7 @@ async function fillTemplatePeople(rawText) {
     if (signatureSlots[index]) {
       try {
         const signature = await findSignatureForPerson(person.name);
-        if (signature?.image_url) {
+        if (signature?.svg_data || signature?.image_url) {
           signatureSlots[index].el.src = signature.svg_data || signature.image_url;
           signatureSlots[index].el.vectorSrc = signature.svg_data || '';
           signatureSlots[index].el.pngFallback = signature.image_url;
@@ -4547,7 +4547,7 @@ async function findSignaturesForPeople(people) {
   const exact = new Map();
   const byTokens = new Map();
   signatures.forEach(signature => {
-    if (!signature?.name || !signature?.image_url) return;
+    if (!signature?.name || (!signature?.svg_data && !signature?.image_url)) return;
     exact.set(signatureMatchKey(signature.name), signature);
     const tokenKey = signatureTokenKey(signature.name);
     if (!byTokens.has(tokenKey)) byTokens.set(tokenKey, signature);
@@ -5086,13 +5086,13 @@ function getRecentSignatures() {
   }
 }
 
-function addRecentSignature(name, imageUrl) {
+function addRecentSignature(name, imageUrl, vectorUrl = '') {
   if (!name || !imageUrl) return;
   let recents = getRecentSignatures();
   // Remove duplicate by name
   recents = recents.filter(s => s.name !== name);
   // Add to front
-  recents.unshift({ name: name, imageUrl: imageUrl });
+  recents.unshift({ name: name, imageUrl: imageUrl, vectorUrl: vectorUrl || '' });
   // Keep only the five most recently used signatures.
   recents = recents.slice(0, MAX_RECENT_SIGNATURES);
   localStorage.setItem('pe_recentSignatures', JSON.stringify(recents));
@@ -5122,7 +5122,7 @@ function renderRecentSignatures() {
     
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      selectSignature(sig.imageUrl, sig.name);
+      selectSignature(sig.imageUrl, sig.name, sig.vectorUrl || '');
     });
     
     list.appendChild(btn);

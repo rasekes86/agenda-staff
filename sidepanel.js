@@ -2500,7 +2500,8 @@ async function addSignatureToPdf() {
   resetSignatureState();
   
   // Override the download function temporarily
-  window.selectSignatureForEditor = (url, name) => {
+  window.selectSignatureForEditor = (url, name, vectorUrl = '') => {
+    const preferredSource = vectorUrl || url;
     const img = new Image();
     img.onload = () => {
       let width = img.width;
@@ -2519,7 +2520,9 @@ async function addSignatureToPdf() {
       
       editorElements[editorCurrentPage].push({
         type: 'signature',
-        src: url,
+        src: preferredSource,
+        fallbackSrc: url,
+        vectorSrc: vectorUrl,
         x: 50,
         y: 50,
         width,
@@ -2531,7 +2534,7 @@ async function addSignatureToPdf() {
       renderEditorPage();
       showToast('Firma añadida');
     };
-    img.src = url;
+    img.src = preferredSource;
   };
 }
 
@@ -2601,10 +2604,18 @@ async function saveEditedPdf() {
         } else if (el.type === 'image' || el.type === 'signature') {
           // Embed image
           try {
-            const imageBytes = await fetch(el.src).then(r => r.arrayBuffer());
+            const vectorSource = el.vectorSrc || (/^data:image\/svg/i.test(el.src) ? el.src : '');
+            const embedSource = vectorSource
+              ? await AgendaSignatureVector.renderSvg(
+                  vectorSource,
+                  Math.max(800, Math.round(el.width * 8)),
+                  Math.max(240, Math.round(el.height * 8))
+                )
+              : el.src;
+            const imageBytes = await fetch(embedSource).then(r => r.arrayBuffer());
             let image;
             
-            if (el.src.includes('image/png')) {
+            if (embedSource.includes('image/png')) {
               image = await editorPdfDoc.embedPng(imageBytes);
             } else {
               image = await editorPdfDoc.embedJpg(imageBytes);
@@ -2967,6 +2978,10 @@ function signatureNamesMatch(searchedName, storedName) {
   return searchedTokens.length === storedTokens.length && searchedTokens.every(token => storedTokens.includes(token));
 }
 
+function signaturePreferredSource(signature) {
+  return signature?.svg_data || signature?.image_url || '';
+}
+
 async function searchSignatures() {
   const searchInput = $('signatureSearchInput').value.trim();
 
@@ -3039,7 +3054,7 @@ function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames
       // Display name in uppercase
       const displayName = sig.name.toUpperCase();
       html += `
-        <div class="signature-result-item signature-found" data-id="${sig.id}" data-url="${sig.image_url}" data-name="${esc(displayName)}" title="Clic para ${window.selectSignatureForEditor ? 'seleccionar' : 'descargar'}">
+        <div class="signature-result-item signature-found" data-id="${sig.id}" data-name="${esc(displayName)}" title="Clic para ${window.selectSignatureForEditor ? 'seleccionar' : 'descargar'}">
           <span class="signature-result-name">${esc(displayName)}</span>
           <div class="signature-actions">
             <button class="signature-delete-btn" data-id="${sig.id}" data-name="${esc(displayName)}" title="Eliminar firma">🗑️</button>
@@ -3086,10 +3101,12 @@ function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames
       
       if (window.selectSignatureForEditor) {
         // Called from PDF editor
-        window.selectSignatureForEditor(item.dataset.url, item.dataset.name);
+        const signature = signatures.find(candidate => String(candidate.id) === item.dataset.id);
+        window.selectSignatureForEditor(signature?.image_url || signaturePreferredSource(signature), item.dataset.name, signature?.svg_data || '');
       } else {
         // Normal download
-        downloadSignature(item.dataset.url, item.dataset.name);
+        const signature = signatures.find(candidate => String(candidate.id) === item.dataset.id);
+        downloadSignature(signaturePreferredSource(signature), item.dataset.name);
       }
     });
   });
@@ -3122,7 +3139,7 @@ function showSignaturePreview(url, name, id) {
   overlay.className = 'sig-preview-overlay';
   overlay.innerHTML = `
     <div class="sig-preview-card">
-      <img src="${url}" alt="${esc(name)}"image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%2240%22><text y=%2225%22 font-size=%2214%22 fill=%22%23999%22>Error</text></svg>'">
+      <img src="${url}" alt="${esc(name)}">
       <div class="sig-preview-name">${esc(name)}</div>
       <div class="sig-preview-actions">
         ${window.selectSignatureForEditor ? `
@@ -3293,7 +3310,7 @@ function renderSignatureResults(signatures, isAlphabetical = false) {
     
     // Simple item: just name, clickable to download or select for editor
     html += `
-      <div class="signature-result-item" data-id="${sig.id}" data-url="${sig.image_url}" data-name="${esc(displayName)}" title="Clic para ${window.selectSignatureForEditor ? 'seleccionar' : 'descargar'}">
+      <div class="signature-result-item" data-id="${sig.id}" data-name="${esc(displayName)}" title="Clic para ${window.selectSignatureForEditor ? 'seleccionar' : 'descargar'}">
         <span class="signature-result-name">${esc(displayName)}</span>
         <svg class="signature-download-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -3312,10 +3329,12 @@ function renderSignatureResults(signatures, isAlphabetical = false) {
     item.addEventListener('click', () => {
       if (window.selectSignatureForEditor) {
         // Called from PDF editor
-        window.selectSignatureForEditor(item.dataset.url, item.dataset.name);
+        const signature = signatures.find(candidate => String(candidate.id) === item.dataset.id);
+        window.selectSignatureForEditor(signature?.image_url || signaturePreferredSource(signature), item.dataset.name, signature?.svg_data || '');
       } else {
         // Normal download
-        downloadSignature(item.dataset.url, item.dataset.name);
+        const signature = signatures.find(candidate => String(candidate.id) === item.dataset.id);
+        downloadSignature(signaturePreferredSource(signature), item.dataset.name);
       }
     });
   });
@@ -3435,7 +3454,7 @@ async function previewAllSignatures() {
       html += `
         <div class="signature-preview-card" data-id="${sig.id}" data-name="${esc(displayName)}">
           <div class="signature-preview-image-container">
-            <img src="${sig.image_url}" alt="${esc(displayName)}" class="signature-preview-image"image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 50%22><text x=%2250%%22 y=%2250%%22 text-anchor=%22middle%22 fill=%22%23999%22>Sin imagen</text></svg>'">
+            <img src="${esc(signaturePreferredSource(sig))}" alt="${esc(displayName)}" class="signature-preview-image">
           </div>
           <div class="signature-preview-name">${esc(displayName)}</div>
           <button class="signature-preview-delete" data-id="${sig.id}" data-name="${esc(displayName)}" title="Eliminar firma">🗑️</button>
@@ -3717,7 +3736,8 @@ async function downloadSignature(url, name) {
     const downloadUrl = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = downloadUrl;
-    a.download = `firma-${name.replace(/\s+/g, '-')}.png`;
+    const isSvg = /image\/svg/i.test(blob.type) || /^data:image\/svg/i.test(url);
+    a.download = `firma-${name.replace(/\s+/g, '-')}.${isSvg ? 'svg' : 'png'}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -3823,7 +3843,7 @@ async function downloadAllSignatures() {
   if (button) button.disabled = true;
   showToast('Preparando copia de todas las firmas…');
   try {
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=name,image_url&order=name.asc&limit=10000`, {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=name,image_url,svg_data&order=name.asc&limit=10000`, {
       headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${session.access_token}` }
     });
     if (!response.ok) throw new Error('No se ha podido consultar la base de firmas');
@@ -3835,12 +3855,13 @@ async function downloadAllSignatures() {
     for (let index = 0; index < signatures.length; index++) {
       const signature = signatures[index];
       try {
-        const source = await signatureSourceBytes(signature.image_url);
+        const preferredSource = signaturePreferredSource(signature);
+        const source = await signatureSourceBytes(preferredSource);
         const base = safeSignatureFileName(signature.name);
         const count = (usedNames.get(base) || 0) + 1;
         usedNames.set(base, count);
         const uniqueName = count === 1 ? base : `${base} (${count})`;
-        files.push({ name: `${uniqueName}.${signatureFileExtension(signature.image_url, source.type)}`, bytes: source.bytes });
+        files.push({ name: `${uniqueName}.${signatureFileExtension(preferredSource, source.type)}`, bytes: source.bytes });
       } catch (error) {
         failed++;
         console.warn(`No se pudo exportar ${signature.name}:`, error);
