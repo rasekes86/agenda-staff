@@ -2992,6 +2992,22 @@ function signatureRequestHeaders() {
   return headers;
 }
 
+async function fetchSignatureRead(url) {
+  let response = await fetch(url, { headers: signatureRequestHeaders() });
+  if (response.status !== 401) return response;
+
+  if (session?.refresh_token && await refreshSession(session.refresh_token)) {
+    const stored = await chrome.storage.local.get(['session']);
+    session = stored.session || session;
+    response = await fetch(url, { headers: signatureRequestHeaders() });
+    if (response.status !== 401) return response;
+  }
+
+  // Signature reads are publicly permitted by the existing RLS policy. An
+  // expired user JWT must not make an otherwise valid read request fail.
+  return fetch(url, { headers: { apikey: SUPABASE_KEY } });
+}
+
 function invalidateSignatureIndex() {
   signatureIndexCache = null;
   signatureIndexCachedAt = 0;
@@ -3002,9 +3018,7 @@ async function getSignatureIndex() {
   if (signatureIndexCache && Date.now() - signatureIndexCachedAt < SIGNATURE_INDEX_TTL) {
     return signatureIndexCache;
   }
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=id,name&order=name.asc&limit=5000`, {
-    headers: signatureRequestHeaders()
-  });
+  const response = await fetchSignatureRead(`${SUPABASE_URL}/rest/v1/signatures?select=id,name&order=name.asc&limit=5000`);
   if (!response.ok) throw new Error(`No se ha podido consultar la base de firmas (${response.status})`);
   signatureIndexCache = await response.json();
   signatureIndexCachedAt = Date.now();
@@ -3017,9 +3031,7 @@ async function getSignatureAssets(ids) {
   const results = [];
   for (let offset = 0; offset < uniqueIds.length; offset += 50) {
     const batch = uniqueIds.slice(offset, offset + 50).join(',');
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=id,name,image_url,svg_data&id=in.(${encodeURIComponent(batch)})`, {
-      headers: signatureRequestHeaders()
-    });
+    const response = await fetchSignatureRead(`${SUPABASE_URL}/rest/v1/signatures?select=id,name,image_url,svg_data&id=in.(${encodeURIComponent(batch)})`);
     if (!response.ok) throw new Error(`No se han podido cargar las firmas encontradas (${response.status})`);
     results.push(...await response.json());
   }
@@ -3037,9 +3049,7 @@ async function getSignatureCandidates(searchTerms) {
     const cached = signatureCandidateCache.get(cacheKey);
     if (cached && Date.now() - cached.at < SIGNATURE_INDEX_TTL) return cached.rows;
     const query = encodeURIComponent(`*${token}*`);
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=id,name&name=ilike.${query}&order=name.asc&limit=500`, {
-      headers: signatureRequestHeaders()
-    });
+    const response = await fetchSignatureRead(`${SUPABASE_URL}/rest/v1/signatures?select=id,name&name=ilike.${query}&order=name.asc&limit=500`);
     if (!response.ok) throw new Error(`No se ha podido consultar la base de firmas (${response.status})`);
     const rows = await response.json();
     signatureCandidateCache.set(cacheKey, { at: Date.now(), rows });

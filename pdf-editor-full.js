@@ -2320,11 +2320,32 @@ async function getEditorSignatureIndex(headers) {
   if (editorSignatureIndexCache && Date.now() - editorSignatureIndexCachedAt < EDITOR_SIGNATURE_INDEX_TTL) {
     return editorSignatureIndexCache;
   }
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=id,name&order=name.asc&limit=5000`, { headers });
+  const response = await fetchEditorSignatureRead(`${SUPABASE_URL}/rest/v1/signatures?select=id,name&order=name.asc&limit=5000`, headers);
   if (!response.ok) throw new Error(`No se ha podido consultar la base de firmas (${response.status})`);
   editorSignatureIndexCache = await response.json();
   editorSignatureIndexCachedAt = Date.now();
   return editorSignatureIndexCache;
+}
+
+async function fetchEditorSignatureRead(url, headers) {
+  let response = await fetch(url, { headers });
+  if (response.status !== 401) return response;
+
+  try {
+    if (window.AndroidBridge && window.ensureAndroidSession) await window.ensureAndroidSession(true);
+    const stored = await chrome.storage.local.get(['session']);
+    if (stored.session?.access_token) {
+      session = stored.session;
+      const refreshedHeaders = { ...headers, Authorization: `Bearer ${session.access_token}` };
+      response = await fetch(url, { headers: refreshedHeaders });
+      if (response.status !== 401) return response;
+    }
+  } catch (error) {
+    console.warn('No se pudo renovar la sesión antes de reintentar la firma:', error);
+  }
+
+  const publicHeaders = { apikey: SUPABASE_KEY };
+  return fetch(url, { headers: publicHeaders });
 }
 
 async function getEditorSignatureAssets(ids, headers) {
@@ -2333,7 +2354,7 @@ async function getEditorSignatureAssets(ids, headers) {
   const results = [];
   for (let offset = 0; offset < uniqueIds.length; offset += 50) {
     const batch = uniqueIds.slice(offset, offset + 50).join(',');
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=id,name,image_url,svg_data&id=in.(${encodeURIComponent(batch)})`, { headers });
+    const response = await fetchEditorSignatureRead(`${SUPABASE_URL}/rest/v1/signatures?select=id,name,image_url,svg_data&id=in.(${encodeURIComponent(batch)})`, headers);
     if (!response.ok) throw new Error(`No se han podido cargar las firmas encontradas (${response.status})`);
     results.push(...await response.json());
   }
@@ -2351,7 +2372,7 @@ async function getEditorSignatureCandidates(searchTerms, headers) {
     const cached = editorSignatureCandidateCache.get(cacheKey);
     if (cached && Date.now() - cached.at < EDITOR_SIGNATURE_INDEX_TTL) return cached.rows;
     const query = encodeURIComponent(`*${token}*`);
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=id,name&name=ilike.${query}&order=name.asc&limit=500`, { headers });
+    const response = await fetchEditorSignatureRead(`${SUPABASE_URL}/rest/v1/signatures?select=id,name&name=ilike.${query}&order=name.asc&limit=500`, headers);
     if (!response.ok) throw new Error(`No se ha podido consultar la base de firmas (${response.status})`);
     const rows = await response.json();
     editorSignatureCandidateCache.set(cacheKey, { at: Date.now(), rows });
