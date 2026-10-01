@@ -56,10 +56,28 @@
     return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
   }
 
+  function editableElement(value) {
+    if (!value) return null;
+    return value.nodeType === Node.ELEMENT_NODE ? value : value.parentElement;
+  }
+
+  function isEditableContext(value) {
+    const element = editableElement(value);
+    return Boolean(element?.closest(
+      '[contenteditable="true"], [contenteditable="plaintext-only"], [role="textbox"], textarea, input, .Am.Al.editable'
+    ));
+  }
+
+  function isComposingEmail() {
+    return [...document.querySelectorAll(
+      '[contenteditable="true"][role="textbox"], [contenteditable="true"].Am, .Am.Al.editable, textarea[aria-label*="Mensaje" i], textarea[aria-label*="Message" i]'
+    )].some(isVisible);
+  }
+
   function extractPersonnel() {
-    const messageBodies = [...document.querySelectorAll('.a3s.aiL, [role="main"] .a3s, [role="main"] .ii.gt')].filter(isVisible);
-    const mainArea = document.querySelector('[role="main"]');
-    const bodies = [...new Set([...messageBodies, ...(isVisible(mainArea) ? [mainArea] : [])])];
+    const messageBodies = [...document.querySelectorAll('.a3s.aiL, [role="main"] .a3s, [role="main"] .ii.gt')]
+      .filter(body => isVisible(body) && !isEditableContext(body));
+    const bodies = [...new Set(messageBodies)];
     const people = [];
     const seen = new Set();
     const dniPattern = /\b(?:[XYZ]\s?\d{7}\s?[A-Z]|\d{8}\s?[A-Z])\b/i;
@@ -391,7 +409,7 @@
   function findExactNameTextNode(body, name) {
     const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
-        if (!node.nodeValue?.trim() || node.parentElement?.closest('.agenda-signature-inline')) return NodeFilter.FILTER_REJECT;
+        if (!node.nodeValue?.trim() || node.parentElement?.closest('.agenda-signature-inline') || isEditableContext(node)) return NodeFilter.FILTER_REJECT;
         return node.nodeValue.toLocaleUpperCase().includes(name.toLocaleUpperCase()) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
       }
     });
@@ -399,6 +417,7 @@
   }
 
   function injectIndicator(person) {
+    if (isEditableContext(person.anchorElement) || isEditableContext(person.body)) return;
     if (person.anchorElement?.isConnected) {
       person.anchorElement.classList.add('agenda-signature-name-state', person.saved ? 'saved' : 'missing');
       person.anchorElement.append(createBadge(person, true));
@@ -440,13 +459,16 @@
     observer?.disconnect();
     document.getElementById('agenda-signature-overlay')?.remove();
     clearInlineIndicators();
-    extractPersonnel().forEach(injectIndicator);
+    if (!isComposingEmail()) extractPersonnel().forEach(injectIndicator);
     if (observer) observer.observe(document.body, observerConfig);
   }
 
   function observeGmail() {
     if (observer) return;
-    observer = new MutationObserver(() => {
+    observer = new MutationObserver(records => {
+      // Keystrokes and Gmail's internal mutations inside a draft must never
+      // trigger scanning or DOM rewriting in the compose editor.
+      if (records.length && records.every(record => isEditableContext(record.target))) return;
       clearTimeout(scanTimer);
       scanTimer = setTimeout(() => {
         if (signatureDataLoaded) scanAndRender();

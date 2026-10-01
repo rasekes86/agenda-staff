@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "AGENDA STAFF",
-  "version": "4.2.4",
-  "version_name": "4.2.4",
+  "version": "4.2.5",
+  "version_name": "4.2.5",
   "description": "Agenda colaborativa con autenticación, notificaciones, herramientas PDF, firmas",
   "permissions": [
     "sidePanel",
