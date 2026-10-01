@@ -1879,6 +1879,25 @@ body {
 .btn-download-all-signatures:hover { background: #059669; }
 .btn-download-all-signatures:disabled { opacity: .55; cursor: wait; }
 
+.btn-clear-all-signature-vectors {
+  display: flex;
+  width: 100%;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin: -5px 0 12px;
+  border: 1px solid #ef4444;
+  border-radius: 8px;
+  background: #991b1b;
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn-clear-all-signature-vectors:hover { background: #b91c1c; }
+.btn-clear-all-signature-vectors:disabled { opacity: .55; cursor: wait; }
+
 /* Results */
 .signatures-results {
   max-height: 300px;

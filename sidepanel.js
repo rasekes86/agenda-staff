@@ -2501,7 +2501,7 @@ async function addSignatureToPdf() {
   
   // Override the download function temporarily
   window.selectSignatureForEditor = (url, name, vectorUrl = '') => {
-    const preferredSource = vectorUrl || url;
+    const preferredSource = url || vectorUrl;
     const img = new Image();
     img.onload = () => {
       let width = img.width;
@@ -2522,7 +2522,7 @@ async function addSignatureToPdf() {
         type: 'signature',
         src: preferredSource,
         fallbackSrc: url,
-        vectorSrc: vectorUrl,
+        vectorSrc: '',
         x: 50,
         y: 50,
         width,
@@ -2604,14 +2604,7 @@ async function saveEditedPdf() {
         } else if (el.type === 'image' || el.type === 'signature') {
           // Embed image
           try {
-            const vectorSource = el.vectorSrc || (/^data:image\/svg/i.test(el.src) ? el.src : '');
-            const embedSource = vectorSource
-              ? await AgendaSignatureVector.renderSvg(
-                  vectorSource,
-                  Math.max(800, Math.round(el.width * 8)),
-                  Math.max(240, Math.round(el.height * 8))
-                )
-              : el.src;
+            const embedSource = el.type === 'signature' ? (el.fallbackSrc || el.src) : el.src;
             const imageBytes = await fetch(embedSource).then(r => r.arrayBuffer());
             let image;
             
@@ -2830,6 +2823,9 @@ function setupSignatureListeners() {
   // Export every original signature in one ZIP, preserving its database name.
   on('btnDownloadAllSignatures', 'click', downloadAllSignatures);
 
+  // Temporarily remove vector masters while retaining every PNG fallback.
+  on('btnClearAllSignatureVectors', 'click', clearAllSignatureVectors);
+
   // Dropzone click
   on('signatureDropzone', 'click', () => {
     const fi = $('signatureFileInput');
@@ -2979,7 +2975,7 @@ function signatureNamesMatch(searchedName, storedName) {
 }
 
 function signaturePreferredSource(signature) {
-  return signature?.svg_data || signature?.image_url || '';
+  return signature?.image_url || signature?.svg_data || '';
 }
 
 let signatureIndexCache = null;
@@ -3317,10 +3313,6 @@ async function quickUploadMissingSignature(name) {
       } catch (err) {
         console.warn('Signature processing failed, using original:', err);
       }
-      let svgData = '';
-      try { svgData = (await AgendaSignatureVector.pngToSvg(processedImage)).dataUrl; }
-      catch (error) { console.warn('Vectorization failed, keeping PNG fallback:', error); }
-      
       // Upload to Supabase
       const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
       const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures`, {
@@ -3335,8 +3327,8 @@ async function quickUploadMissingSignature(name) {
           id,
           name: name.toUpperCase(),
           image_url: processedImage,
-          svg_data: svgData || null,
-          vector_version: svgData ? 1 : 0,
+          svg_data: null,
+          vector_version: 0,
           user_id: currentUser.id,
           user_name: currentUser.name
         })
@@ -3691,19 +3683,16 @@ async function prepareSignatureFile(file) {
     const fallbackHeight = Math.max(32, Math.round(dimensions.height * scale));
     return {
       processedImage: await AgendaSignatureVector.renderSvg(vector.svg, fallbackWidth, fallbackHeight),
-      svgData: vector.dataUrl,
-      vectorVersion: 2,
-      isSvg: true
+      svgData: '',
+      vectorVersion: 0,
+      isSvg: false
     };
   }
   const base64 = await readFileAsDataUrl(file);
   let processedImage = base64;
   try { processedImage = await processAndTrimSignature(base64); }
   catch (error) { console.warn('Signature processing failed, using original:', error); }
-  let svgData = '';
-  try { svgData = (await AgendaSignatureVector.pngToSvg(processedImage)).dataUrl; }
-  catch (error) { console.warn('Vectorization failed, keeping PNG fallback:', error); }
-  return { processedImage, svgData, vectorVersion: svgData ? 1 : 0, isSvg: false };
+  return { processedImage, svgData: '', vectorVersion: 0, isSvg: false };
 }
 
 function clearSignaturePreview() {
@@ -3748,7 +3737,7 @@ async function uploadSignature() {
       user_id: currentUser.id,
       user_name: currentUser.name
     };
-    // When replacing an old PNG with an SVG, retain its PNG as fallback.
+    // PNG-only mode: every replacement updates the raster master and clears SVG.
     if (!existingSignature || !isSvg) payload.image_url = processedImage;
     const insertRes = await fetch(existingSignature
       ? `${SUPABASE_URL}/rest/v1/signatures?id=eq.${existingSignature.id}`
@@ -3959,6 +3948,61 @@ async function downloadAllSignatures() {
   }
 }
 
+async function clearAllSignatureVectors() {
+  const button = $('btnClearAllSignatureVectors');
+  try {
+    const countResponse = await fetchSignatureRead(`${SUPABASE_URL}/rest/v1/signatures?select=id,image_url&svg_data=not.is.null&limit=10000`);
+    if (!countResponse.ok) throw new Error(`No se pudieron consultar los SVG (${countResponse.status})`);
+    const rows = await countResponse.json();
+    if (!rows.length) {
+      showToast('No hay firmas SVG pendientes de eliminar');
+      return;
+    }
+
+    const safeRows = rows.filter(row => Boolean(row.image_url));
+    const protectedRows = rows.length - safeRows.length;
+    if (!safeRows.length) {
+      showToast(`No se puede eliminar: ${protectedRows} firmas no tienen PNG de respaldo`);
+      return;
+    }
+
+    const accepted = confirm(
+      `Se eliminará el SVG de ${safeRows.length} firmas que tienen PNG de respaldo.` +
+      (protectedRows ? `\n\n${protectedRows} firmas solo tienen SVG y se conservarán para evitar perderlas.` : '') +
+      '\n\nLos nombres y las imágenes PNG se conservarán. Esta acción no se puede deshacer desde la extensión.\n\n¿Continuar?'
+    );
+    if (!accepted) return;
+
+    if (button) button.disabled = true;
+    showToast(`Eliminando ${safeRows.length} SVG…`);
+
+    const request = () => fetch(`${SUPABASE_URL}/rest/v1/signatures?svg_data=not.is.null&image_url=not.is.null`, {
+      method: 'PATCH',
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${session?.access_token || ''}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal'
+      },
+      body: JSON.stringify({ svg_data: null, vector_version: 0 })
+    });
+
+    let response = await request();
+    if (response.status === 401 && session?.refresh_token && await refreshSession(session.refresh_token)) {
+      response = await request();
+    }
+    if (!response.ok) throw new Error(`No se pudieron eliminar los SVG (${response.status}): ${await response.text()}`);
+
+    invalidateSignatureIndex();
+    showToast(`✅ ${safeRows.length} SVG eliminados; los PNG se han conservado${protectedRows ? ` · ${protectedRows} sin PNG omitidos` : ''}`);
+  } catch (error) {
+    console.error('Clear signature SVG error:', error);
+    showToast(`Error: ${error.message}`);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 // Delete signature
 async function deleteSignature(id) {
   try {
@@ -4076,8 +4120,7 @@ async function handleBulkUpload(files) {
         user_id: currentUser.id,
         user_name: currentUser.name
       };
-      // SVG replacements update the vector master but deliberately retain the
-      // old PNG in image_url as a compatibility fallback.
+      // PNG-only mode: every replacement updates the raster master and clears SVG.
       if (!existing || !isSvg) payload.image_url = processedImage;
 
       // Upload to Supabase
