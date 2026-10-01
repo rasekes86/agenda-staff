@@ -87,9 +87,26 @@
       sheetHeader.className = 'mobile-sheet-header';
       sheetHeader.innerHTML = '<div><strong>¿Qué quieres hacer?</strong><small>Editor PDF</small></div><button type="button" aria-label="Cerrar herramientas">×</button>';
 
+      const actionsHost = document.createElement('div');
+      actionsHost.className = 'mobile-actions-host';
+
+      const templateActions = document.createElement('div');
+      templateActions.className = 'mobile-template-actions';
+      const templateItems = [
+        ['📐', 'Plantillas', 'Crear, usar o editar', 'btnOpenTemplates'],
+        ['📋', 'Rellenar plantilla', 'Completar documento', 'btnFillTemplate']
+      ];
+      templateItems.forEach(([icon, label, hint, targetId]) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.mobileTarget = targetId;
+        button.innerHTML = `<span>${icon}</span><span><b>${label}</b><small>${hint}</small></span>`;
+        templateActions.appendChild(button);
+      });
+
       const quickActions = document.createElement('div');
-      quickActions.className = 'mobile-action-grid';
-      const actions = [
+      quickActions.className = 'mobile-action-grid mobile-editor-actions';
+      const editorActions = [
         ['📂', 'Abrir PDF', 'btnUpload'],
         ['📝', 'Texto', 'btnAddText'],
         ['🖼️', 'Imagen', 'btnAddImage'],
@@ -101,26 +118,46 @@
         ['🏷️', 'Categoría', 'btnAddCategory'],
         ['✏️', 'Dibujar', 'btnDraw'],
         ['✅', 'Check', 'btnStampCheck'],
-        ['❌', 'X', 'btnStampX'],
-        ['📐', 'Plantillas', 'btnOpenTemplates'],
-        ['📋', 'Rellenar', 'btnFillTemplate'],
+        ['❌', 'X', 'btnStampX']
+      ];
+      editorActions.forEach(([icon, label, targetId]) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.mobileTarget = targetId;
+        button.innerHTML = `<span>${icon}</span><b>${label}</b>`;
+        quickActions.appendChild(button);
+      });
+
+      const utilities = document.createElement('details');
+      utilities.className = 'mobile-utilities';
+      utilities.innerHTML = '<summary>⚙️ Más utilidades <small>Convertir, unir y ordenar</small></summary>';
+      const utilityGrid = document.createElement('div');
+      utilityGrid.className = 'mobile-action-grid';
+      const utilityActions = [
         ['🖼️', 'Imágenes → PDF', 'tool:imgToPdf'],
         ['W', 'Word → PDF', 'tool:wordToPdf'],
         ['🔗', 'Juntar PDFs', 'tool:merge'],
         ['✂️', 'Separar PDF', 'tool:split'],
         ['🔢', 'Ordenar páginas', 'tool:pages'],
-        ['⬜', 'Fondo blanco', 'tool:whiteBackground'],
-        ['💾', 'Guardar PDF', 'btnSave']
+        ['⬜', 'Fondo blanco', 'tool:whiteBackground']
       ];
-      actions.forEach(([icon, label, targetId]) => {
+      utilityActions.forEach(([icon, label, targetId]) => {
         const button = document.createElement('button');
         button.type = 'button';
         button.dataset.mobileTarget = targetId;
         button.innerHTML = `<span>${icon}</span><b>${label}</b>`;
-        if (targetId === 'btnSave') button.classList.add('mobile-save-action');
-        quickActions.appendChild(button);
+        utilityGrid.appendChild(button);
       });
-      sidebar.prepend(quickActions);
+      utilities.appendChild(utilityGrid);
+
+      const saveButton = document.createElement('button');
+      saveButton.type = 'button';
+      saveButton.className = 'mobile-save-action';
+      saveButton.dataset.mobileTarget = 'btnSave';
+      saveButton.innerHTML = '<span>💾</span><b>Guardar PDF</b>';
+      actionsHost.append(templateActions, quickActions, utilities, saveButton);
+
+      sidebar.prepend(actionsHost);
       sidebar.prepend(sheetHeader);
 
       const toggle = document.createElement('button');
@@ -146,7 +183,7 @@
       toggle.addEventListener('click', openTools);
       backdrop.addEventListener('click', () => setOpen(false));
       sheetHeader.querySelector('button').addEventListener('click', () => setOpen(false));
-      quickActions.addEventListener('click', event => {
+      actionsHost.addEventListener('click', event => {
         const action = event.target.closest('[data-mobile-target]');
         if (!action) return;
         const actionTarget = action.dataset.mobileTarget;
