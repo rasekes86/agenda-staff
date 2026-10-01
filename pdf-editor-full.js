@@ -2306,6 +2306,60 @@ function showSignatureModal() {
 
 // removeDniNie and normalizeText moved to shared-utils.js
 
+let editorSignatureIndexCache = null;
+let editorSignatureIndexCachedAt = 0;
+const EDITOR_SIGNATURE_INDEX_TTL = 60 * 1000;
+
+function invalidateEditorSignatureIndex() {
+  editorSignatureIndexCache = null;
+  editorSignatureIndexCachedAt = 0;
+  editorSignatureCandidateCache.clear();
+}
+
+async function getEditorSignatureIndex(headers) {
+  if (editorSignatureIndexCache && Date.now() - editorSignatureIndexCachedAt < EDITOR_SIGNATURE_INDEX_TTL) {
+    return editorSignatureIndexCache;
+  }
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=id,name&order=name.asc&limit=5000`, { headers });
+  if (!response.ok) throw new Error(`No se ha podido consultar la base de firmas (${response.status})`);
+  editorSignatureIndexCache = await response.json();
+  editorSignatureIndexCachedAt = Date.now();
+  return editorSignatureIndexCache;
+}
+
+async function getEditorSignatureAssets(ids, headers) {
+  const uniqueIds = [...new Set(ids.filter(Boolean).map(String))];
+  if (!uniqueIds.length) return [];
+  const results = [];
+  for (let offset = 0; offset < uniqueIds.length; offset += 50) {
+    const batch = uniqueIds.slice(offset, offset + 50).join(',');
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=id,name,image_url,svg_data&id=in.(${encodeURIComponent(batch)})`, { headers });
+    if (!response.ok) throw new Error(`No se han podido cargar las firmas encontradas (${response.status})`);
+    results.push(...await response.json());
+  }
+  return results;
+}
+
+const editorSignatureCandidateCache = new Map();
+
+async function getEditorSignatureCandidates(searchTerms, headers) {
+  const groups = await Promise.all(searchTerms.map(async term => {
+    const tokens = String(term || '').split(/[^\p{L}\p{N}]+/u).filter(Boolean).sort((a, b) => b.length - a.length);
+    const token = tokens[0];
+    if (!token) return [];
+    const cacheKey = token.toLocaleUpperCase('es-ES');
+    const cached = editorSignatureCandidateCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < EDITOR_SIGNATURE_INDEX_TTL) return cached.rows;
+    const query = encodeURIComponent(`*${token}*`);
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=id,name&name=ilike.${query}&order=name.asc&limit=500`, { headers });
+    if (!response.ok) throw new Error(`No se ha podido consultar la base de firmas (${response.status})`);
+    const rows = await response.json();
+    editorSignatureCandidateCache.set(cacheKey, { at: Date.now(), rows });
+    return rows;
+  }));
+  return groups.flat();
+}
+
 async function searchSignatures() {
   const signatureSearchInput = $('signatureSearchInput');
   const signatureResults = $('signatureResults');
@@ -2324,7 +2378,7 @@ async function searchSignatures() {
   if (signatureResults) signatureResults.innerHTML = '<div class="signature-loading">Buscando...</div>';
   
   try {
-    let allSignatures = [];
+    let matchedSignatures = [];
     const foundNames = [];
     
     const headers = { 'apikey': SUPABASE_KEY };
@@ -2332,18 +2386,17 @@ async function searchSignatures() {
       headers['Authorization'] = `Bearer ${session.access_token}`;
     }
     
-    // Fetch once and compare normalized token sets locally. Supabase `ilike`
-    // only matches the literal word order, so it misses "NOMBRE APELLIDOS"
-    // when the stored signature is "APELLIDOS NOMBRE".
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=*&order=name.asc&limit=5000`, { headers });
-    if (!res.ok) throw new Error('No se ha podido consultar la base de firmas');
-    const storedSignatures = await res.json();
+    // Ask Supabase only for likely name matches first. SVG/PNG payloads can be
+    // very large, so assets are requested only for the matching rows.
+    const storedSignatures = await getEditorSignatureCandidates(searchTerms, headers);
     searchTerms.forEach(term => {
       storedSignatures.filter(sig => signatureNameMatches(term, sig.name)).forEach(sig => {
-        if (!allSignatures.some(item => item.id === sig.id)) allSignatures.push(sig);
+        if (!matchedSignatures.some(item => item.id === sig.id)) matchedSignatures.push(sig);
         foundNames.push(sig.name);
       });
     });
+
+    const allSignatures = await getEditorSignatureAssets(matchedSignatures.map(signature => signature.id), headers);
     
     allSignatures.sort((a, b) => a.name.localeCompare(b.name));
     renderSignatureResultsWithMissing(allSignatures, searchTerms, foundNames);
@@ -2370,7 +2423,7 @@ function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames
       <button class="signature-add-all-btn" id="btnAddAllSignatures" title="Añadir todas las firmas al PDF">✓ Añadir todas</button>
     </div>`;
     signatures.forEach(sig => {
-      html += `<div class="signature-item signature-found" data-id="${sig.id}" data-url="${escapeHtml(sig.image_url || sig.svg_data || '')}" data-vector="${escapeHtml(sig.svg_data || '')}" data-name="${escapeHtml(sig.name)}">
+      html += `<div class="signature-item signature-found" data-id="${sig.id}" data-name="${escapeHtml(sig.name)}">
         <span class="signature-name">${escapeHtml(sig.name)}</span>
         <div class="signature-actions">
           <button class="signature-delete-btn" data-id="${sig.id}" data-name="${escapeHtml(sig.name)}" title="Eliminar">🗑️</button>
@@ -2399,14 +2452,13 @@ function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames
   document.querySelectorAll('.signature-item.signature-found').forEach(item => {
     item.addEventListener('click', async (e) => {
       if (e.target.classList.contains('signature-delete-btn')) return;
-      let vectorUrl = item.dataset.vector || '';
+      const signature = signatures.find(candidate => String(candidate.id) === item.dataset.id);
+      let vectorUrl = signature?.svg_data || '';
       if (!vectorUrl) {
-        const signature = signatures.find(candidate => String(candidate.id) === item.dataset.id);
         const migrated = await ensureSignatureVector(signature);
         vectorUrl = migrated?.svg_data || '';
-        if (vectorUrl) item.dataset.vector = vectorUrl;
       }
-      selectSignature(item.dataset.url, item.dataset.name, vectorUrl);
+      selectSignature(signature?.image_url || vectorUrl, item.dataset.name, vectorUrl);
     });
   });
   
@@ -2447,7 +2499,7 @@ function renderSignatureResultsWithMissing(signatures, searchedTerms, foundNames
       e.stopPropagation();
       for (const sig of signatures) {
         const migrated = await ensureSignatureVector(sig);
-        selectSignature(migrated.image_url, migrated.name, migrated.svg_data || '');
+        selectSignature(migrated.image_url || migrated.svg_data, migrated.name, migrated.svg_data || '');
         await new Promise(resolve => setTimeout(resolve, 100));
       }
     });
@@ -2483,6 +2535,7 @@ async function deleteSignature(id, name) {
     }
     
     showStatus('✓ Firma eliminada: ' + name, 'success');
+    invalidateEditorSignatureIndex();
     searchSignatures();
   } catch (err) {
     console.error('Delete signature error:', err);
@@ -2581,6 +2634,7 @@ async function saveMissingSignature(name, processedBase64, suppliedSvg = '') {
 
   showStatus('✓ Firma guardada: ' + name, 'success');
   selectSignature(storageImage, name, vectorImage);
+  invalidateEditorSignatureIndex();
   searchSignatures();
 }
 
@@ -4541,9 +4595,14 @@ function signatureNameMatches(searchedName, storedName) {
 async function findSignaturesForPeople(people) {
   const headers = { apikey: SUPABASE_KEY };
   if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=*&order=name.asc&limit=5000`, { headers });
-  if (!response.ok) throw new Error('No se ha podido consultar la base de firmas');
-  const signatures = await response.json();
+  const signatureIndex = await getEditorSignatureIndex(headers);
+  const matchingIds = [];
+  people.forEach(person => {
+    signatureIndex.filter(signature => signatureNameMatches(person.name, signature.name)).forEach(signature => {
+      if (!matchingIds.includes(signature.id)) matchingIds.push(signature.id);
+    });
+  });
+  const signatures = await getEditorSignatureAssets(matchingIds, headers);
   const exact = new Map();
   const byTokens = new Map();
   signatures.forEach(signature => {

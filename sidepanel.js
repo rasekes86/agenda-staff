@@ -2982,6 +2982,72 @@ function signaturePreferredSource(signature) {
   return signature?.svg_data || signature?.image_url || '';
 }
 
+let signatureIndexCache = null;
+let signatureIndexCachedAt = 0;
+const SIGNATURE_INDEX_TTL = 60 * 1000;
+
+function signatureRequestHeaders() {
+  const headers = { apikey: SUPABASE_KEY };
+  if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
+  return headers;
+}
+
+function invalidateSignatureIndex() {
+  signatureIndexCache = null;
+  signatureIndexCachedAt = 0;
+  signatureCandidateCache.clear();
+}
+
+async function getSignatureIndex() {
+  if (signatureIndexCache && Date.now() - signatureIndexCachedAt < SIGNATURE_INDEX_TTL) {
+    return signatureIndexCache;
+  }
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=id,name&order=name.asc&limit=5000`, {
+    headers: signatureRequestHeaders()
+  });
+  if (!response.ok) throw new Error(`No se ha podido consultar la base de firmas (${response.status})`);
+  signatureIndexCache = await response.json();
+  signatureIndexCachedAt = Date.now();
+  return signatureIndexCache;
+}
+
+async function getSignatureAssets(ids) {
+  const uniqueIds = [...new Set(ids.filter(Boolean).map(String))];
+  if (!uniqueIds.length) return [];
+  const results = [];
+  for (let offset = 0; offset < uniqueIds.length; offset += 50) {
+    const batch = uniqueIds.slice(offset, offset + 50).join(',');
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=id,name,image_url,svg_data&id=in.(${encodeURIComponent(batch)})`, {
+      headers: signatureRequestHeaders()
+    });
+    if (!response.ok) throw new Error(`No se han podido cargar las firmas encontradas (${response.status})`);
+    results.push(...await response.json());
+  }
+  return results;
+}
+
+const signatureCandidateCache = new Map();
+
+async function getSignatureCandidates(searchTerms) {
+  const groups = await Promise.all(searchTerms.map(async term => {
+    const tokens = String(term || '').split(/[^\p{L}\p{N}]+/u).filter(Boolean).sort((a, b) => b.length - a.length);
+    const token = tokens[0];
+    if (!token) return [];
+    const cacheKey = token.toLocaleUpperCase('es-ES');
+    const cached = signatureCandidateCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < SIGNATURE_INDEX_TTL) return cached.rows;
+    const query = encodeURIComponent(`*${token}*`);
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=id,name&name=ilike.${query}&order=name.asc&limit=500`, {
+      headers: signatureRequestHeaders()
+    });
+    if (!response.ok) throw new Error(`No se ha podido consultar la base de firmas (${response.status})`);
+    const rows = await response.json();
+    signatureCandidateCache.set(cacheKey, { at: Date.now(), rows });
+    return rows;
+  }));
+  return groups.flat();
+}
+
 async function searchSignatures() {
   const searchInput = $('signatureSearchInput').value.trim();
 
@@ -3008,23 +3074,18 @@ async function searchSignatures() {
   $('signaturesResults').innerHTML = '<div class="signatures-loading"></div>';
 
   try {
-    let allSignatures = [];
+    let matchedSignatures = [];
     const foundNames = [];
 
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=*&order=name.asc&limit=5000`, {
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${session.access_token}`
-      }
-    });
-    if (!res.ok) throw new Error('No se ha podido consultar la base de firmas');
-    const storedSignatures = await res.json();
+    const storedSignatures = await getSignatureCandidates(searchTerms);
     searchTerms.forEach(term => {
       storedSignatures.filter(sig => signatureNamesMatch(term, sig.name)).forEach(sig => {
-        if (!allSignatures.some(item => item.id === sig.id)) allSignatures.push(sig);
+        if (!matchedSignatures.some(item => item.id === sig.id)) matchedSignatures.push(sig);
         foundNames.push(sig.name);
       });
     });
+
+    const allSignatures = await getSignatureAssets(matchedSignatures.map(signature => signature.id));
 
     // Sort alphabetically by name
     allSignatures.sort((a, b) => a.name.localeCompare(b.name));
@@ -3034,8 +3095,7 @@ async function searchSignatures() {
 
   } catch (err) {
     console.error('Search error:', err);
-    // Show upload section on error (table might not exist)
-    showSignaturesUploadSection(searchTerms.join(', '));
+    $('signaturesResults').innerHTML = `<div class="signatures-empty-text">Error: ${esc(err.message)}</div>`;
   }
 }
 
@@ -3210,6 +3270,7 @@ async function deleteSignatureFromSidepanel(id, name) {
     showToast('✓ Firma eliminada: ' + name);
     
     // Re-run search to update results
+    invalidateSignatureIndex();
     searchSignatures();
     
   } catch (err) {
@@ -3280,6 +3341,7 @@ async function quickUploadMissingSignature(name) {
       showToast('✓ Firma subida: ' + name);
       
       // Re-run search to update results
+      invalidateSignatureIndex();
       searchSignatures();
       
     } catch (err) {
