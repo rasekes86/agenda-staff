@@ -4980,47 +4980,89 @@ function showIndividualGenerationProgress(total) {
   };
 }
 
-function confirmIndividualPdfPreview(pdfBytes, personName, qualityWarnings = 0, previewPage = 1) {
+function confirmIndividualPdfPreviews(items) {
   return new Promise(resolve => {
     document.querySelector('.individual-preview-overlay')?.remove();
-    const url = URL.createObjectURL(new Blob([pdfBytes], { type: 'application/pdf' }));
+    if (!items.length) { resolve(true); return; }
+    let currentIndex = 0;
+    let renderToken = 0;
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay show individual-preview-overlay';
     overlay.innerHTML = `<div class="modal individual-preview-modal">
-      <h3>🔎 Revisa la firma antes de generar el ZIP</h3>
-      <p>Esta es una vista del PDF real de <strong>${escapeHtml(personName)}</strong>. Amplía la zona de la firma y confirma solo si se ve correctamente.</p>
-      ${qualityWarnings ? '<p class="signature-quality-notice">⚠️ La firma se ha mantenido más pequeña que el hueco para garantizar 300 DPI y evitar cualquier pixelación.</p>' : '<p class="signature-quality-ok">✓ La firma tiene resolución suficiente para el tamaño de la plantilla.</p>'}
-      ${window.AndroidBridge ? '<div class="individual-preview-canvas-wrap"><canvas title="Vista previa del primer documento"></canvas></div>' : '<iframe title="Vista previa del primer documento"></iframe>'}
+      <div class="individual-preview-heading">
+        <h3>🔎 Revisa todas las firmas antes de generar el ZIP</h3>
+        <strong data-counter></strong>
+      </div>
+      <p>Documento de <strong data-person></strong>. Solo se muestra la página que contiene la firma.</p>
+      <div data-quality></div>
+      <div class="individual-preview-canvas-wrap"><canvas title="Página que contiene la firma"></canvas></div>
       <div class="modal-actions">
         <button class="btn-cancel" data-cancel>Cancelar</button>
-        <button class="btn-add" data-confirm>La firma se ve bien · Generar ZIP</button>
+        <button class="btn-cancel" data-previous>← Anterior</button>
+        <button class="btn-add" data-next></button>
       </div>
     </div>`;
     document.body.appendChild(overlay);
-    const iframe = overlay.querySelector('iframe');
-    if (iframe) iframe.src = `${url}#toolbar=1&zoom=page-width`;
-    const previewCanvas = overlay.querySelector('canvas');
-    if (previewCanvas) {
-      window.pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise
-        .then(document => document.getPage(Math.min(Math.max(1, previewPage), document.numPages)))
-        .then(page => {
-          const viewport = page.getViewport({ scale: 2 });
-          previewCanvas.width = viewport.width;
-          previewCanvas.height = viewport.height;
-          return page.render({ canvasContext: previewCanvas.getContext('2d'), viewport }).promise;
-        })
-        .catch(error => {
-          const wrap = overlay.querySelector('.individual-preview-canvas-wrap');
-          if (wrap) wrap.textContent = `No se pudo mostrar la vista previa: ${error.message}`;
-        });
-    }
+
+    const renderCurrent = async () => {
+      const token = ++renderToken;
+      const item = items[currentIndex];
+      overlay.querySelector('[data-counter]').textContent = `${currentIndex + 1} de ${items.length}`;
+      overlay.querySelector('[data-person]').textContent = item.personName;
+      const quality = overlay.querySelector('[data-quality]');
+      quality.className = item.qualityWarnings ? 'signature-quality-notice' : 'signature-quality-ok';
+      quality.textContent = item.qualityWarnings
+        ? '⚠️ La firma se ha mantenido más pequeña que el hueco para garantizar 300 DPI y evitar pixelación.'
+        : '✓ La firma tiene resolución suficiente para el tamaño de la plantilla.';
+      const previousButton = overlay.querySelector('[data-previous]');
+      const nextButton = overlay.querySelector('[data-next]');
+      previousButton.disabled = true;
+      nextButton.disabled = true;
+      nextButton.textContent = currentIndex === items.length - 1
+        ? 'Todas correctas · Generar ZIP'
+        : 'Firma correcta · Siguiente →';
+      const wrap = overlay.querySelector('.individual-preview-canvas-wrap');
+      wrap.textContent = '';
+      const canvas = document.createElement('canvas');
+      canvas.title = 'Página que contiene la firma';
+      wrap.appendChild(canvas);
+      canvas.style.opacity = '.35';
+      try {
+        const documentPdf = await window.pdfjsLib.getDocument({ data: item.pdfBytes.slice(0) }).promise;
+        const pageNumber = Math.min(Math.max(1, item.signaturePage || 1), documentPdf.numPages);
+        const page = await documentPdf.getPage(pageNumber);
+        if (token !== renderToken) { documentPdf.destroy?.(); return; }
+        const viewport = page.getViewport({ scale: 2 });
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+        canvas.style.opacity = '1';
+        previousButton.disabled = currentIndex === 0;
+        nextButton.disabled = false;
+        documentPdf.destroy?.();
+      } catch (error) {
+        if (token === renderToken) {
+          wrap.textContent = `No se pudo mostrar la vista previa: ${error.message}`;
+          previousButton.disabled = currentIndex === 0;
+          nextButton.disabled = false;
+        }
+      }
+    };
+
     const finish = accepted => {
-      URL.revokeObjectURL(url);
+      renderToken++;
       overlay.remove();
       resolve(accepted);
     };
     overlay.querySelector('[data-cancel]').onclick = () => finish(false);
-    overlay.querySelector('[data-confirm]').onclick = () => finish(true);
+    overlay.querySelector('[data-previous]').onclick = () => {
+      if (currentIndex > 0) { currentIndex--; renderCurrent(); }
+    };
+    overlay.querySelector('[data-next]').onclick = () => {
+      if (currentIndex < items.length - 1) { currentIndex++; renderCurrent(); }
+      else finish(true);
+    };
+    renderCurrent();
   });
 }
 
@@ -5053,25 +5095,11 @@ async function generateIndividualTemplatePdfs(rawText) {
 
   $('fillTemplateModal')?.classList.remove('show');
   const generatedFiles = [];
+  const previewItems = [];
   const missing = [];
   const failed = [];
   try {
     const matches = await findSignaturesForPeople(people);
-    const firstMatchIndex = matches.findIndex(match => match.signature);
-    const previewCache = new Map();
-    if (firstMatchIndex >= 0) {
-      showStatus('Preparando una vista previa con calidad de impresión…');
-      const firstMatch = matches[firstMatchIndex];
-      const previewElements = cloneElementsForIndividual(activeDoc, firstMatch.person, firstMatch.signature);
-      const previewResult = await buildIndividualPdf(activeDoc, previewElements);
-      previewCache.set(firstMatchIndex, previewResult.bytes);
-      const signaturePage = Number(Object.keys(previewElements).find(page => previewElements[page].some(element => element.type === 'signature')) || 1);
-      const accepted = await confirmIndividualPdfPreview(previewResult.bytes, firstMatch.person.name, previewResult.qualityWarnings, signaturePage);
-      if (!accepted) {
-        showStatus('Generación cancelada para que puedas ajustar la plantilla', 'error');
-        return;
-      }
-    }
     const progress = showIndividualGenerationProgress(people.length);
     const usedNames = new Map();
     for (let index = 0; index < matches.length; index++) {
@@ -5084,16 +5112,27 @@ async function generateIndividualTemplatePdfs(rawText) {
       }
       try {
         const elements = cloneElementsForIndividual(activeDoc, person, signature);
-        const cachedBytes = previewCache.get(index);
-        const bytes = cachedBytes || (await buildIndividualPdf(activeDoc, elements)).bytes;
+        const result = await buildIndividualPdf(activeDoc, elements);
+        const bytes = result.bytes;
+        const signaturePage = Number(Object.keys(elements).find(page => elements[page].some(element => element.type === 'signature')) || 1);
         const base = `${sanitizeDownloadName(activeDoc.fileName.replace(/\.pdf$/i, ''))}_${sanitizeDownloadName(person.name)}`;
         const occurrence = (usedNames.get(base) || 0) + 1;
         usedNames.set(base, occurrence);
         generatedFiles.push({ name: `${base}${occurrence > 1 ? `_${occurrence}` : ''}.pdf`, data: bytes });
+        previewItems.push({ pdfBytes: bytes, personName: person.name, qualityWarnings: result.qualityWarnings, signaturePage });
       } catch (error) {
         failed.push({ person, error: error.message || 'Error desconocido' });
       }
       progress.update(index + 1, person.name);
+    }
+    progress.close();
+
+    if (previewItems.length) {
+      const accepted = await confirmIndividualPdfPreviews(previewItems);
+      if (!accepted) {
+        showStatus('Generación cancelada para que puedas revisar o ajustar las firmas', 'error');
+        return;
+      }
     }
 
     let zipName = '';
@@ -5117,7 +5156,6 @@ async function generateIndividualTemplatePdfs(rawText) {
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
     }
-    progress.close();
     showIndividualGenerationReport(generatedFiles.filter(file => file.name.endsWith('.pdf')).length, missing, failed, zipName);
   } catch (error) {
     document.querySelector('.individual-generation-overlay')?.remove();

@@ -143,19 +143,35 @@
           return text.includes('NOMBRE') && text.includes('APELLIDO 1');
         });
         if (headerRowIndex < 0) {
-          // Common email format: NAME SURNAME, FIRST NAME | DNI/NIE | ROLE,
-          // without any header row. Requiring a valid identity document keeps
-          // corporate signatures and ordinary prose out of this path.
+          // Common headerless formats:
+          //   SURNAME SURNAME, FIRST NAME | DNI/NIE | ROLE
+          //   DNI/NIE | FIRST NAME | SURNAME SURNAME
+          // A valid identity document is mandatory here, which keeps ordinary
+          // prose, email signatures and unrelated tables out of this path.
           rows.forEach(row => {
             const cells = [...row.querySelectorAll(':scope > th, :scope > td')];
             const dniIndex = cells.findIndex(cell => dniPattern.test(normalize(cell.innerText).replace(/ /g, '')));
             if (dniIndex < 0) return;
             const nameCell = cells.slice(0, dniIndex).find(cell => looksLikePersonnelName(cell.innerText.trim()));
-            if (!nameCell) return;
-            addPerson(nameCell.innerText.trim(), cells[dniIndex].innerText.trim(), body, {
-              anchorText: nameCell.innerText.trim(),
-              anchorElement: nameCell
-            });
+            if (nameCell) {
+              addPerson(nameCell.innerText.trim(), cells[dniIndex].innerText.trim(), body, {
+                anchorText: nameCell.innerText.trim(),
+                anchorElement: nameCell
+              });
+              return;
+            }
+            const identityCells = cells
+              .map((cell, index) => ({ cell, index, text: cell.innerText.replace(/\s+/g, ' ').trim() }))
+              .filter(item => item.index !== dniIndex && item.text);
+            if (dniIndex === 0 && identityCells.length >= 2) {
+              const firstName = identityCells[0].text;
+              const surnames = identityCells.slice(1).map(item => item.text).join(' ');
+              if (/\d|@|https?:|www\./i.test(`${firstName} ${surnames}`)) return;
+              addPerson(`${surnames}, ${firstName}`, cells[dniIndex].innerText.trim(), body, {
+                anchorText: firstName,
+                anchorElement: identityCells[0].cell
+              });
+            }
           });
           return;
         }
