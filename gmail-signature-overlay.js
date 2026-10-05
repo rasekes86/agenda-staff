@@ -149,7 +149,10 @@
           // A valid identity document is mandatory here, which keeps ordinary
           // prose, email signatures and unrelated tables out of this path.
           rows.forEach(row => {
-            const cells = [...row.querySelectorAll(':scope > th, :scope > td')];
+            // Gmail may wrap pasted spreadsheet cells in extra elements. Use
+            // leaf cells instead of requiring them to be direct TR children.
+            const cells = [...row.querySelectorAll('th, td')]
+              .filter(cell => !cell.querySelector('th, td'));
             const dniIndex = cells.findIndex(cell => dniPattern.test(normalize(cell.innerText).replace(/ /g, '')));
             if (dniIndex < 0) return;
             const nameCell = cells.slice(0, dniIndex).find(cell => looksLikePersonnelName(cell.innerText.trim()));
@@ -164,6 +167,18 @@
               .map((cell, index) => ({ cell, index, text: cell.innerText.replace(/\s+/g, ' ').trim() }))
               .filter(item => item.index !== dniIndex && item.text);
             if (dniIndex === 0 && identityCells.length >= 2) {
+              const firstName = identityCells[0].text;
+              const surnames = identityCells.slice(1).map(item => item.text).join(' ');
+              if (/\d|@|https?:|www\./i.test(`${firstName} ${surnames}`)) return;
+              addPerson(`${surnames}, ${firstName}`, cells[dniIndex].innerText.trim(), body, {
+                anchorText: firstName,
+                anchorElement: identityCells[0].cell
+              });
+              return;
+            }
+            // Some pasted sheets place the identity document last while the
+            // name and surnames remain in independent cells.
+            if (dniIndex === cells.length - 1 && identityCells.length >= 2) {
               const firstName = identityCells[0].text;
               const surnames = identityCells.slice(1).map(item => item.text).join(' ');
               if (/\d|@|https?:|www\./i.test(`${firstName} ${surnames}`)) return;
@@ -230,6 +245,21 @@
         }
         if (!name) continue;
         addPerson(name, dniMatch[0], body);
+      }
+
+      // Fallback for lists pasted from Excel/Sheets as plain tabulated text:
+      // DNI | FIRST NAME | SURNAME(S), without a heading row.
+      for (const rawLine of usefulBodyText.split(/\r?\n/)) {
+        const columns = rawLine.replace(/\u00a0/g, ' ').trim().split(/\t+|\s{2,}/).map(value => value.trim()).filter(Boolean);
+        if (columns.length < 3) continue;
+        const dniIndex = columns.findIndex(column => dniPattern.test(normalize(column).replace(/ /g, '')));
+        if (dniIndex < 0) continue;
+        const identityColumns = columns.filter((_, index) => index !== dniIndex);
+        if (identityColumns.length < 2) continue;
+        const firstName = identityColumns[0];
+        const surnames = identityColumns.slice(1).join(' ');
+        if (/\d|@|https?:|www\./i.test(`${firstName} ${surnames}`)) continue;
+        addPerson(`${surnames}, ${firstName}`, columns[dniIndex], body, { anchorText: firstName });
       }
 
       const standaloneCandidates = [];

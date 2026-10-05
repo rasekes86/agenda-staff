@@ -5037,9 +5037,12 @@ function confirmIndividualPdfPreviews(items) {
         : 'Firma correcta · Siguiente →';
       const wrap = overlay.querySelector('.individual-preview-canvas-wrap');
       wrap.textContent = '';
+      const pageSurface = document.createElement('div');
+      pageSurface.className = 'individual-preview-page';
       const canvas = document.createElement('canvas');
       canvas.title = 'Página que contiene la firma';
-      wrap.appendChild(canvas);
+      pageSurface.appendChild(canvas);
+      wrap.appendChild(pageSurface);
       canvas.style.opacity = '.35';
       try {
         const documentPdf = await window.pdfjsLib.getDocument({ data: item.pdfBytes.slice(0) }).promise;
@@ -5073,7 +5076,7 @@ function confirmIndividualPdfPreviews(items) {
             resizeCurrentSignature(event.deltaY < 0 ? 0.25 : -0.25)
               .finally(() => { hitbox.dataset.resizing = 'false'; });
           }, { passive: false });
-          wrap.appendChild(hitbox);
+          pageSurface.appendChild(hitbox);
         }
         canvas.style.opacity = '1';
         previousButton.disabled = currentIndex === 0;
