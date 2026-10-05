@@ -4403,21 +4403,26 @@ body {
 
 .signatures-preview-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+  width: 100%;
   max-height: 400px;
+  overflow-x: hidden;
   overflow-y: auto;
   padding: 2px;
 }
 
 .signature-preview-card {
   position: relative;
+  min-width: 0;
+  width: 100%;
   background: var(--bg2);
   border-radius: 8px;
   padding: 10px;
   text-align: center;
   transition: all 0.2s;
   border: 1px solid transparent;
+  cursor: pointer;
 }
 
 .signature-preview-card:hover {
@@ -4453,6 +4458,13 @@ body {
   white-space: nowrap;
 }
 
+.signature-preview-recrop-hint {
+  margin-top: 5px;
+  color: var(--pri);
+  font-size: 9px;
+  font-weight: 700;
+}
+
 .signature-preview-delete {
   position: absolute;
   top: 4px;
@@ -4479,4 +4491,62 @@ body {
 .signature-preview-delete:hover {
   background: var(--danger);
   transform: scale(1.1);
+}
+
+.sidepanel-crop-preview-overlay,
+.sidepanel-signature-crop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10020;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: rgba(2, 6, 23, .82);
+}
+
+.sidepanel-crop-preview-card,
+.sidepanel-signature-crop-card {
+  width: 100%;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  padding: 14px;
+  border: 1px solid var(--bor);
+  border-radius: 12px;
+  background: var(--bg1);
+  color: var(--txt);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .45);
+}
+
+.sidepanel-crop-preview-card h3 { margin: 0 0 4px; }
+.sidepanel-crop-preview-card > p,
+.sidepanel-signature-crop-card > p { margin: 0 0 10px; color: var(--txt2); font-size: 11px; line-height: 1.4; }
+.sidepanel-crop-preview-checker { height: 125px; display: grid; place-items: center; overflow: hidden; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: repeating-conic-gradient(#e2e8f0 0 25%, #fff 0 50%) 50% / 12px 12px; }
+.sidepanel-crop-preview-checker img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.sidepanel-crop-preview-card small { display: block; margin: 5px 0 8px; color: var(--txt2); text-align: center; font-size: 10px; }
+.sidepanel-crop-preview-card small.low-resolution { color: #f59e0b; font-weight: 700; }
+.sidepanel-crop-document { position: relative; height: 145px; overflow: hidden; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; }
+.sidepanel-crop-lines { width: 60%; height: 39px; margin: 17px; opacity: .65; background: repeating-linear-gradient(to bottom, #cbd5e1 0, #cbd5e1 2px, transparent 2px, transparent 10px); }
+.sidepanel-crop-signature-box { position: absolute; right: 16px; bottom: 17px; width: 165px; height: 68px; border: 1px solid #94a3b8; }
+.sidepanel-crop-signature-box span { position: absolute; top: 3px; left: 5px; color: #64748b; font: 8px Arial, sans-serif; }
+.sidepanel-crop-signature-box img { position: absolute; inset: 14px 6px 5px; width: calc(100% - 12px); height: calc(100% - 19px); object-fit: contain; }
+.sidepanel-crop-preview-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+.sidepanel-crop-preview-actions button { min-width: 0; padding: 8px 5px; border: 0; border-radius: 7px; background: var(--bg3); color: var(--txt); font-size: 10px; font-weight: 700; cursor: pointer; }
+.sidepanel-crop-preview-actions .confirm { background: var(--succ); color: #fff; }
+
+.sidepanel-signature-crop-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 7px; }
+.sidepanel-signature-crop-title > div { min-width: 0; }
+.sidepanel-signature-crop-title strong,
+.sidepanel-signature-crop-title span { display: block; }
+.sidepanel-signature-crop-title span { overflow: hidden; margin-top: 2px; color: var(--txt2); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.sidepanel-signature-crop-title button { flex: 0 0 28px; height: 28px; border: 0; border-radius: 6px; background: var(--danger); color: #fff; cursor: pointer; }
+.sidepanel-signature-crop-tabs { display: flex; flex-direction: column; gap: 6px; max-height: 360px; overflow-y: auto; }
+.sidepanel-signature-crop-tab { min-width: 0; padding: 9px; border: 1px solid var(--bor); border-radius: 8px; background: var(--bg2); color: var(--txt); text-align: left; cursor: pointer; }
+.sidepanel-signature-crop-tab strong,
+.sidepanel-signature-crop-tab span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidepanel-signature-crop-tab strong { font-size: 11px; }
+.sidepanel-signature-crop-tab span { margin-top: 2px; color: var(--txt2); font-size: 9px; }
+
+@media (max-width: 300px) {
+  .signatures-preview-grid { grid-template-columns: 1fr; }
 }

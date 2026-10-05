@@ -172,6 +172,9 @@ async function getSignatureCaptureTabs(sourceTabId) {
 async function startSignatureCrop(message, sourceTab) {
   const name = String(message.name || '').trim();
   const targetTabId = Number(message.tabId);
+  if (!sourceTab?.id) {
+    [sourceTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  }
   if (!name || !targetTabId || !sourceTab?.id) throw new Error('No se ha podido preparar el recorte');
   const targetTab = await chrome.tabs.get(targetTabId);
   if (!targetTab?.id || !/^(https?|file):/i.test(targetTab.url || '')) throw new Error('Esta pestaña no permite realizar capturas');
@@ -227,14 +230,16 @@ async function confirmSignatureCropOnce(message, senderTab) {
   const crop = { ...activeCrop };
   const result = await uploadGmailSignature({ name: crop.name, imageUrl: message.imageUrl, svgData: message.svgData || '' });
   try {
-    await chrome.tabs.sendMessage(crop.sourceTabId, {
+    const savedMessage = {
       type: 'AGENDA_SIGNATURE_CROP_SAVED',
       name: crop.name,
       imageUrl: message.imageUrl,
       svgData: message.svgData || '',
       context: crop.context || 'gmail',
       target: crop.target || null
-    });
+    };
+    if (crop.context === 'sidepanel') await chrome.runtime.sendMessage(savedMessage);
+    else await chrome.tabs.sendMessage(crop.sourceTabId, savedMessage);
     await chrome.windows.update(crop.sourceWindowId, { focused: true });
     await chrome.tabs.update(crop.sourceTabId, { active: true });
   } catch (_) {}

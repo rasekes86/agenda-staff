@@ -1744,6 +1744,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ success: true });
     return true;
   }
+
+  if (message.type === 'AGENDA_SIGNATURE_CROP_SAVED' && message.context === 'sidepanel') {
+    showToast(`✓ Firma sustituida: ${message.name}`);
+    invalidateSignatureIndex();
+    previewAllSignatures();
+    sendResponse({ success: true });
+    return true;
+  }
   
   if (message.type === 'SHOW_REMINDER') {
     showReminderBanner(message.event);
@@ -1780,6 +1788,16 @@ async function handleScreenshotResult(dataUrl) {
     const blob = await response.blob();
     
     if (!blob || blob.size === 0) throw new Error('Blob vacío');
+
+    const previewAction = await showSidepanelCropPreview(dataUrl);
+    if (previewAction === 'repeat') {
+      await startScreenshot();
+      return;
+    }
+    if (previewAction !== 'confirm') {
+      showToast('Captura cancelada');
+      return;
+    }
     
     // Try clipboard first
     let clipboardSuccess = false;
@@ -1814,6 +1832,48 @@ async function handleScreenshotResult(dataUrl) {
     console.error('Error processing screenshot:', err);
     showToast('Error al procesar: ' + err.message);
   }
+}
+
+function showSidepanelCropPreview(dataUrl) {
+  return new Promise(resolve => {
+    document.querySelector('.sidepanel-crop-preview-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'sidepanel-crop-preview-overlay';
+    overlay.innerHTML = `
+      <div class="sidepanel-crop-preview-card">
+        <h3>Confirma el recorte</h3>
+        <p>Comprueba la transparencia y cómo se verá aproximadamente sobre un documento.</p>
+        <div class="sidepanel-crop-preview-checker"><img src="${dataUrl}" alt="Recorte transparente"></div>
+        <small data-resolution>Calculando resolución…</small>
+        <div class="sidepanel-crop-document">
+          <div class="sidepanel-crop-lines"></div>
+          <div class="sidepanel-crop-signature-box"><span>Firma</span><img src="${dataUrl}" alt="Recorte sobre documento"></div>
+        </div>
+        <div class="sidepanel-crop-preview-actions">
+          <button type="button" data-action="repeat">Repetir</button>
+          <button type="button" data-action="cancel">Cancelar</button>
+          <button type="button" class="confirm" data-action="confirm">Usar recorte</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const image = new Image();
+    image.onload = () => {
+      const lowResolution = image.naturalWidth < 400 || image.naturalHeight < 100;
+      const label = overlay.querySelector('[data-resolution]');
+      label.textContent = lowResolution
+        ? `${image.naturalWidth} × ${image.naturalHeight} píxeles · Resolución baja`
+        : `${image.naturalWidth} × ${image.naturalHeight} píxeles reales · PNG sin pérdida`;
+      label.classList.toggle('low-resolution', lowResolution);
+    };
+    image.src = dataUrl;
+    overlay.querySelectorAll('[data-action]').forEach(button => {
+      button.addEventListener('click', () => {
+        const action = button.dataset.action;
+        overlay.remove();
+        resolve(action);
+      });
+    });
+  });
 }
 
 // Helpers
@@ -3521,6 +3581,7 @@ async function previewAllSignatures() {
             <img src="${esc(signaturePreferredSource(sig))}" alt="${esc(displayName)}" class="signature-preview-image">
           </div>
           <div class="signature-preview-name">${esc(displayName)}</div>
+          <div class="signature-preview-recrop-hint">✂ Recortar y sustituir</div>
           <button class="signature-preview-delete" data-id="${sig.id}" data-name="${esc(displayName)}" title="Eliminar firma">🗑️</button>
         </div>
       `;
@@ -3570,6 +3631,13 @@ async function previewAllSignatures() {
       });
     });
 
+    document.querySelectorAll('.signature-preview-card').forEach(card => {
+      card.addEventListener('click', event => {
+        if (event.target.closest('.signature-preview-delete')) return;
+        openSidepanelSignatureCrop(card.dataset.name);
+      });
+    });
+
   } catch (err) {
     console.error('Preview error:', err);
     $('signaturesResults').innerHTML = `
@@ -3578,6 +3646,69 @@ async function previewAllSignatures() {
         <div class="signatures-empty-text">Error al cargar firmas</div>
       </div>
     `;
+  }
+}
+
+async function openSidepanelSignatureCrop(name) {
+  document.querySelector('.sidepanel-signature-crop-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'sidepanel-signature-crop-overlay';
+  overlay.innerHTML = `
+    <div class="sidepanel-signature-crop-card">
+      <div class="sidepanel-signature-crop-title">
+        <div><strong>Recortar y sustituir</strong><span>${esc(name)}</span></div>
+        <button type="button" data-close aria-label="Cerrar">×</button>
+      </div>
+      <p>Selecciona la pestaña donde tengas visible la firma correcta.</p>
+      <div class="sidepanel-signature-crop-tabs"><div class="signatures-loading"></div></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('[data-close]').addEventListener('click', close);
+  overlay.addEventListener('click', event => { if (event.target === overlay) close(); });
+
+  try {
+    const result = await chrome.runtime.sendMessage({ type: 'AGENDA_GET_CAPTURE_TABS' });
+    if (!result?.success) throw new Error(result?.error || 'No se han podido consultar las pestañas');
+    const list = overlay.querySelector('.sidepanel-signature-crop-tabs');
+    list.innerHTML = '';
+    if (!result.tabs?.length) {
+      list.innerHTML = '<div class="signatures-empty-text">Abre primero el documento que contiene la firma.</div>';
+      return;
+    }
+    result.tabs.forEach(tab => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'sidepanel-signature-crop-tab';
+      const title = document.createElement('strong');
+      title.textContent = tab.title || 'Pestaña sin título';
+      const location = document.createElement('span');
+      try { location.textContent = new URL(tab.url).hostname || tab.url; }
+      catch (_) { location.textContent = tab.url || ''; }
+      button.append(title, location);
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        title.textContent = 'Preparando recorte…';
+        try {
+          const response = await chrome.runtime.sendMessage({
+            type: 'AGENDA_START_SIGNATURE_CROP',
+            name,
+            tabId: tab.id,
+            context: 'sidepanel',
+            target: { kind: 'signature-manager' }
+          });
+          if (!response?.success) throw new Error(response?.error || 'No se ha podido iniciar el recorte');
+          close();
+        } catch (error) {
+          button.disabled = false;
+          title.textContent = tab.title || 'Pestaña sin título';
+          showToast(error.message || 'No se ha podido abrir el recortador');
+        }
+      });
+      list.appendChild(button);
+    });
+  } catch (error) {
+    overlay.querySelector('.sidepanel-signature-crop-tabs').innerHTML = `<div class="signatures-empty-text">${esc(error.message)}</div>`;
   }
 }
 
