@@ -1794,6 +1794,24 @@ async function handleScreenshotResult(dataUrl) {
       await startScreenshot();
       return;
     }
+    if (previewAction === 'save-signature') {
+      const signatureName = await askCroppedSignatureName();
+      if (!signatureName) {
+        showToast('Guardado cancelado');
+        return;
+      }
+      showToast(`Guardando firma de ${signatureName}…`);
+      const result = await chrome.runtime.sendMessage({
+        type: 'AGENDA_UPLOAD_GMAIL_SIGNATURE',
+        name: signatureName,
+        imageUrl: dataUrl,
+        svgData: ''
+      });
+      if (!result?.success) throw new Error(result?.error || 'No se ha podido guardar la firma');
+      invalidateSignatureIndex();
+      showToast(`✓ Firma guardada: ${result.name || signatureName}`);
+      return;
+    }
     if (previewAction !== 'confirm') {
       showToast('Captura cancelada');
       return;
@@ -1857,7 +1875,8 @@ function showSidepanelCropPreview(dataUrl) {
         <div class="sidepanel-crop-preview-actions">
           <button type="button" data-action="repeat">Repetir</button>
           <button type="button" data-action="cancel">Cancelar</button>
-          <button type="button" class="confirm" data-action="confirm">Usar recorte</button>
+          <button type="button" class="save-signature" data-action="save-signature">Guardar en firmas</button>
+          <button type="button" class="confirm" data-action="confirm">Descargar PNG</button>
         </div>
       </div>`;
     document.body.appendChild(overlay);
@@ -1878,6 +1897,37 @@ function showSidepanelCropPreview(dataUrl) {
         resolve(action);
       });
     });
+  });
+}
+
+function askCroppedSignatureName() {
+  return new Promise(resolve => {
+    document.querySelector('.sidepanel-crop-name-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'sidepanel-crop-name-overlay';
+    overlay.innerHTML = `
+      <form class="sidepanel-crop-name-card">
+        <h3>Guardar firma</h3>
+        <p>Escribe el nombre completo con el que se buscará esta firma.</p>
+        <input type="text" autocomplete="off" placeholder="APELLIDO 1 APELLIDO 2, NOMBRE" required>
+        <div>
+          <button type="button" data-cancel>Cancelar</button>
+          <button type="submit" class="confirm">Guardar firma</button>
+        </div>
+      </form>`;
+    document.body.appendChild(overlay);
+    const input = overlay.querySelector('input');
+    const finish = value => {
+      overlay.remove();
+      resolve(String(value || '').replace(/\s+/g, ' ').trim());
+    };
+    overlay.querySelector('[data-cancel]').addEventListener('click', () => finish(''));
+    overlay.addEventListener('click', event => { if (event.target === overlay) finish(''); });
+    overlay.querySelector('form').addEventListener('submit', event => {
+      event.preventDefault();
+      if (input.value.trim()) finish(input.value);
+    });
+    setTimeout(() => input.focus(), 0);
   });
 }
 
