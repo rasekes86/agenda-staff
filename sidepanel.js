@@ -4,6 +4,7 @@
 
 const SUPABASE_URL = 'https://iugutcsukxkxlgpkmzxt.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1Z3V0Y3N1a3hreGxncGttenh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzc5OTExMjksImV4cCI6MjA1MzU2NzEyOX0.PpolAzqqXNBOhRlUVzplqkKeGQxzfed4gH377CidVJE';
+const sidepanelInstanceId = crypto.randomUUID?.() || `panel-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 // State
 let currentUser = null;
@@ -1726,12 +1727,14 @@ async function splitPdfAction() {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'SCREENSHOT_RESULT') {
+    if (message.requestId !== sidepanelInstanceId) return;
     handleScreenshotResult(message.dataUrl);
     sendResponse({ success: true });
     return true;
   }
   
   if (message.type === 'SCREENSHOT_CANCELLED') {
+    if (message.requestId !== sidepanelInstanceId) return;
     $('btnScreenshot').classList.remove('capturing');
     showToast('Captura cancelada');
     sendResponse({ success: true });
@@ -1739,6 +1742,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   
   if (message.type === 'SCREENSHOT_ERROR') {
+    if (message.requestId !== sidepanelInstanceId) return;
     $('btnScreenshot').classList.remove('capturing');
     showToast('Error: ' + message.error);
     sendResponse({ success: true });
@@ -1765,7 +1769,7 @@ async function startScreenshot() {
   btn.classList.add('capturing');
   
   try {
-    await chrome.runtime.sendMessage({ type: 'START_SCREENSHOT' });
+    await chrome.runtime.sendMessage({ type: 'START_SCREENSHOT', requestId: sidepanelInstanceId });
   } catch (err) {
     console.error('Error starting screenshot:', err);
     btn.classList.remove('capturing');

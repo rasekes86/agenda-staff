@@ -46,6 +46,7 @@ let scheduledEvents = [];
 let notifiedEvents = new Set();
 let pendingSignatureCrop = null;
 let signatureCropConfirmationPromise = null;
+const screenshotRequestsByTab = new Map();
 
 async function getPendingSignatureCrop() {
   if (pendingSignatureCrop) return pendingSignatureCrop;
@@ -81,26 +82,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   
   if (message.type === 'START_SCREENSHOT') {
-    handleStartScreenshot();
+    handleStartScreenshot(message.requestId);
     sendResponse({ success: true });
     return true;
   }
   
   if (message.type === 'CAPTURE_AREA') {
-    captureAndProcessArea(message.rect)
+    captureAndProcessArea(message.rect, sender.tab)
       .then(result => sendResponse(result))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
   
   if (message.type === 'SCREENSHOT_CANCELLED') {
-    notifySidepanel({ type: 'SCREENSHOT_CANCELLED' });
+    const requestId = screenshotRequestsByTab.get(sender.tab?.id);
+    screenshotRequestsByTab.delete(sender.tab?.id);
+    notifySidepanel({ type: 'SCREENSHOT_CANCELLED', requestId });
     sendResponse({ success: true });
     return true;
   }
   
   if (message.type === 'SCREENSHOT_ERROR') {
-    notifySidepanel({ type: 'SCREENSHOT_ERROR', error: message.error });
+    const requestId = screenshotRequestsByTab.get(sender.tab?.id);
+    screenshotRequestsByTab.delete(sender.tab?.id);
+    notifySidepanel({ type: 'SCREENSHOT_ERROR', error: message.error, requestId });
     sendResponse({ success: true });
     return true;
   }
@@ -489,9 +494,10 @@ async function playNotificationSound(soundType) {
 // SCREENSHOT FUNCTIONALITY
 // ============================================
 
-async function handleStartScreenshot() {
+async function handleStartScreenshot(requestId) {
+  let tab = null;
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     
     if (!tab || !tab.id) {
       throw new Error('No hay pestaña activa');
@@ -501,6 +507,8 @@ async function handleStartScreenshot() {
     if (tab.url && (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://'))) {
       throw new Error('No se puede capturar páginas de Chrome');
     }
+
+    screenshotRequestsByTab.set(tab.id, requestId);
     
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
@@ -509,13 +517,15 @@ async function handleStartScreenshot() {
     
   } catch (err) {
     console.error('Error starting screenshot:', err);
-    notifySidepanel({ type: 'SCREENSHOT_ERROR', error: err.message });
+    if (tab?.id) screenshotRequestsByTab.delete(tab.id);
+    notifySidepanel({ type: 'SCREENSHOT_ERROR', error: err.message, requestId });
   }
 }
 
-async function captureAndProcessArea(rect) {
+async function captureAndProcessArea(rect, senderTab) {
   try {
-    const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+    const requestId = screenshotRequestsByTab.get(senderTab?.id);
+    const dataUrl = await chrome.tabs.captureVisibleTab(senderTab?.windowId, { format: 'png' });
     
     if (!dataUrl) {
       throw new Error('No se pudo capturar la pantalla');
@@ -560,12 +570,15 @@ async function captureAndProcessArea(rect) {
       reader.readAsDataURL(resultBlob);
     });
     
-    notifySidepanel({ type: 'SCREENSHOT_RESULT', dataUrl: base64 });
+    screenshotRequestsByTab.delete(senderTab?.id);
+    notifySidepanel({ type: 'SCREENSHOT_RESULT', dataUrl: base64, requestId });
     
     return { success: true };
     
   } catch (err) {
     console.error('Error capturing area:', err);
+    // Keep the request mapping until screenshot-selector reports
+    // SCREENSHOT_ERROR, so the error returns to the initiating panel only.
     throw err;
   }
 }
