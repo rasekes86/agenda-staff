@@ -1496,6 +1496,14 @@ function createElementDiv(el, idx, scale, activeDoc) {
     div.style.color = el.color || '#000';
     div.style.minWidth = MIN_ELEMENT_SIZE + 'px';
     div.style.minHeight = MIN_ELEMENT_SIZE + 'px';
+    if (el.templateFieldKey) {
+      div.style.width = `${(el.width || 150) * scale}px`;
+      div.style.height = `${(el.height || Math.max(28, (el.size || 14) + 12)) * scale}px`;
+      div.style.overflow = 'hidden';
+      div.style.whiteSpace = 'nowrap';
+      div.style.padding = '0 2px';
+      div.style.lineHeight = `${(el.height || Math.max(28, (el.size || 14) + 12)) * scale}px`;
+    }
     
     // #25 Rich text styles
     if (el.bold) div.style.fontWeight = 'bold';
@@ -3511,8 +3519,7 @@ async function savePdf() {
         // Empty template slots are visual guides only and must never be exported.
         if (el.isPlaceholder) continue;
         if (el.type === 'text') {
-          const fontSize = el.size || 14;
-          const pdfY = height - el.y - fontSize;
+          let fontSize = el.size || 14;
           const color = hexToRgb(el.color || '#000000');
           
           // #25 Select font variant based on bold/italic
@@ -3524,6 +3531,8 @@ async function savePdf() {
           } else if (el.italic) {
             selectedFont = fontItalic;
           }
+          fontSize = fitPdfTemplateFontSize(el, el.text, selectedFont);
+          const pdfY = height - el.y - fontSize;
           
           page.drawText(el.text, {
             x: el.x,
@@ -4307,6 +4316,7 @@ function applyTemplate(template, options = {}) {
       x: slot.x * scaleX, y: slot.y * scaleY,
       width: (slot.width || 100) * scaleX, height: (slot.height || 60) * scaleY,
       size: (slot.size || DEFAULT_FONT_SIZE) * Math.min(scaleX, scaleY),
+      templateBaseSize: (slot.size || DEFAULT_FONT_SIZE) * Math.min(scaleX, scaleY),
       color: slot.color || '#000000', bold: Boolean(slot.bold), italic: Boolean(slot.italic), underline: Boolean(slot.underline),
       isPlaceholder: true, fieldGroup: label,
       templateFieldKey: label,
@@ -4316,21 +4326,14 @@ function applyTemplate(template, options = {}) {
     };
     const normalizedLabel = normalizeText(label).toUpperCase();
     if (normalizedLabel === 'WORKOUT EVENTS' && placeholder.type === 'text') {
-      placeholder.text = 'WORKOUT EVENTS';
+      fitTemplateTextToBox(placeholder, 'WORKOUT EVENTS');
       placeholder.bold = true;
       clearPlaceholderMetadata(placeholder);
     } else if (normalizedLabel === 'CIUDAD' && placeholder.type === 'text') {
-      placeholder.text = slot.fixedValue || localStorage.getItem('pe_lastCity') || selectedCity || 'Madrid';
+      fitTemplateTextToBox(placeholder, slot.fixedValue || localStorage.getItem('pe_lastCity') || selectedCity || 'Madrid');
       clearPlaceholderMetadata(placeholder);
     } else if (normalizedLabel === 'CATEGORIA' && placeholder.type === 'text') {
-      placeholder.text = slot.fixedValue || localStorage.getItem('pe_lastCategory') || selectedCategory || CATEGORY_OPTIONS[0];
-      clearPlaceholderMetadata(placeholder);
-    } else if (['FECHA', 'DATE', 'DIA', 'MES', 'ANO'].includes(normalizedLabel) && placeholder.type === 'text') {
-      const now = new Date();
-      if (normalizedLabel === 'DIA') placeholder.text = String(now.getDate()).padStart(2, '0');
-      else if (normalizedLabel === 'MES') placeholder.text = String(now.getMonth() + 1).padStart(2, '0');
-      else if (normalizedLabel === 'ANO') placeholder.text = String(now.getFullYear());
-      else placeholder.text = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
+      fitTemplateTextToBox(placeholder, slot.fixedValue || localStorage.getItem('pe_lastCategory') || selectedCategory || CATEGORY_OPTIONS[0]);
       clearPlaceholderMetadata(placeholder);
     }
     pushElement(activeDoc, page, placeholder);
@@ -4398,7 +4401,7 @@ function applyTemplateVariableFields(container, options = {}) {
     const items = getTemplateFieldElements(update.field);
     items.forEach(item => {
       item.el.type = 'text';
-      item.el.text = update.value;
+      fitTemplateTextToBox(item.el, update.value);
       clearPlaceholderMetadata(item.el);
       changed++;
     });
@@ -4437,8 +4440,8 @@ function showFillTemplateModal() {
   const hasPeopleFields = groups.NOMBRE?.length || groups.DNI?.length || groups.FIRMA?.length;
   const peopleFill = hasPeopleFields ? `<div style="background:#172554;border:1px solid #3b82f6;border-radius:8px;padding:10px;margin-bottom:12px;">
     <strong>👥 Rellenar listado de personal</strong>
-    <p style="font-size:10px;color:#bfdbfe;margin:5px 0 7px;">Una persona por línea: APELLIDO 1 APELLIDO 2, NOMBRE&nbsp;&nbsp;&nbsp;DNI</p>
-    <textarea id="templatePeopleInput" rows="6" placeholder="GARCÍA LÓPEZ, ANA    12345678A&#10;PÉREZ MARTÍN, LUIS    87654321B" style="width:100%;padding:7px;background:#0f172a;border:1px solid #3b82f6;border-radius:6px;color:#f1f5f9;resize:vertical;"></textarea>
+    <p style="font-size:10px;color:#bfdbfe;margin:5px 0 7px;">El DNI/NIE puede ir en la misma línea o justo debajo del nombre.</p>
+    <textarea id="templatePeopleInput" rows="6" placeholder="GARCÍA LÓPEZ, ANA&#10;12345678A&#10;PÉREZ MARTÍN, LUIS    87654321B" style="width:100%;padding:7px;background:#0f172a;border:1px solid #3b82f6;border-radius:6px;color:#f1f5f9;resize:vertical;"></textarea>
     <div class="template-people-modes">
       <button class="sidebar-btn fill-template-people" style="background:#2563eb;color:white;justify-content:center;">📋 Documento colectivo</button>
       <button class="sidebar-btn generate-individual-documents" style="background:#047857;color:white;justify-content:center;">📄 Un PDF por persona</button>
@@ -4476,6 +4479,35 @@ function showFillTemplateModal() {
   modal.classList.add('show');
 }
 
+function fitTemplateTextToBox(element, text) {
+  const value = String(text || '');
+  element.text = value;
+  const baseSize = Number(element.templateBaseSize || element.size || DEFAULT_FONT_SIZE);
+  element.templateBaseSize = baseSize;
+  const availableWidth = Math.max(1, Number(element.width || 150) - 4);
+  const availableHeight = Math.max(5, Number(element.height || baseSize + 8) - 4);
+  const canvas = fitTemplateTextToBox.canvas ||= document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  const weight = element.bold ? '700' : '400';
+  const style = element.italic ? 'italic' : 'normal';
+  context.font = `${style} ${weight} ${baseSize}px Helvetica, Arial, sans-serif`;
+  const measuredWidth = Math.max(1, context.measureText(value).width);
+  const fittedSize = Math.min(baseSize, availableHeight, baseSize * availableWidth / measuredWidth);
+  element.size = Math.max(3, Math.floor(fittedSize * 10) / 10);
+  return element.size;
+}
+
+function fitPdfTemplateFontSize(element, text, font) {
+  let size = Number(element.size || DEFAULT_FONT_SIZE);
+  if (!element.templateFieldKey) return size;
+  const availableWidth = Math.max(1, Number(element.width || 150) - 4);
+  const availableHeight = Math.max(5, Number(element.height || size + 8) - 4);
+  size = Math.min(size, availableHeight);
+  const measuredWidth = font.widthOfTextAtSize(String(text || ''), size);
+  if (measuredWidth > availableWidth) size *= availableWidth / measuredWidth;
+  return Math.max(3, size);
+}
+
 function clearPlaceholderMetadata(el) {
   delete el.isPlaceholder;
   delete el.placeholderLabel;
@@ -4493,7 +4525,7 @@ function fillTemplateTextGroup(groupName, rawValues) {
   const count = Math.min(values.length, slots.length);
   for (let i = 0; i < count; i++) {
     const el = activeDoc.elements[slots[i].page][slots[i].index];
-    el.text = values[i];
+    fitTemplateTextToBox(el, values[i]);
     clearPlaceholderMetadata(el);
   }
   updateTabModified(activeDoc.id, true);
@@ -4516,10 +4548,23 @@ async function findSignatureForPerson(name) {
 }
 
 function parseTemplatePeople(rawText) {
-  return rawText.split(/\r?\n/).map(line => line.trim()).filter(Boolean).map(line => {
+  const lines = String(rawText || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const people = [];
+  let pendingPerson = null;
+  for (const line of lines) {
     const { foundDni, textWithoutDni } = extractDniFromLine(line);
-    return { name: textWithoutDni.replace(/\s+/g, ' ').trim(), dni: (foundDni || '').toUpperCase() };
-  }).filter(person => person.name);
+    const name = textWithoutDni.replace(/\s+/g, ' ').trim();
+    const isStandaloneDni = foundDni && (!name || /^(?:D\.?N\.?I\.?|N\.?I\.?E\.?)\s*[:\-]?$/i.test(name));
+    if (isStandaloneDni) {
+      if (pendingPerson && !pendingPerson.dni) pendingPerson.dni = foundDni.toUpperCase();
+      continue;
+    }
+    if (!name) continue;
+    const person = { name, dni: (foundDni || '').toUpperCase() };
+    people.push(person);
+    pendingPerson = person.dni ? null : person;
+  }
+  return people;
 }
 
 async function fillTemplatePeople(rawText) {
@@ -4535,17 +4580,18 @@ async function fillTemplatePeople(rawText) {
   let namesFilled = 0;
   let dniFilled = 0;
   let signaturesFilled = 0;
+  let datesFilled = 0;
   const missingSignatures = [];
 
   for (let index = 0; index < people.length; index++) {
     const person = people[index];
     if (nameSlots[index]) {
-      nameSlots[index].el.text = person.name;
+      fitTemplateTextToBox(nameSlots[index].el, person.name);
       clearPlaceholderMetadata(nameSlots[index].el);
       namesFilled++;
     }
     if (dniSlots[index] && person.dni) {
-      dniSlots[index].el.text = person.dni.toUpperCase();
+      fitTemplateTextToBox(dniSlots[index].el, person.dni.toUpperCase());
       dniSlots[index].el.name = person.name;
       clearPlaceholderMetadata(dniSlots[index].el);
       dniFilled++;
@@ -4573,11 +4619,31 @@ async function fillTemplatePeople(rawText) {
     }
   }
 
+  const now = new Date();
+  const dateValues = {
+    FECHA: `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`,
+    DATE: `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`,
+    DIA: String(now.getDate()).padStart(2, '0'),
+    MES: String(now.getMonth() + 1).padStart(2, '0'),
+    ANO: String(now.getFullYear())
+  };
+  Object.entries(groups).forEach(([groupName, slots]) => {
+    const normalizedGroup = normalizeText(groupName).toUpperCase();
+    if (!(normalizedGroup in dateValues)) return;
+    const count = Math.min(namesFilled, slots.length);
+    for (let index = 0; index < count; index++) {
+      fitTemplateTextToBox(slots[index].el, dateValues[normalizedGroup]);
+      clearPlaceholderMetadata(slots[index].el);
+      datesFilled++;
+    }
+  });
+
   updateTabModified(activeDoc.id, true);
   renderPage();
   $('fillTemplateModal')?.classList.remove('show');
   const missingText = missingSignatures.length ? ` · Sin firma: ${missingSignatures.join(', ')}` : '';
-  showStatus(`${namesFilled} nombres · ${dniFilled} DNI · ${signaturesFilled} firmas${missingText}`, missingSignatures.length ? 'error' : 'success');
+  const datesText = datesFilled ? ` · ${datesFilled} fechas` : '';
+  showStatus(`${namesFilled} nombres · ${dniFilled} DNI · ${signaturesFilled} firmas${datesText}${missingText}`, missingSignatures.length ? 'error' : 'success');
 }
 
 function signatureMatchKey(value) {
@@ -4633,17 +4699,35 @@ async function ensureSignatureVector(signature) {
 
 function cloneElementsForIndividual(activeDoc, person, signature) {
   const cloned = JSON.parse(JSON.stringify(activeDoc.elements || {}));
+  const nameFieldCount = Object.values(cloned).reduce((count, elements) => count + elements.filter(element => normalizeText(element.templateFieldKey || element.fieldGroup || '').toUpperCase() === 'NOMBRE').length, 0);
+  const dateFieldCounts = {};
+  const now = new Date();
+  const dateValues = {
+    FECHA: `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`,
+    DATE: `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`,
+    DIA: String(now.getDate()).padStart(2, '0'),
+    MES: String(now.getMonth() + 1).padStart(2, '0'),
+    ANO: String(now.getFullYear())
+  };
   for (let page = 1; page <= activeDoc.totalPages; page++) {
     (cloned[page] || []).forEach(element => {
       const field = normalizeText(element.templateFieldKey || element.fieldGroup || '').toUpperCase();
       if (field === 'NOMBRE') {
         element.type = 'text';
-        element.text = person.name;
+        fitTemplateTextToBox(element, person.name);
         clearPlaceholderMetadata(element);
       } else if (field === 'DNI') {
         element.type = 'text';
-        element.text = person.dni || '';
+        fitTemplateTextToBox(element, person.dni || '');
         clearPlaceholderMetadata(element);
+      } else if (field in dateValues) {
+        const index = dateFieldCounts[field] || 0;
+        dateFieldCounts[field] = index + 1;
+        if (index < nameFieldCount) {
+          element.type = 'text';
+          fitTemplateTextToBox(element, dateValues[field]);
+          clearPlaceholderMetadata(element);
+        }
       } else if (field === 'FIRMA') {
         element.type = 'signature';
         element.src = signature.image_url || signature.svg_data;
@@ -4674,9 +4758,10 @@ async function buildIndividualPdf(activeDoc, elements) {
       if (element.type === 'text') {
         const text = String(element.text || '');
         if (!text) continue;
-        const size = element.size || 14;
+        let size = element.size || 14;
         const color = hexToRgb(element.color || '#000000');
         const selectedFont = element.bold && element.italic ? fontBoldItalic : element.bold ? fontBold : element.italic ? fontItalic : font;
+        size = fitPdfTemplateFontSize(element, text, selectedFont);
         const y = height - element.y - size;
         page.drawText(text, {
           x: element.x, y, size, font: selectedFont,
