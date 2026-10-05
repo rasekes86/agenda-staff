@@ -1870,6 +1870,12 @@ body.light-mode .signature-crop-tab-option:hover { background: #f5f3ff; border-c
 .individual-preview-modal > p { margin: 0 0 10px; color: #cbd5e1; font-size: 12px; line-height: 1.45; }
 .individual-preview-modal .signature-quality-notice { padding: 9px 11px; border: 1px solid #f59e0b; border-radius: 8px; background: #451a03; color: #fde68a; }
 .individual-preview-modal .signature-quality-ok { padding: 9px 11px; border-radius: 8px; background: #064e3b; color: #d1fae5; }
+.individual-signature-size-controls { display: grid; grid-template-columns: 1fr 38px 58px 38px; align-items: center; gap: 7px; margin: 9px 0; padding: 8px 10px; border: 1px solid #475569; border-radius: 8px; background: #1e293b; }
+.individual-signature-size-controls > span { color: #e2e8f0; font-size: 11px; font-weight: 700; }
+.individual-signature-size-controls button { height: 32px; border: 0; border-radius: 6px; background: #4f46e5; color: #fff; font-size: 20px; font-weight: 800; cursor: pointer; }
+.individual-signature-size-controls button:disabled { cursor: wait; opacity: .45; }
+.individual-signature-size-controls > strong { color: #fff; text-align: center; font-size: 11px; }
+.individual-signature-size-controls > small { grid-column: 1 / -1; color: #94a3b8; font-size: 9px; }
 .individual-preview-modal iframe { display: block; width: 100%; height: min(68vh, 720px); border: 1px solid #475569; border-radius: 8px; background: #fff; }
 .individual-preview-canvas-wrap { overflow: auto; width: 100%; max-height: 68vh; border: 1px solid #475569; border-radius: 8px; background: #64748b; }
 .individual-preview-canvas-wrap canvas { display: block; width: 100%; height: auto; background: #fff; }
@@ -1894,6 +1900,9 @@ body.light-mode .individual-progress-text { color: #334155; }
 body.light-mode .individual-preview-modal > p { color: #475569; }
 body.light-mode .individual-preview-modal .signature-quality-notice { background: #fffbeb; color: #92400e; }
 body.light-mode .individual-preview-modal .signature-quality-ok { background: #ecfdf5; color: #065f46; }
+body.light-mode .individual-signature-size-controls { background: #f8fafc; border-color: #cbd5e1; }
+body.light-mode .individual-signature-size-controls > span,
+body.light-mode .individual-signature-size-controls > strong { color: #1e293b; }
 body.light-mode .individual-missing-list { border-color: #f59e0b; background: #fffbeb; color: #92400e; }
 body.light-mode .individual-failed-list { border-color: #ef4444; background: #fef2f2; color: #991b1b; }
 

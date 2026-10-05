@@ -3560,7 +3560,7 @@ async function savePdf() {
             // Process signatures: remove white bg, feather edges, ink variance
             if (el.type === 'signature') {
               try {
-                const prepared = await prepareSignatureForPdf(el.pngFallback || el.src, el.width, el.height);
+                const prepared = await prepareSignatureForPdf(el.pngFallback || el.src, el.width, el.height, el.signatureDisplayScale || 1);
                 imageSrc = prepared.src;
                 drawWidth = prepared.width;
                 drawHeight = prepared.height;
@@ -4812,7 +4812,7 @@ async function buildIndividualPdf(activeDoc, elements) {
         let drawWidth = element.width;
         let drawHeight = element.height;
         if (element.type === 'signature') {
-          const prepared = await prepareSignatureForPdf(element.pngFallback || source, element.width, element.height);
+          const prepared = await prepareSignatureForPdf(element.pngFallback || source, element.width, element.height, element.signatureDisplayScale || 1);
           if (prepared.qualityLimited) qualityWarnings++;
           source = prepared.src;
           drawWidth = prepared.width;
@@ -4849,7 +4849,7 @@ async function buildIndividualPdf(activeDoc, elements) {
  * once with high-quality interpolation at 300 DPI instead of being stretched
  * by the PDF viewer.
  */
-async function prepareSignatureForPdf(src, boxWidth, boxHeight) {
+async function prepareSignatureForPdf(src, boxWidth, boxHeight, displayScale = 1) {
   const svgMarkup = AgendaSignatureVector?.dataUrlToSvg(src) || '';
   if (svgMarkup) {
     const vectorSize = AgendaSignatureVector.dimensions(svgMarkup);
@@ -4877,14 +4877,15 @@ async function prepareSignatureForPdf(src, boxWidth, boxHeight) {
   // Refusing to exceed this scale is the only honest way to guarantee that a
   // low-resolution raster signature is never enlarged into visible pixels.
   const maxPrintScale = 72 / 300;
-  const fit = Math.min(boxFit, maxPrintScale);
+  const safeDisplayScale = Math.max(0.5, Math.min(4, Number(displayScale) || 1));
+  const fit = Math.min(boxFit, maxPrintScale * safeDisplayScale);
   const width = Math.max(1, naturalWidth * fit);
   const height = Math.max(1, naturalHeight * fit);
   return {
     src: processedSrc,
     width,
     height,
-    qualityLimited: boxFit > maxPrintScale + 0.0001
+    qualityLimited: boxFit > maxPrintScale + 0.0001 || safeDisplayScale > 1.0001
   };
 }
 
@@ -4995,6 +4996,13 @@ function confirmIndividualPdfPreviews(items) {
       </div>
       <p>Documento de <strong data-person></strong>. Solo se muestra la página que contiene la firma.</p>
       <div data-quality></div>
+      <div class="individual-signature-size-controls">
+        <span>Tamaño de la firma</span>
+        <button type="button" data-smaller title="Reducir firma">−</button>
+        <strong data-scale>100%</strong>
+        <button type="button" data-larger title="Aumentar firma">+</button>
+        <small>Si la amplías por encima de su resolución original puede perder nitidez.</small>
+      </div>
       <div class="individual-preview-canvas-wrap"><canvas title="Página que contiene la firma"></canvas></div>
       <div class="modal-actions">
         <button class="btn-cancel" data-cancel>Cancelar</button>
@@ -5011,13 +5019,20 @@ function confirmIndividualPdfPreviews(items) {
       overlay.querySelector('[data-person]').textContent = item.personName;
       const quality = overlay.querySelector('[data-quality]');
       quality.className = item.qualityWarnings ? 'signature-quality-notice' : 'signature-quality-ok';
-      quality.textContent = item.qualityWarnings
-        ? '⚠️ La firma se ha mantenido más pequeña que el hueco para garantizar 300 DPI y evitar pixelación.'
+      quality.textContent = (item.signatureScale || 1) > 1
+        ? `⚠️ Firma ampliada al ${Math.round(item.signatureScale * 100)}%. Comprueba especialmente la nitidez antes de continuar.`
+        : item.qualityWarnings
+          ? '⚠️ La firma se ha mantenido más pequeña que el hueco para garantizar 300 DPI y evitar pixelación.'
         : '✓ La firma tiene resolución suficiente para el tamaño de la plantilla.';
       const previousButton = overlay.querySelector('[data-previous]');
       const nextButton = overlay.querySelector('[data-next]');
+      const smallerButton = overlay.querySelector('[data-smaller]');
+      const largerButton = overlay.querySelector('[data-larger]');
+      overlay.querySelector('[data-scale]').textContent = `${Math.round((item.signatureScale || 1) * 100)}%`;
       previousButton.disabled = true;
       nextButton.disabled = true;
+      smallerButton.disabled = true;
+      largerButton.disabled = true;
       nextButton.textContent = currentIndex === items.length - 1
         ? 'Todas correctas · Generar ZIP'
         : 'Firma correcta · Siguiente →';
@@ -5039,13 +5054,32 @@ function confirmIndividualPdfPreviews(items) {
         canvas.style.opacity = '1';
         previousButton.disabled = currentIndex === 0;
         nextButton.disabled = false;
+        smallerButton.disabled = (item.signatureScale || 1) <= 0.5;
+        largerButton.disabled = (item.signatureScale || 1) >= 4;
         documentPdf.destroy?.();
       } catch (error) {
         if (token === renderToken) {
           wrap.textContent = `No se pudo mostrar la vista previa: ${error.message}`;
           previousButton.disabled = currentIndex === 0;
           nextButton.disabled = false;
+          smallerButton.disabled = (item.signatureScale || 1) <= 0.5;
+          largerButton.disabled = (item.signatureScale || 1) >= 4;
         }
+      }
+    };
+
+    const resizeCurrentSignature = async delta => {
+      const item = items[currentIndex];
+      const nextScale = Math.max(0.5, Math.min(4, Math.round(((item.signatureScale || 1) + delta) * 100) / 100));
+      if (nextScale === item.signatureScale || typeof item.resizeSignature !== 'function') return;
+      overlay.querySelectorAll('button').forEach(button => { button.disabled = true; });
+      overlay.querySelector('[data-scale]').textContent = 'Regenerando…';
+      try {
+        await item.resizeSignature(nextScale);
+        await renderCurrent();
+      } catch (error) {
+        showStatus(`No se pudo cambiar el tamaño de la firma: ${error.message}`, 'error');
+        await renderCurrent();
       }
     };
 
@@ -5062,6 +5096,8 @@ function confirmIndividualPdfPreviews(items) {
       if (currentIndex < items.length - 1) { currentIndex++; renderCurrent(); }
       else finish(true);
     };
+    overlay.querySelector('[data-smaller]').onclick = () => resizeCurrentSignature(-0.25);
+    overlay.querySelector('[data-larger]').onclick = () => resizeCurrentSignature(0.25);
     renderCurrent();
   });
 }
@@ -5118,8 +5154,25 @@ async function generateIndividualTemplatePdfs(rawText) {
         const base = `${sanitizeDownloadName(activeDoc.fileName.replace(/\.pdf$/i, ''))}_${sanitizeDownloadName(person.name)}`;
         const occurrence = (usedNames.get(base) || 0) + 1;
         usedNames.set(base, occurrence);
-        generatedFiles.push({ name: `${base}${occurrence > 1 ? `_${occurrence}` : ''}.pdf`, data: bytes });
-        previewItems.push({ pdfBytes: bytes, personName: person.name, qualityWarnings: result.qualityWarnings, signaturePage });
+        const generatedFile = { name: `${base}${occurrence > 1 ? `_${occurrence}` : ''}.pdf`, data: bytes };
+        generatedFiles.push(generatedFile);
+        previewItems.push({
+          pdfBytes: bytes,
+          personName: person.name,
+          qualityWarnings: result.qualityWarnings,
+          signaturePage,
+          signatureScale: 1,
+          async resizeSignature(scale) {
+            this.signatureScale = Math.max(0.5, Math.min(4, scale));
+            Object.values(elements).forEach(pageElements => pageElements.forEach(element => {
+              if (element.type === 'signature') element.signatureDisplayScale = this.signatureScale;
+            }));
+            const rebuilt = await buildIndividualPdf(activeDoc, elements);
+            this.pdfBytes = rebuilt.bytes;
+            this.qualityWarnings = rebuilt.qualityWarnings;
+            generatedFile.data = rebuilt.bytes;
+          }
+        });
       } catch (error) {
         failed.push({ person, error: error.message || 'Error desconocido' });
       }
