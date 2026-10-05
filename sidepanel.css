@@ -1838,7 +1838,8 @@ body {
 
 .btn-search-signature,
 .btn-view-all-signatures,
-.btn-preview-signatures {
+.btn-preview-signatures,
+.btn-low-quality-signatures {
   width: 38px;
   height: 38px;
   border: none;
@@ -1852,7 +1853,8 @@ body {
 }
 
 .btn-search-signature:hover,
-.btn-view-all-signatures:hover { background: var(--pri-h); }
+.btn-view-all-signatures:hover,
+.btn-low-quality-signatures:hover { background: var(--pri-h); }
 
 .btn-view-all-signatures {
   background: var(--sec);
@@ -4365,6 +4367,15 @@ body {
   background: var(--pri);
   color: white;
 }
+
+.btn-low-quality-signatures { background: #d97706; }
+
+.signatures-quality-progress,
+.signatures-quality-note { color: var(--txt2); font-size: 11px; text-align: center; margin: 8px 0 12px; }
+
+.signature-preview-card.low-quality { border-color: rgba(245, 158, 11, .55); }
+
+.signature-preview-resolution { margin-top: 4px; color: #f59e0b; font-size: 10px; font-weight: 800; }
 
 .signatures-preview-header {
   display: flex;

@@ -4996,14 +4996,13 @@ function confirmIndividualPdfPreviews(items) {
       </div>
       <p>Documento de <strong data-person></strong>. Solo se muestra la página que contiene la firma.</p>
       <div data-quality></div>
+      <div class="individual-preview-canvas-wrap"><canvas title="Página que contiene la firma"></canvas></div>
       <div class="individual-signature-size-controls">
-        <span>Tamaño de la firma</span>
+        <span>Haz clic sobre la firma y usa la rueda</span>
         <button type="button" data-smaller title="Reducir firma">−</button>
         <strong data-scale>100%</strong>
         <button type="button" data-larger title="Aumentar firma">+</button>
-        <small>Si la amplías por encima de su resolución original puede perder nitidez.</small>
       </div>
-      <div class="individual-preview-canvas-wrap"><canvas title="Página que contiene la firma"></canvas></div>
       <div class="modal-actions">
         <button class="btn-cancel" data-cancel>Cancelar</button>
         <button class="btn-cancel" data-previous>← Anterior</button>
@@ -5051,6 +5050,31 @@ function confirmIndividualPdfPreviews(items) {
         canvas.width = viewport.width;
         canvas.height = viewport.height;
         await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+        if (item.signatureBounds) {
+          const hitbox = document.createElement('button');
+          hitbox.type = 'button';
+          hitbox.className = 'individual-signature-hitbox';
+          if (item.signatureSelected) hitbox.classList.add('selected');
+          hitbox.title = 'Haz clic y usa la rueda para cambiar el tamaño de esta firma';
+          hitbox.style.left = `${item.signatureBounds.x / (viewport.width / 2) * 100}%`;
+          hitbox.style.top = `${item.signatureBounds.y / (viewport.height / 2) * 100}%`;
+          hitbox.style.width = `${item.signatureBounds.width / (viewport.width / 2) * 100}%`;
+          hitbox.style.height = `${item.signatureBounds.height / (viewport.height / 2) * 100}%`;
+          hitbox.addEventListener('click', () => {
+            item.signatureSelected = !item.signatureSelected;
+            hitbox.classList.toggle('selected', item.signatureSelected);
+          });
+          hitbox.addEventListener('wheel', event => {
+            if (!hitbox.classList.contains('selected')) return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (hitbox.dataset.resizing === 'true') return;
+            hitbox.dataset.resizing = 'true';
+            resizeCurrentSignature(event.deltaY < 0 ? 0.25 : -0.25)
+              .finally(() => { hitbox.dataset.resizing = 'false'; });
+          }, { passive: false });
+          wrap.appendChild(hitbox);
+        }
         canvas.style.opacity = '1';
         previousButton.disabled = currentIndex === 0;
         nextButton.disabled = false;
@@ -5151,6 +5175,7 @@ async function generateIndividualTemplatePdfs(rawText) {
         const result = await buildIndividualPdf(activeDoc, elements);
         const bytes = result.bytes;
         const signaturePage = Number(Object.keys(elements).find(page => elements[page].some(element => element.type === 'signature')) || 1);
+        const signatureElement = (elements[signaturePage] || []).find(element => element.type === 'signature');
         const base = `${sanitizeDownloadName(activeDoc.fileName.replace(/\.pdf$/i, ''))}_${sanitizeDownloadName(person.name)}`;
         const occurrence = (usedNames.get(base) || 0) + 1;
         usedNames.set(base, occurrence);
@@ -5161,6 +5186,12 @@ async function generateIndividualTemplatePdfs(rawText) {
           personName: person.name,
           qualityWarnings: result.qualityWarnings,
           signaturePage,
+          signatureBounds: signatureElement ? {
+            x: signatureElement.x,
+            y: signatureElement.y,
+            width: signatureElement.width,
+            height: signatureElement.height
+          } : null,
           signatureScale: 1,
           async resizeSignature(scale) {
             this.signatureScale = Math.max(0.5, Math.min(4, scale));

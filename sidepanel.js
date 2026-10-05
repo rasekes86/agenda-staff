@@ -2939,6 +2939,9 @@ function setupSignatureListeners() {
   // Preview all signatures button
   on('btnPreviewSignatures', 'click', previewAllSignatures);
 
+  // Find raster signatures whose source resolution is too low for clean PDF output.
+  on('btnLowQualitySignatures', 'click', reviewLowQualitySignatures);
+
   // Export every original signature in one ZIP, preserving its database name.
   on('btnDownloadAllSignatures', 'click', downloadAllSignatures);
 
@@ -3705,6 +3708,70 @@ async function previewAllSignatures() {
         <div class="signatures-empty-text">Error al cargar firmas</div>
       </div>
     `;
+  }
+}
+
+function readSignaturePixelSize(source) {
+  return new Promise(resolve => {
+    if (!source) { resolve({ width: 0, height: 0, failed: true }); return; }
+    const image = new Image();
+    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight, failed: false });
+    image.onerror = () => resolve({ width: 0, height: 0, failed: true });
+    image.src = source;
+  });
+}
+
+async function reviewLowQualitySignatures() {
+  const results = $('signaturesResults');
+  results.innerHTML = '<div class="signatures-loading"></div><div class="signatures-quality-progress">Analizando dimensiones reales…</div>';
+  $('signaturesUploadSection').style.display = 'none';
+
+  try {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/signatures?select=id,name,image_url&order=name.asc&limit=10000`, {
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${session.access_token}`
+      }
+    });
+    if (!response.ok) throw new Error('No se han podido consultar las firmas');
+    const signatures = await response.json();
+    const lowQuality = [];
+    const batchSize = 12;
+
+    for (let start = 0; start < signatures.length; start += batchSize) {
+      const batch = signatures.slice(start, start + batchSize);
+      const sizes = await Promise.all(batch.map(signature => readSignaturePixelSize(signature.image_url)));
+      batch.forEach((signature, index) => {
+        const size = sizes[index];
+        if (size.failed || size.width < 400 || size.height < 100) {
+          lowQuality.push({ ...signature, ...size, score: Math.min(size.width / 400, size.height / 100) });
+        }
+      });
+      const progress = results.querySelector('.signatures-quality-progress');
+      if (progress) progress.textContent = `Analizadas ${Math.min(start + batchSize, signatures.length)} de ${signatures.length}…`;
+    }
+
+    lowQuality.sort((a, b) => a.score - b.score || String(a.name).localeCompare(String(b.name), 'es'));
+    if (!lowQuality.length) {
+      results.innerHTML = `<div class="signatures-preview-header"><span>✓ Todas tienen resolución suficiente</span><button class="btn-close-preview" id="btnClosePreview">✕</button></div><div class="signatures-empty"><div class="signatures-empty-icon">✅</div><div class="signatures-empty-text">No se han encontrado PNG por debajo de 400 × 100 px.</div></div>`;
+    } else {
+      results.innerHTML = `<div class="signatures-preview-header"><span>⚠ Baja resolución (${lowQuality.length})</span><button class="btn-close-preview" id="btnClosePreview">✕</button></div><div class="signatures-quality-note">Se muestran primero las de peor calidad. Pulsa una para recortarla y sustituirla.</div><div class="signatures-preview-grid">${lowQuality.map(signature => {
+        const displayName = signature.name || 'Sin nombre';
+        const resolution = signature.failed ? 'No se puede leer' : `${signature.width} × ${signature.height} px`;
+        return `<div class="signature-preview-card low-quality" data-name="${esc(displayName)}"><div class="signature-preview-image-container"><img src="${esc(signature.image_url || '')}" alt="${esc(displayName)}" class="signature-preview-image"></div><div class="signature-preview-name">${esc(displayName)}</div><div class="signature-preview-resolution">${resolution}</div><div class="signature-preview-recrop-hint">✂ Recortar y sustituir</div></div>`;
+      }).join('')}</div>`;
+    }
+
+    $('btnClosePreview')?.addEventListener('click', () => {
+      results.innerHTML = '<div class="signatures-empty"><div class="signatures-empty-icon">🔍</div><div class="signatures-empty-text">Busca una firma o utiliza una de las vistas</div></div>';
+    });
+    results.querySelectorAll('.signature-preview-card.low-quality').forEach(card => {
+      card.addEventListener('click', () => openSidepanelSignatureCrop(card.dataset.name));
+    });
+  } catch (error) {
+    console.error('Low-quality signature review error:', error);
+    results.innerHTML = `<div class="signatures-empty"><div class="signatures-empty-icon">⚠️</div><div class="signatures-empty-text">${esc(error.message)}</div></div>`;
+    $('signaturesUploadSection').style.display = 'block';
   }
 }
 

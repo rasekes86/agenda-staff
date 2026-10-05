@@ -1877,8 +1877,11 @@ body.light-mode .signature-crop-tab-option:hover { background: #f5f3ff; border-c
 .individual-signature-size-controls > strong { color: #fff; text-align: center; font-size: 11px; }
 .individual-signature-size-controls > small { grid-column: 1 / -1; color: #94a3b8; font-size: 9px; }
 .individual-preview-modal iframe { display: block; width: 100%; height: min(68vh, 720px); border: 1px solid #475569; border-radius: 8px; background: #fff; }
-.individual-preview-canvas-wrap { overflow: auto; width: 100%; max-height: 68vh; border: 1px solid #475569; border-radius: 8px; background: #64748b; }
+.individual-preview-canvas-wrap { position: relative; overflow: auto; width: 100%; max-height: 68vh; border: 1px solid #475569; border-radius: 8px; background: #64748b; }
 .individual-preview-canvas-wrap canvas { display: block; width: 100%; height: auto; background: #fff; }
+.individual-signature-hitbox { position: absolute; z-index: 2; min-width: 18px; min-height: 18px; margin: 0; padding: 0; border: 2px dashed transparent; border-radius: 4px; background: transparent; cursor: pointer; touch-action: none; }
+.individual-signature-hitbox:hover { border-color: rgba(79, 70, 229, .65); background: rgba(79, 70, 229, .08); }
+.individual-signature-hitbox.selected { border-color: #4f46e5; background: rgba(79, 70, 229, .12); box-shadow: 0 0 0 2px rgba(255, 255, 255, .8); cursor: ns-resize; }
 .individual-preview-modal .modal-actions { flex-wrap: wrap; }
 .individual-preview-modal .btn-add { min-width: 250px; }
 .individual-result-summary { display: flex; align-items: baseline; gap: 9px; margin-bottom: 12px; padding: 12px; border-radius: 9px; background: #064e3b; color: #d1fae5; }
