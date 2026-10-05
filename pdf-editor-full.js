@@ -4771,7 +4771,7 @@ function cloneElementsForIndividual(activeDoc, person, signature) {
   return cloned;
 }
 
-async function buildIndividualPdf(activeDoc, elements) {
+async function buildIndividualPdf(activeDoc, elements, options = {}) {
   const { PDFDocument, rgb, StandardFonts } = window.PDFLib;
   const pdfDoc = await PDFDocument.load(activeDoc.originalPdfBytes, { ignoreEncryption: true });
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -4785,6 +4785,7 @@ async function buildIndividualPdf(activeDoc, elements) {
     const { height } = page.getSize();
     for (const element of elements[pageNum] || []) {
       if (element.isPlaceholder) continue;
+      if (options.skipSignatures && element.type === 'signature') continue;
       if (element.type === 'text') {
         const text = String(element.text || '');
         if (!text) continue;
@@ -5045,7 +5046,8 @@ function confirmIndividualPdfPreviews(items) {
       wrap.appendChild(pageSurface);
       canvas.style.opacity = '.35';
       try {
-        const documentPdf = await window.pdfjsLib.getDocument({ data: item.pdfBytes.slice(0) }).promise;
+        const previewBytes = typeof item.getPreviewBytes === 'function' ? await item.getPreviewBytes() : item.pdfBytes;
+        const documentPdf = await window.pdfjsLib.getDocument({ data: previewBytes.slice(0) }).promise;
         const pageNumber = Math.min(Math.max(1, item.signaturePage || 1), documentPdf.numPages);
         const page = await documentPdf.getPage(pageNumber);
         if (token !== renderToken) { documentPdf.destroy?.(); return; }
@@ -5063,6 +5065,14 @@ function confirmIndividualPdfPreviews(items) {
           hitbox.style.top = `${item.signatureBounds.y / (viewport.height / 2) * 100}%`;
           hitbox.style.width = `${item.signatureBounds.width / (viewport.width / 2) * 100}%`;
           hitbox.style.height = `${item.signatureBounds.height / (viewport.height / 2) * 100}%`;
+          if (item.signaturePreviewSrc) {
+            const signatureImage = document.createElement('img');
+            signatureImage.className = 'individual-signature-preview-image';
+            signatureImage.src = item.signaturePreviewSrc;
+            signatureImage.alt = `Firma de ${item.personName}`;
+            signatureImage.style.transform = `scale(${item.signatureScale || 1})`;
+            hitbox.appendChild(signatureImage);
+          }
           hitbox.addEventListener('click', () => {
             item.signatureSelected = !item.signatureSelected;
             hitbox.classList.toggle('selected', item.signatureSelected);
@@ -5071,10 +5081,7 @@ function confirmIndividualPdfPreviews(items) {
             if (!hitbox.classList.contains('selected')) return;
             event.preventDefault();
             event.stopPropagation();
-            if (hitbox.dataset.resizing === 'true') return;
-            hitbox.dataset.resizing = 'true';
-            resizeCurrentSignature(event.deltaY < 0 ? 0.25 : -0.25)
-              .finally(() => { hitbox.dataset.resizing = 'false'; });
+            previewResizeCurrentSignature(event.deltaY < 0 ? 0.25 : -0.25);
           }, { passive: false });
           pageSurface.appendChild(hitbox);
         }
@@ -5095,18 +5102,47 @@ function confirmIndividualPdfPreviews(items) {
       }
     };
 
-    const resizeCurrentSignature = async delta => {
+    const refreshSignatureSizeUi = item => {
+      overlay.querySelector('[data-scale]').textContent = `${Math.round((item.signatureScale || 1) * 100)}%`;
+      overlay.querySelector('[data-smaller]').disabled = (item.signatureScale || 1) <= 0.5;
+      overlay.querySelector('[data-larger]').disabled = (item.signatureScale || 1) >= 4;
+      const image = overlay.querySelector('.individual-signature-preview-image');
+      if (image) image.style.transform = `scale(${item.signatureScale || 1})`;
+      const quality = overlay.querySelector('[data-quality]');
+      if ((item.signatureScale || 1) > 1) {
+        quality.className = 'signature-quality-notice';
+        quality.textContent = `⚠️ Firma ampliada al ${Math.round(item.signatureScale * 100)}%. Comprueba especialmente la nitidez antes de continuar.`;
+      } else {
+        quality.className = item.qualityWarnings ? 'signature-quality-notice' : 'signature-quality-ok';
+        quality.textContent = item.qualityWarnings
+          ? '⚠️ La firma se ha mantenido más pequeña que el hueco para garantizar 300 DPI y evitar pixelación.'
+          : '✓ La firma tiene resolución suficiente para el tamaño de la plantilla.';
+      }
+    };
+
+    const previewResizeCurrentSignature = delta => {
       const item = items[currentIndex];
       const nextScale = Math.max(0.5, Math.min(4, Math.round(((item.signatureScale || 1) + delta) * 100) / 100));
-      if (nextScale === item.signatureScale || typeof item.resizeSignature !== 'function') return;
+      if (nextScale === item.signatureScale) return;
+      item.signatureScale = nextScale;
+      refreshSignatureSizeUi(item);
+    };
+
+    const applyCurrentSignatureSize = async () => {
+      const item = items[currentIndex];
+      if (item.appliedSignatureScale === item.signatureScale || typeof item.resizeSignature !== 'function') return;
       overlay.querySelectorAll('button').forEach(button => { button.disabled = true; });
-      overlay.querySelector('[data-scale]').textContent = 'Regenerando…';
+      overlay.querySelector('[data-scale]').textContent = 'Aplicando…';
       try {
-        await item.resizeSignature(nextScale);
-        await renderCurrent();
+        await item.resizeSignature(item.signatureScale);
+        item.appliedSignatureScale = item.signatureScale;
       } catch (error) {
         showStatus(`No se pudo cambiar el tamaño de la firma: ${error.message}`, 'error');
-        await renderCurrent();
+        item.signatureScale = item.appliedSignatureScale || 1;
+      } finally {
+        refreshSignatureSizeUi(item);
+        overlay.querySelector('[data-previous]').disabled = currentIndex === 0;
+        overlay.querySelector('[data-next]').disabled = false;
       }
     };
 
@@ -5116,15 +5152,16 @@ function confirmIndividualPdfPreviews(items) {
       resolve(accepted);
     };
     overlay.querySelector('[data-cancel]').onclick = () => finish(false);
-    overlay.querySelector('[data-previous]').onclick = () => {
-      if (currentIndex > 0) { currentIndex--; renderCurrent(); }
+    overlay.querySelector('[data-previous]').onclick = async () => {
+      if (currentIndex > 0) { await applyCurrentSignatureSize(); currentIndex--; renderCurrent(); }
     };
-    overlay.querySelector('[data-next]').onclick = () => {
+    overlay.querySelector('[data-next]').onclick = async () => {
+      await applyCurrentSignatureSize();
       if (currentIndex < items.length - 1) { currentIndex++; renderCurrent(); }
       else finish(true);
     };
-    overlay.querySelector('[data-smaller]').onclick = () => resizeCurrentSignature(-0.25);
-    overlay.querySelector('[data-larger]').onclick = () => resizeCurrentSignature(0.25);
+    overlay.querySelector('[data-smaller]').onclick = () => previewResizeCurrentSignature(-0.25);
+    overlay.querySelector('[data-larger]').onclick = () => previewResizeCurrentSignature(0.25);
     renderCurrent();
   });
 }
@@ -5195,7 +5232,17 @@ async function generateIndividualTemplatePdfs(rawText) {
             width: signatureElement.width,
             height: signatureElement.height
           } : null,
+          signaturePreviewSrc: signature.image_url || signature.svg_data || '',
           signatureScale: 1,
+          appliedSignatureScale: 1,
+          previewPdfBytes: null,
+          async getPreviewBytes() {
+            if (!this.previewPdfBytes) {
+              const preview = await buildIndividualPdf(activeDoc, elements, { skipSignatures: true });
+              this.previewPdfBytes = preview.bytes;
+            }
+            return this.previewPdfBytes;
+          },
           async resizeSignature(scale) {
             this.signatureScale = Math.max(0.5, Math.min(4, scale));
             Object.values(elements).forEach(pageElements => pageElements.forEach(element => {

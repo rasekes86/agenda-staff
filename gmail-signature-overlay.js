@@ -188,6 +188,25 @@
               });
             }
           });
+          // Gmail can flatten rows from pasted spreadsheets. Read consecutive
+          // leaf cells too, so DNI | name | surnames remains detectable even
+          // when the visual row has no usable TR structure.
+          const leafCells = [...table.querySelectorAll('th, td')]
+            .filter(cell => !cell.querySelector('th, td'));
+          leafCells.forEach((cell, index) => {
+            const dni = normalize(cell.innerText).replace(/ /g, '');
+            if (!dniPattern.test(dni)) return;
+            const firstNameCell = leafCells[index + 1];
+            const surnamesCell = leafCells[index + 2];
+            if (!firstNameCell || !surnamesCell) return;
+            const firstName = firstNameCell.innerText.replace(/\s+/g, ' ').trim();
+            const surnames = surnamesCell.innerText.replace(/\s+/g, ' ').trim();
+            if (!firstName || !surnames || /\d|@|https?:|www\./i.test(`${firstName} ${surnames}`)) return;
+            addPerson(`${surnames}, ${firstName}`, cell.innerText.trim(), body, {
+              anchorText: firstName,
+              anchorElement: firstNameCell
+            });
+          });
           return;
         }
         const headerCells = [...rows[headerRowIndex].querySelectorAll('th, td')];
@@ -209,6 +228,14 @@
       });
 
       const usefulBodyText = messageBodyText(body);
+      // Gmail sometimes exposes visual line breaks as spaces. Scan the whole
+      // message for SURNAME(S), FIRST NAME followed by a DNI/NIE as well.
+      const inlinePersonnelPattern = /([A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ'´ -]{1,70},\s*[A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ'´ -]{1,55}?)\s+((?:[XYZ]\s?\d{7}\s?[A-Z]|\d{8}\s?[A-Z]))(?=\s|$)/gi;
+      let inlinePersonnelCount = 0;
+      for (const match of usefulBodyText.matchAll(inlinePersonnelPattern)) {
+        addPerson(match[1], match[2], body, { anchorText: match[1] });
+        inlinePersonnelCount++;
+      }
       const rawLines = usefulBodyText.split(/\r?\n/);
       const tableHeaderIndex = rawLines.findIndex(line => {
         const value = normalize(line);
@@ -271,7 +298,7 @@
         if (!match || (!hasNamesHeading && line !== line.toLocaleUpperCase())) continue;
         standaloneCandidates.push(match[1]);
       }
-      if (hasNamesHeading || standaloneCandidates.length >= 2) {
+      if (hasNamesHeading || standaloneCandidates.length >= 2 || inlinePersonnelCount >= 2) {
         standaloneCandidates.forEach(name => addPerson(name, '', body));
       }
     }
@@ -555,7 +582,9 @@
     observer?.disconnect();
     document.getElementById('agenda-signature-overlay')?.remove();
     clearInlineIndicators();
-    if (!isComposingEmail()) extractPersonnel().forEach(injectIndicator);
+    // Compose areas are already excluded individually. A minimized draft must
+    // not disable analysis of the received message currently being viewed.
+    extractPersonnel().forEach(injectIndicator);
     if (observer) observer.observe(document.body, observerConfig);
   }
 
