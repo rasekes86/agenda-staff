@@ -1810,24 +1810,29 @@ async function handleScreenshotResult(dataUrl) {
       console.log('Clipboard no disponible:', clipErr.message);
     }
     
-    // Only download if clipboard failed
-    if (!clipboardSuccess) {
-      try {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `captura-${Date.now()}.png`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      } catch (downloadErr) {
-        console.log('Download error:', downloadErr.message);
-      }
-      showToast('✅ Captura descargada');
-    } else {
-      showToast('✅ Captura copiada al portapapeles');
-    }
+    // Always download the confirmed transparent PNG so it is immediately
+    // available for uploading as a signature. Clipboard is only an extra.
+    const now = new Date();
+    const stamp = [
+      now.getFullYear(),
+      String(now.getMonth() + 1).padStart(2, '0'),
+      String(now.getDate()).padStart(2, '0')
+    ].join('-') + '-' + [
+      String(now.getHours()).padStart(2, '0'),
+      String(now.getMinutes()).padStart(2, '0'),
+      String(now.getSeconds()).padStart(2, '0')
+    ].join('');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `firma-recortada-${stamp}.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast(clipboardSuccess
+      ? '✅ Firma PNG descargada y copiada'
+      : '✅ Firma PNG transparente descargada');
   } catch (err) {
     console.error('Error processing screenshot:', err);
     showToast('Error al procesar: ' + err.message);
