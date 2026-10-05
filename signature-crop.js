@@ -4,6 +4,8 @@
   const selection = document.getElementById('selection');
   const preview = document.getElementById('preview');
   const previewImage = document.getElementById('preview-image');
+  const documentPreviewImage = document.getElementById('document-preview-image');
+  const previewResolution = document.getElementById('preview-resolution');
   const loading = document.getElementById('loading');
   const saveButton = document.getElementById('save');
   let startX = 0;
@@ -66,30 +68,13 @@
     output.width = right - left + 1;
     output.height = bottom - top + 1;
     output.getContext('2d').drawImage(canvas, left, top, output.width, output.height, 0, 0, output.width, output.height);
-    return exportHighResolutionSignature(output);
-  }
-
-  function exportHighResolutionSignature(sourceCanvas) {
-    // A screen crop can be physically small even when its strokes are clean.
-    // Keep the native crop, then create a lossless high-resolution master so
-    // it can occupy a normal signature field at 300 DPI without pixelation.
-    const minWidth = 1200;
-    const minHeight = 400;
-    const maxWidth = 3200;
-    const maxHeight = 1200;
-    const requestedScale = Math.max(1, minWidth / sourceCanvas.width, minHeight / sourceCanvas.height);
-    const safeScale = Math.min(8, requestedScale, maxWidth / sourceCanvas.width, maxHeight / sourceCanvas.height);
-    if (safeScale <= 1.01) return sourceCanvas.toDataURL('image/png');
-
-    const highResolution = document.createElement('canvas');
-    highResolution.width = Math.max(1, Math.round(sourceCanvas.width * safeScale));
-    highResolution.height = Math.max(1, Math.round(sourceCanvas.height * safeScale));
-    const context = highResolution.getContext('2d');
-    context.imageSmoothingEnabled = true;
-    context.imageSmoothingQuality = 'high';
-    context.clearRect(0, 0, highResolution.width, highResolution.height);
-    context.drawImage(sourceCanvas, 0, 0, highResolution.width, highResolution.height);
-    return highResolution.toDataURL('image/png');
+    // PNG is lossless. Keeping the native crop preserves every real source
+    // pixel; enlarging it here only invents pixels and softens the strokes.
+    return {
+      dataUrl: output.toDataURL('image/png'),
+      width: output.width,
+      height: output.height
+    };
   }
 
   stage.addEventListener('pointerdown', event => {
@@ -126,12 +111,18 @@
     loading.hidden = false;
     selection.hidden = true;
     try {
-      previewDataUrl = processCrop({
+      const crop = processCrop({
         x: (rect.left - imageRect.left) * scaleX,
         y: (rect.top - imageRect.top) * scaleY,
         width: rect.width * scaleX,
         height: rect.height * scaleY
       });
+      previewDataUrl = crop.dataUrl;
+      const lowResolution = crop.width < 400 || crop.height < 100;
+      previewResolution.textContent = lowResolution
+        ? `${crop.width} × ${crop.height} píxeles · Resolución baja: amplía el documento y repite el recorte`
+        : `${crop.width} × ${crop.height} píxeles reales · PNG sin pérdida`;
+      previewResolution.classList.toggle('low-resolution', lowResolution);
     } catch (error) {
       loading.hidden = true;
       alert(error.message || 'No se ha podido realizar el recorte');
@@ -139,6 +130,7 @@
     }
     loading.hidden = true;
     previewImage.src = previewDataUrl;
+    documentPreviewImage.src = previewDataUrl;
     preview.hidden = false;
   });
 
@@ -151,10 +143,9 @@
   saveButton.addEventListener('click', async () => {
     saveButton.disabled = true;
     saveButton.textContent = 'Guardando…';
-    let svgData = '';
-    try { svgData = (await AgendaSignatureVector.pngToSvg(previewDataUrl)).dataUrl; }
-    catch (error) { console.warn('No se pudo vectorizar el recorte; se conservará el PNG:', error); }
-    const result = await chrome.runtime.sendMessage({ type: 'AGENDA_CONFIRM_SIGNATURE_CROP', imageUrl: previewDataUrl, svgData });
+    // Cropped signatures stay as their lossless PNG master. Do not run an
+    // automatic vectorisation that could alter the original strokes.
+    const result = await chrome.runtime.sendMessage({ type: 'AGENDA_CONFIRM_SIGNATURE_CROP', imageUrl: previewDataUrl, svgData: '' });
     if (!result?.success) {
       saveButton.disabled = false;
       saveButton.textContent = 'Guardar firma';

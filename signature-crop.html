@@ -22,8 +22,25 @@
     <section id="preview" hidden>
       <div class="preview-card">
         <h1>Confirma el recorte</h1>
-        <p>El fondo blanco se ha eliminado. Comprueba el resultado antes de guardarlo.</p>
-        <div class="checker"><img id="preview-image" alt="Vista previa de la firma"></div>
+        <p>El fondo blanco se ha eliminado sin reducir la resolución original. Comprueba el recorte y cómo se verá sobre un documento.</p>
+        <div class="preview-grid">
+          <div class="preview-block">
+            <strong>Recorte transparente</strong>
+            <div class="checker"><img id="preview-image" alt="Vista previa transparente de la firma"></div>
+            <small id="preview-resolution"></small>
+          </div>
+          <div class="preview-block">
+            <strong>Vista aproximada en el PDF</strong>
+            <div class="document-preview">
+              <div class="document-lines"></div>
+              <div class="document-signature-field">
+                <span>Firma</span>
+                <img id="document-preview-image" alt="Firma sobre un documento">
+              </div>
+              <div class="document-line-short"></div>
+            </div>
+          </div>
+        </div>
         <div class="actions">
           <button id="repeat" type="button">Repetir recorte</button>
           <button id="preview-cancel" type="button">Cancelar</button>

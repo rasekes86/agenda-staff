@@ -45,6 +45,7 @@ let notificationCheckInterval = null;
 let scheduledEvents = [];
 let notifiedEvents = new Set();
 let pendingSignatureCrop = null;
+let signatureCropConfirmationPromise = null;
 
 async function getPendingSignatureCrop() {
   if (pendingSignatureCrop) return pendingSignatureCrop;
@@ -211,6 +212,16 @@ async function startSignatureCrop(message, sourceTab) {
 }
 
 async function confirmSignatureCrop(message, senderTab) {
+  if (signatureCropConfirmationPromise) return signatureCropConfirmationPromise;
+  signatureCropConfirmationPromise = confirmSignatureCropOnce(message, senderTab);
+  try {
+    return await signatureCropConfirmationPromise;
+  } finally {
+    signatureCropConfirmationPromise = null;
+  }
+}
+
+async function confirmSignatureCropOnce(message, senderTab) {
   const activeCrop = await getPendingSignatureCrop();
   if (!activeCrop || senderTab?.id !== activeCrop.cropperTabId) throw new Error('La sesión de recorte ha caducado');
   const crop = { ...activeCrop };
@@ -260,8 +271,21 @@ async function uploadGmailSignature(message) {
     user_id: stored.user.id,
     user_name: stored.user.name || stored.user.email || 'Usuario'
   };
-  let response = await fetch(`${configUrl}/rest/v1/signatures`, {
-    method: 'POST',
+  const lookupUrl = new URL(`${configUrl}/rest/v1/signatures`);
+  lookupUrl.searchParams.set('select', 'id,name');
+  lookupUrl.searchParams.set('name', `eq.${signatureBody.name}`);
+  lookupUrl.searchParams.set('limit', '20');
+  const lookupResponse = await fetch(lookupUrl.toString(), {
+    headers: { apikey: configKey, Authorization: `Bearer ${stored.session.access_token}` }
+  });
+  const existingRows = lookupResponse.ok ? await lookupResponse.json() : [];
+  const existing = existingRows[0] || null;
+  const saveUrl = existing
+    ? `${configUrl}/rest/v1/signatures?id=eq.${encodeURIComponent(existing.id)}`
+    : `${configUrl}/rest/v1/signatures`;
+  if (existing) delete signatureBody.id;
+  let response = await fetch(saveUrl, {
+    method: existing ? 'PATCH' : 'POST',
     headers: {
       apikey: configKey,
       Authorization: `Bearer ${stored.session.access_token}`,
@@ -273,13 +297,20 @@ async function uploadGmailSignature(message) {
   if (!response.ok && message.svgData && /svg_data|vector_version|schema cache/i.test(await response.clone().text())) {
     delete signatureBody.svg_data;
     delete signatureBody.vector_version;
-    response = await fetch(`${configUrl}/rest/v1/signatures`, {
-      method: 'POST',
+    response = await fetch(saveUrl, {
+      method: existing ? 'PATCH' : 'POST',
       headers: { apikey: configKey, Authorization: `Bearer ${stored.session.access_token}`, 'Content-Type': 'application/json', Prefer: 'return=representation' },
       body: JSON.stringify(signatureBody)
     });
   }
   if (!response.ok) throw new Error('No se ha podido guardar la firma');
+  // Remove duplicate legacy rows only after the selected master was saved.
+  if (existingRows.length > 1) {
+    await Promise.allSettled(existingRows.slice(1).map(row => fetch(
+      `${configUrl}/rest/v1/signatures?id=eq.${encodeURIComponent(row.id)}`,
+      { method: 'DELETE', headers: { apikey: configKey, Authorization: `Bearer ${stored.session.access_token}` } }
+    )));
+  }
   return { success: true, name: name.toUpperCase() };
 }
 
