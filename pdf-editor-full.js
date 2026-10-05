@@ -4479,13 +4479,27 @@ function showFillTemplateModal() {
   modal.classList.add('show');
 }
 
+function getTemplateReadableFontFloor(element, availableHeight) {
+  const field = normalizeText(element.templateFieldKey || element.fieldGroup || '').toUpperCase();
+  const preferredFloor = ['FECHA', 'DATE', 'DIA', 'MES', 'AÑO'].includes(field) ? 8
+    : field === 'DNI' ? 7.5
+      : 6.5;
+  return Math.min(preferredFloor, availableHeight);
+}
+
 function fitTemplateTextToBox(element, text) {
   const value = String(text || '');
   element.text = value;
-  const baseSize = Number(element.templateBaseSize || element.size || DEFAULT_FONT_SIZE);
-  element.templateBaseSize = baseSize;
+  const savedSize = Number(element.templateBaseSize || element.size || DEFAULT_FONT_SIZE);
   const availableWidth = Math.max(1, Number(element.width || 150) - 4);
-  const availableHeight = Math.max(5, Number(element.height || baseSize + 8) - 4);
+  const availableHeight = Math.max(5, Number(element.height || savedSize + 8) - 4);
+  // Older templates may contain a very small saved font after resizing a slot.
+  // Recover a readable base size from the actual field height instead of
+  // treating that stale value as the maximum forever.
+  const readableFloor = getTemplateReadableFontFloor(element, availableHeight);
+  const heightBasedSize = Math.min(DEFAULT_FONT_SIZE, availableHeight * 0.72);
+  const baseSize = Math.min(availableHeight, Math.max(savedSize, heightBasedSize, readableFloor));
+  element.templateBaseSize = baseSize;
   const canvas = fitTemplateTextToBox.canvas ||= document.createElement('canvas');
   const context = canvas.getContext('2d');
   const weight = element.bold ? '700' : '400';
@@ -4493,7 +4507,7 @@ function fitTemplateTextToBox(element, text) {
   context.font = `${style} ${weight} ${baseSize}px Helvetica, Arial, sans-serif`;
   const measuredWidth = Math.max(1, context.measureText(value).width);
   const fittedSize = Math.min(baseSize, availableHeight, baseSize * availableWidth / measuredWidth);
-  element.size = Math.max(3, Math.floor(fittedSize * 10) / 10);
+  element.size = Math.max(readableFloor, Math.floor(fittedSize * 10) / 10);
   return element.size;
 }
 
@@ -4502,10 +4516,12 @@ function fitPdfTemplateFontSize(element, text, font) {
   if (!element.templateFieldKey) return size;
   const availableWidth = Math.max(1, Number(element.width || 150) - 4);
   const availableHeight = Math.max(5, Number(element.height || size + 8) - 4);
-  size = Math.min(size, availableHeight);
+  const readableFloor = getTemplateReadableFontFloor(element, availableHeight);
+  const heightBasedSize = Math.min(DEFAULT_FONT_SIZE, availableHeight * 0.72);
+  size = Math.min(availableHeight, Math.max(size, heightBasedSize, readableFloor));
   const measuredWidth = font.widthOfTextAtSize(String(text || ''), size);
   if (measuredWidth > availableWidth) size *= availableWidth / measuredWidth;
-  return Math.max(3, size);
+  return Math.max(readableFloor, size);
 }
 
 function clearPlaceholderMetadata(el) {
