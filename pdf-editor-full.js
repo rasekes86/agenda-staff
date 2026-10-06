@@ -5320,28 +5320,34 @@ async function generateIndividualTemplatePdfs(rawText) {
       }
     }
 
-    let zipName = '';
+    let downloadedName = '';
     if (generatedFiles.length) {
-      const reportLines = [
-        'AGENDA STAFF - INFORME DE GENERACIÓN INDIVIDUAL',
-        `Fecha: ${new Date().toLocaleString('es-ES')}`,
-        `Documentos generados: ${generatedFiles.length}`,
-        `Sin firma: ${missing.length}`,
-        '',
-        ...(missing.length ? ['PERSONAS SIN FIRMA:', ...missing.map(person => `- ${person.name}${person.dni ? ` · ${person.dni}` : ''}`)] : ['Todas las personas disponían de firma.']),
-        ...(failed.length ? ['', 'ERRORES:', ...failed.map(item => `- ${item.person.name}: ${item.error}`)] : [])
-      ];
-      generatedFiles.push({ name: 'INFORME_GENERACION.txt', data: new TextEncoder().encode(reportLines.join('\r\n')) });
-      const zip = createStoredZip(generatedFiles);
-      const url = URL.createObjectURL(zip);
       const link = document.createElement('a');
-      zipName = `${sanitizeDownloadName(activeDoc.fileName.replace(/\.pdf$/i, ''))}_DOCUMENTOS_INDIVIDUALES.zip`;
+      let url;
+      if (people.length === 1 && generatedFiles.length === 1) {
+        const onlyPdf = generatedFiles[0];
+        downloadedName = onlyPdf.name;
+        url = URL.createObjectURL(new Blob([onlyPdf.data], { type: 'application/pdf' }));
+      } else {
+        const reportLines = [
+          'AGENDA STAFF - INFORME DE GENERACIÓN INDIVIDUAL',
+          `Fecha: ${new Date().toLocaleString('es-ES')}`,
+          `Documentos generados: ${generatedFiles.length}`,
+          `Sin firma: ${missing.length}`,
+          '',
+          ...(missing.length ? ['PERSONAS SIN FIRMA:', ...missing.map(person => `- ${person.name}${person.dni ? ` · ${person.dni}` : ''}`)] : ['Todas las personas disponían de firma.']),
+          ...(failed.length ? ['', 'ERRORES:', ...failed.map(item => `- ${item.person.name}: ${item.error}`)] : [])
+        ];
+        const zipFiles = [...generatedFiles, { name: 'INFORME_GENERACION.txt', data: new TextEncoder().encode(reportLines.join('\r\n')) }];
+        downloadedName = `${sanitizeDownloadName(activeDoc.fileName.replace(/\.pdf$/i, ''))}_DOCUMENTOS_INDIVIDUALES.zip`;
+        url = URL.createObjectURL(createStoredZip(zipFiles));
+      }
       link.href = url;
-      link.download = zipName;
+      link.download = downloadedName;
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
     }
-    showIndividualGenerationReport(generatedFiles.filter(file => file.name.endsWith('.pdf')).length, missing, failed, zipName);
+    showIndividualGenerationReport(generatedFiles.length, missing, failed, downloadedName);
   } catch (error) {
     document.querySelector('.individual-generation-overlay')?.remove();
     showStatus(`No se pudieron generar los documentos: ${error.message}`, 'error');
