@@ -4988,6 +4988,7 @@ function confirmIndividualPdfPreviews(items) {
     if (!items.length) { resolve(true); return; }
     let currentIndex = 0;
     let renderToken = 0;
+    let overviewScrollTop = 0;
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay show individual-preview-overlay';
     overlay.innerHTML = `<div class="modal individual-preview-modal">
@@ -4995,14 +4996,21 @@ function confirmIndividualPdfPreviews(items) {
         <h3>🔎 Revisa todas las firmas antes de generar el ZIP</h3>
         <strong data-counter></strong>
       </div>
-      <p>Documento de <strong data-person></strong>. Solo se muestra la página que contiene la firma.</p>
-      <div data-quality></div>
-      <div class="individual-preview-canvas-wrap"><canvas title="Página que contiene la firma"></canvas></div>
-      <div class="individual-signature-size-controls">
-        <span>Haz clic sobre la firma y usa la rueda</span>
-        <button type="button" data-smaller title="Reducir firma">−</button>
-        <strong data-scale>100%</strong>
-        <button type="button" data-larger title="Aumentar firma">+</button>
+      <div class="individual-overview-view" data-overview-view>
+        <p>Comprueba todas las firmas de un vistazo. Pulsa únicamente la que quieras revisar o ajustar.</p>
+        <div class="individual-overview-grid" data-overview-grid></div>
+      </div>
+      <div class="individual-detail-view" data-detail-view hidden>
+        <button type="button" class="individual-back-overview" data-back-overview>← Volver a todas las firmas</button>
+        <p>Documento de <strong data-person></strong>. Solo se muestra la página que contiene la firma.</p>
+        <div data-quality></div>
+        <div class="individual-preview-canvas-wrap"><canvas title="Página que contiene la firma"></canvas></div>
+        <div class="individual-signature-size-controls">
+          <span>Haz clic sobre la firma y usa la rueda</span>
+          <button type="button" data-smaller title="Reducir firma">−</button>
+          <strong data-scale>100%</strong>
+          <button type="button" data-larger title="Aumentar firma">+</button>
+        </div>
       </div>
       <div class="modal-actions">
         <button class="btn-cancel" data-cancel>Cancelar</button>
@@ -5013,9 +5021,42 @@ function confirmIndividualPdfPreviews(items) {
     </div>`;
     document.body.appendChild(overlay);
 
+    const renderOverview = () => {
+      renderToken++;
+      overlay.querySelector('[data-overview-view]').hidden = false;
+      overlay.querySelector('[data-detail-view]').hidden = true;
+      overlay.querySelector('[data-counter]').textContent = `${items.length} firmas`;
+      overlay.querySelector('[data-previous]').hidden = true;
+      overlay.querySelector('[data-next]').hidden = true;
+      const grid = overlay.querySelector('[data-overview-grid]');
+      grid.innerHTML = items.map((item, index) => {
+        const scale = item.signatureScale || 1;
+        const qualityClass = item.qualityWarnings || scale > 1 ? 'warning' : 'ok';
+        return `<button type="button" class="individual-overview-card ${qualityClass}${scale !== 1 ? ' adjusted' : ''}" data-preview-index="${index}">
+          <span class="individual-overview-name">${escapeHtml(item.personName)}</span>
+          <span class="individual-overview-signature">
+            ${item.signaturePreviewSrc ? `<img src="${escapeHtml(item.signaturePreviewSrc)}" alt="Firma de ${escapeHtml(item.personName)}" style="transform:scale(${scale})">` : '<em>Sin previsualización</em>'}
+          </span>
+          <span class="individual-overview-meta">${Math.round(scale * 100)}% · Pulsar para ajustar</span>
+        </button>`;
+      }).join('');
+      grid.scrollTop = overviewScrollTop;
+      grid.querySelectorAll('[data-preview-index]').forEach(card => {
+        card.addEventListener('click', () => {
+          overviewScrollTop = grid.scrollTop;
+          currentIndex = Number(card.dataset.previewIndex);
+          renderCurrent();
+        });
+      });
+    };
+
     const renderCurrent = async () => {
       const token = ++renderToken;
       const item = items[currentIndex];
+      overlay.querySelector('[data-overview-view]').hidden = true;
+      overlay.querySelector('[data-detail-view]').hidden = false;
+      overlay.querySelector('[data-previous]').hidden = false;
+      overlay.querySelector('[data-next]').hidden = false;
       overlay.querySelector('[data-counter]').textContent = `${currentIndex + 1} de ${items.length}`;
       overlay.querySelector('[data-person]').textContent = item.personName;
       const quality = overlay.querySelector('[data-quality]');
@@ -5141,6 +5182,7 @@ function confirmIndividualPdfPreviews(items) {
         showStatus(`No se pudo cambiar el tamaño de la firma: ${error.message}`, 'error');
         item.signatureScale = item.appliedSignatureScale || 1;
       } finally {
+        overlay.querySelectorAll('button').forEach(button => { button.disabled = false; });
         refreshSignatureSizeUi(item);
         overlay.querySelector('[data-previous]').disabled = currentIndex === 0;
         overlay.querySelector('[data-next]').disabled = false;
@@ -5160,6 +5202,10 @@ function confirmIndividualPdfPreviews(items) {
     overlay.querySelector('[data-previous]').onclick = async () => {
       if (currentIndex > 0) { await applyCurrentSignatureSize(); currentIndex--; renderCurrent(); }
     };
+    overlay.querySelector('[data-back-overview]').onclick = async () => {
+      await applyCurrentSignatureSize();
+      renderOverview();
+    };
     overlay.querySelector('[data-next]').onclick = async () => {
       await applyCurrentSignatureSize();
       if (currentIndex < items.length - 1) { currentIndex++; renderCurrent(); }
@@ -5167,7 +5213,7 @@ function confirmIndividualPdfPreviews(items) {
     };
     overlay.querySelector('[data-smaller]').onclick = () => previewResizeCurrentSignature(-0.25);
     overlay.querySelector('[data-larger]').onclick = () => previewResizeCurrentSignature(0.25);
-    renderCurrent();
+    renderOverview();
   });
 }
 
