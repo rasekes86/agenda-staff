@@ -5324,6 +5324,7 @@ async function generateIndividualTemplatePdfs(rawText) {
     if (generatedFiles.length) {
       const link = document.createElement('a');
       let url;
+      let reportDownload = null;
       if (people.length === 1 && generatedFiles.length === 1) {
         const onlyPdf = generatedFiles[0];
         downloadedName = onlyPdf.name;
@@ -5338,13 +5339,24 @@ async function generateIndividualTemplatePdfs(rawText) {
           ...(missing.length ? ['PERSONAS SIN FIRMA:', ...missing.map(person => `- ${person.name}${person.dni ? ` · ${person.dni}` : ''}`)] : ['Todas las personas disponían de firma.']),
           ...(failed.length ? ['', 'ERRORES:', ...failed.map(item => `- ${item.person.name}: ${item.error}`)] : [])
         ];
-        const zipFiles = [...generatedFiles, { name: 'INFORME_GENERACION.txt', data: new TextEncoder().encode(reportLines.join('\r\n')) }];
         downloadedName = `${sanitizeDownloadName(activeDoc.fileName.replace(/\.pdf$/i, ''))}_DOCUMENTOS_INDIVIDUALES.zip`;
-        url = URL.createObjectURL(createStoredZip(zipFiles));
+        url = URL.createObjectURL(createStoredZip(generatedFiles));
+        const reportUrl = URL.createObjectURL(new Blob([reportLines.join('\r\n')], { type: 'text/plain;charset=utf-8' }));
+        reportDownload = {
+          url: reportUrl,
+          name: `${sanitizeDownloadName(activeDoc.fileName.replace(/\.pdf$/i, ''))}_INFORME_GENERACION.txt`
+        };
       }
       link.href = url;
       link.download = downloadedName;
       link.click();
+      if (reportDownload) {
+        const reportLink = document.createElement('a');
+        reportLink.href = reportDownload.url;
+        reportLink.download = reportDownload.name;
+        reportLink.click();
+        setTimeout(() => URL.revokeObjectURL(reportDownload.url), 10000);
+      }
       setTimeout(() => URL.revokeObjectURL(url), 10000);
     }
     showIndividualGenerationReport(generatedFiles.length, missing, failed, downloadedName);
