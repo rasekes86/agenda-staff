@@ -117,9 +117,15 @@
   function extractPersonnel() {
     const messageBodies = [...document.querySelectorAll('.a3s.aiL, [role="main"] .a3s, [role="main"] .ii.gt')]
       .filter(body => isVisible(body) && !isEditableContext(body));
-    const bodies = [...new Set(messageBodies)];
+    const uniqueBodies = [...new Set(messageBodies)];
+    // Gmail frequently returns both the actual .a3s message and a visible
+    // parent .ii.gt container. Keep only the innermost body to avoid parsing
+    // the same content twice and attaching markers to the wrong copy.
+    const bodies = uniqueBodies.filter(candidate => !uniqueBodies.some(other => other !== candidate && candidate.contains(other)));
     const people = [];
-    const seen = new Set();
+    // The same worker may legitimately appear in several messages of a Gmail
+    // thread. Deduplicate inside each message, never across the whole thread.
+    const seenByBody = new WeakMap();
     const dniPattern = /\b(?:[XYZ]\s?\d{7}\s?[A-Z]|\d{8}\s?[A-Z])\b/i;
     const namePattern = /([A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ'´ -]{1,70},\s*[A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ'´ -]{1,55})/ig;
     const standaloneNamePattern = /^([A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ'´ -]{1,70},\s*[A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ'´ -]{1,55})$/i;
@@ -130,8 +136,13 @@
       const validName = options.allowUnordered ? looksLikeUnorderedPersonnelName(cleanName) : looksLikePersonnelName(cleanName);
       if (!cleanName || !validName || (cleanDni && !dniPattern.test(cleanDni))) return;
       const key = nameKey(cleanName);
-      if (seen.has(key)) return;
-      seen.add(key);
+      let bodySeen = seenByBody.get(body);
+      if (!bodySeen) {
+        bodySeen = new Set();
+        seenByBody.set(body, bodySeen);
+      }
+      if (bodySeen.has(key)) return;
+      bodySeen.add(key);
       people.push({
         name: cleanName,
         dni: cleanDni,
