@@ -1886,6 +1886,9 @@ body.light-mode .signature-crop-tab-option:hover { background: #f5f3ff; border-c
 .individual-signature-hitbox.selected { border-color: #4f46e5; background: rgba(79, 70, 229, .12); box-shadow: 0 0 0 2px rgba(255, 255, 255, .8); cursor: ns-resize; }
 .individual-preview-modal .modal-actions { flex-wrap: wrap; }
 .individual-preview-modal .btn-add { min-width: 250px; }
+.individual-preview-modal .btn-accept-all { min-height: 36px; padding: 8px 13px; border: 1px solid #10b981; border-radius: 7px; background: #064e3b; color: #d1fae5; font-size: 11px; font-weight: 800; cursor: pointer; }
+.individual-preview-modal .btn-accept-all:hover { background: #047857; color: #fff; }
+.individual-preview-modal .btn-accept-all:disabled { cursor: wait; opacity: .5; }
 .individual-result-summary { display: flex; align-items: baseline; gap: 9px; margin-bottom: 12px; padding: 12px; border-radius: 9px; background: #064e3b; color: #d1fae5; }
 .individual-result-summary strong { font-size: 26px; }
 .individual-result-summary span { font-size: 12px; font-weight: 700; }

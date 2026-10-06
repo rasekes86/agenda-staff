@@ -5006,6 +5006,7 @@ function confirmIndividualPdfPreviews(items) {
       </div>
       <div class="modal-actions">
         <button class="btn-cancel" data-cancel>Cancelar</button>
+        <button class="btn-accept-all" data-accept-all>✓ Aceptar todas y generar ZIP</button>
         <button class="btn-cancel" data-previous>← Anterior</button>
         <button class="btn-add" data-next></button>
       </div>
@@ -5152,6 +5153,10 @@ function confirmIndividualPdfPreviews(items) {
       resolve(accepted);
     };
     overlay.querySelector('[data-cancel]').onclick = () => finish(false);
+    overlay.querySelector('[data-accept-all]').onclick = async () => {
+      await applyCurrentSignatureSize();
+      finish(true);
+    };
     overlay.querySelector('[data-previous]').onclick = async () => {
       if (currentIndex > 0) { await applyCurrentSignatureSize(); currentIndex--; renderCurrent(); }
     };
