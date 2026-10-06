@@ -106,6 +106,14 @@
     return !/\b(?:WORKOUT EVENTS?|RECURSOS HUMANOS|RRHH|DEPARTAMENTO|EQUIPO|COORDINACI[ÓO]N|INFORMACI[ÓO]N|ATENTAMENTE|SALUDOS|AVISO|CONFIDENCIAL|EMPRESA|PRODUCCI[ÓO]N|ADMINISTRACI[ÓO]N|S\.?\s*[LA]\.?)\b/i.test(name);
   }
 
+  function looksLikeUnorderedPersonnelName(value) {
+    const name = String(value || '').replace(/^[\s•·*-]+/, '').replace(/[(),.;:]+$/g, '').replace(/\s+/g, ' ').trim();
+    if (!name || /\d|@|https?:|www\./i.test(name) || name !== name.toLocaleUpperCase('es-ES')) return false;
+    const tokens = name.split(' ').filter(Boolean);
+    if (tokens.length < 2 || tokens.length > 6 || tokens.some(token => !/^[A-ZÁÉÍÓÚÜÑ'´-]+$/i.test(token))) return false;
+    return !/\b(?:MUCHAS?|GRACIAS|SALUDOS?|BUENOS?|D[IÍ]AS|TARDES|ATENTAMENTE|WORKOUT|EVENTS?|PERSONAL|GUARDIA|RESPONSABLE|GESTORA?|DEPARTAMENTO|RRHH|N[ÓO]MINAS?|FIRMA|DNI|NIE|NOMBRE|APELLIDOS?)\b/i.test(name);
+  }
+
   function extractPersonnel() {
     const messageBodies = [...document.querySelectorAll('.a3s.aiL, [role="main"] .a3s, [role="main"] .ii.gt')]
       .filter(body => isVisible(body) && !isEditableContext(body));
@@ -119,7 +127,8 @@
     const addPerson = (name, dni = '', body, options = {}) => {
       const cleanName = String(name || '').replace(/\s+/g, ' ').trim();
       const cleanDni = normalize(dni).replace(/ /g, '');
-      if (!cleanName || !looksLikePersonnelName(cleanName) || (cleanDni && !dniPattern.test(cleanDni))) return;
+      const validName = options.allowUnordered ? looksLikeUnorderedPersonnelName(cleanName) : looksLikePersonnelName(cleanName);
+      if (!cleanName || !validName || (cleanDni && !dniPattern.test(cleanDni))) return;
       const key = nameKey(cleanName);
       if (seen.has(key)) return;
       seen.add(key);
@@ -256,6 +265,7 @@
       }
 
       const lines = usefulBodyText.split(/\r?\n/).map(line => line.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean);
+      let unorderedPersonnelCount = 0;
       for (let index = 0; index < lines.length; index++) {
         const line = lines[index];
         const dniMatch = line.match(dniPattern);
@@ -270,8 +280,15 @@
             break;
           }
         }
-        if (!name) continue;
-        addPerson(name, dniMatch[0], body);
+        if (name) {
+          addPerson(name, dniMatch[0], body);
+          continue;
+        }
+        const unorderedName = prefix.replace(/^[\s•·*-]+/, '').replace(/[(),.;:]+$/g, '').trim();
+        if (looksLikeUnorderedPersonnelName(unorderedName)) {
+          addPerson(unorderedName, dniMatch[0], body, { anchorText: unorderedName, allowUnordered: true });
+          unorderedPersonnelCount++;
+        }
       }
 
       // Fallback for lists pasted from Excel/Sheets as plain tabulated text:
@@ -290,16 +307,20 @@
       }
 
       const standaloneCandidates = [];
+      const unorderedStandaloneCandidates = [];
       const standaloneLines = usefulBodyText.split(/\r?\n/);
       const hasNamesHeading = standaloneLines.some(line => /\b(NOMBRES?|PERSONAL|LISTADO)\b/i.test(line));
       for (const rawLine of standaloneLines) {
         const line = rawLine.replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
         const match = line.match(standaloneNamePattern);
-        if (!match || (!hasNamesHeading && line !== line.toLocaleUpperCase())) continue;
-        standaloneCandidates.push(match[1]);
+        if (match && (hasNamesHeading || line === line.toLocaleUpperCase())) standaloneCandidates.push(match[1]);
+        if (!match && looksLikeUnorderedPersonnelName(line)) unorderedStandaloneCandidates.push(line.replace(/^[\s•·*-]+/, '').trim());
       }
       if (hasNamesHeading || standaloneCandidates.length >= 2 || inlinePersonnelCount >= 2) {
         standaloneCandidates.forEach(name => addPerson(name, '', body));
+      }
+      if (unorderedPersonnelCount >= 2) {
+        unorderedStandaloneCandidates.forEach(name => addPerson(name, '', body, { anchorText: name, allowUnordered: true }));
       }
     }
     return people;
@@ -578,13 +599,73 @@
     }
   }
 
+  function injectIndicators(people) {
+    const pendingByBody = new Map();
+    people.forEach(person => {
+      if (isEditableContext(person.anchorElement) || isEditableContext(person.body)) return;
+      if (person.anchorElement?.isConnected) {
+        person.anchorElement.classList.add('agenda-signature-name-state', person.saved ? 'saved' : 'missing');
+        person.anchorElement.append(createBadge(person, true));
+        return;
+      }
+      if (!pendingByBody.has(person.body)) pendingByBody.set(person.body, []);
+      pendingByBody.get(person.body).push(person);
+    });
+
+    pendingByBody.forEach((pending, body) => {
+      const remaining = new Set(pending);
+      const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          if (!node.nodeValue?.trim() || node.parentElement?.closest('.agenda-signature-inline') || isEditableContext(node) || isIgnoredMessageContent(node)) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      });
+      const textNodes = [];
+      while (walker.nextNode()) textNodes.push(walker.currentNode);
+
+      textNodes.forEach(textNode => {
+        const rawText = textNode.nodeValue;
+        const upperText = rawText.toLocaleUpperCase('es-ES');
+        const matches = [];
+        remaining.forEach(person => {
+          const marker = person.anchorText || person.name;
+          const start = upperText.indexOf(marker.toLocaleUpperCase('es-ES'));
+          if (start >= 0) matches.push({ start, marker, person });
+        });
+        matches.sort((a, b) => a.start - b.start || b.marker.length - a.marker.length);
+        if (!matches.length) return;
+        const fragment = document.createDocumentFragment();
+        let cursor = 0;
+        matches.forEach(match => {
+          if (match.start < cursor) return;
+          fragment.append(document.createTextNode(rawText.slice(cursor, match.start)));
+          const originalName = rawText.slice(match.start, match.start + match.marker.length);
+          const wrapper = document.createElement('span');
+          wrapper.className = `agenda-signature-inline ${match.person.saved ? 'saved' : 'missing'}`;
+          wrapper.dataset.agendaOriginalName = originalName;
+          const nameSpan = document.createElement('span');
+          nameSpan.className = 'agenda-signature-inline-name';
+          nameSpan.textContent = originalName;
+          wrapper.append(nameSpan, createBadge(match.person));
+          fragment.append(wrapper);
+          cursor = match.start + match.marker.length;
+          remaining.delete(match.person);
+        });
+        fragment.append(document.createTextNode(rawText.slice(cursor)));
+        textNode.replaceWith(fragment);
+      });
+
+      remaining.forEach(injectIndicator);
+    });
+  }
+
   function scanAndRender() {
     observer?.disconnect();
     document.getElementById('agenda-signature-overlay')?.remove();
     clearInlineIndicators();
     // Compose areas are already excluded individually. A minimized draft must
     // not disable analysis of the received message currently being viewed.
-    extractPersonnel().forEach(injectIndicator);
+    injectIndicators(extractPersonnel());
     if (observer) observer.observe(document.body, observerConfig);
   }
 
