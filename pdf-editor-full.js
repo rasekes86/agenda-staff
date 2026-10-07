@@ -1248,6 +1248,10 @@ function showUploadArea() {
   
   const fileName = $('fileName');
   if (fileName) fileName.style.display = 'none';
+
+  // With no active PDF there cannot be a fillable template. Reset the
+  // sidebar immediately instead of leaving the state of the closed document.
+  updateFillTemplateVisibility();
   
   const fileInput = $('fileInput');
   const uploadArea = $('uploadArea');
@@ -4611,6 +4615,16 @@ function applyTemplate(template, options = {}) {
   const requiredPages = Math.max(...template.slots.map(slot => slot.page || 1));
   if (requiredPages > activeDoc.totalPages && !confirm(`La plantilla usa ${requiredPages} páginas y este PDF solo tiene ${activeDoc.totalPages}. ¿Aplicar los huecos compatibles?`)) return;
 
+  // Selecting another template must replace the automatically detected one,
+  // not stack a second set of fields over it. Manually inserted PDF elements
+  // are kept because only template-owned elements carry templateFieldKey.
+  if (activeDoc.activeTemplate) {
+    for (let page = 1; page <= activeDoc.totalPages; page++) {
+      activeDoc.elements[page] = (activeDoc.elements[page] || []).filter(element => !element.templateFieldKey);
+    }
+    activeDoc.activeTemplate = null;
+  }
+
   const groupTotals = {};
   const groupIndexes = {};
   template.slots.forEach(slot => { groupTotals[slot.label || 'TEXTO'] = (groupTotals[slot.label || 'TEXTO'] || 0) + 1; });
@@ -4670,7 +4684,16 @@ function updateFillTemplateVisibility() {
   if (!section || !templatesSection) return;
   const hasAppliedTemplate = Boolean(activeDoc?.activeTemplate);
   section.style.display = hasAppliedTemplate ? '' : 'none';
-  templatesSection.style.display = hasAppliedTemplate ? 'none' : '';
+  // Keep manual template selection available even after automatic detection,
+  // so a wrong match can be replaced without reloading the PDF.
+  templatesSection.style.display = '';
+  const title = templatesSection.querySelector('.sidebar-title');
+  if (title) title.textContent = hasAppliedTemplate ? 'Cambiar plantilla' : 'Plantillas';
+  const button = $('btnOpenTemplates');
+  if (button) {
+    const textNode = [...button.childNodes].find(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim());
+    if (textNode) textNode.textContent = hasAppliedTemplate ? ' Seleccionar otra plantilla' : ' Plantillas';
+  }
 }
 
 function getTemplateGroups() {
