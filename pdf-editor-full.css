@@ -1858,6 +1858,15 @@ body.light-mode .signature-crop-tab-option:hover { background: #f5f3ff; border-c
 .template-variable-grid label { color: #e0f2fe; font-size: 11px; font-weight: 600; }
 .template-variable-grid input { width: 100%; margin-top: 4px; padding: 8px; border: 1px solid #0284c7; border-radius: 6px; background: #0f172a; color: #f8fafc; }
 .apply-template-variables { width: 100%; margin-top: 8px; justify-content: center; background: #0369a1; color: white; }
+.recognized-template-list { display: grid; gap: 7px; margin-top: 12px; }
+.recognized-template-list .sidebar-btn { justify-content: center; background: #4338ca; color: #fff; }
+.detected-template-fields-list { display: grid; gap: 6px; max-height: 330px; margin-top: 10px; overflow-y: auto; }
+.detected-template-fields-list label { display: grid; grid-template-columns: 20px 75px 1fr; align-items: center; gap: 7px; padding: 8px; border: 1px solid #334155; border-radius: 7px; background: #0f172a; color: #e2e8f0; cursor: pointer; }
+.detected-template-fields-list strong { color: #c4b5fd; font-size: 11px; }
+.detected-template-fields-list span { overflow: hidden; color: #94a3b8; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+body.light-mode .detected-template-fields-list label { border-color: #cbd5e1; background: #fff; color: #1e293b; }
+body.light-mode .detected-template-fields-list strong { color: #5b21b6; }
+body.light-mode .detected-template-fields-list span { color: #475569; }
 .individual-generation-modal { width: min(560px, 92vw); }
 .individual-generation-modal > p { margin: 0 0 14px; color: #94a3b8; font-size: 12px; line-height: 1.45; }
 .individual-progress-track { overflow: hidden; width: 100%; height: 12px; margin: 14px 0 9px; border-radius: 999px; background: #0f172a; }
@@ -1879,11 +1888,11 @@ body.light-mode .signature-crop-tab-option:hover { background: #f5f3ff; border-c
 .individual-overview-document { position: relative; overflow: hidden; width: 100%; min-height: 260px; border-radius: 6px; background: #fff; line-height: 0; }
 .individual-overview-document canvas { display: block; width: 100%; height: 100%; object-fit: contain; background: #fff; }
 .individual-overview-loading { position: absolute; z-index: 1; inset: 0; display: flex; align-items: center; justify-content: center; color: #64748b; font-size: 10px; line-height: 1.2; }
-.individual-overview-signature-hitbox { position: absolute; z-index: 2; display: flex; align-items: center; justify-content: center; min-width: 12px; min-height: 12px; margin: 0; padding: 0; overflow: visible; border: 1px dashed rgba(79, 70, 229, .5); border-radius: 3px; background: rgba(79, 70, 229, .05); cursor: ns-resize; transition: left .08s ease-out, top .08s ease-out, width .08s ease-out, height .08s ease-out; }
+.individual-overview-signature-hitbox { position: absolute; z-index: 2; display: flex; align-items: center; justify-content: center; min-width: 12px; min-height: 12px; margin: 0; padding: 0; overflow: visible; border: 1px dashed rgba(79, 70, 229, .5); border-radius: 3px; background: rgba(79, 70, 229, .05); cursor: ns-resize; transform-origin: center; transition: left .08s ease-out, top .08s ease-out, width .08s ease-out, height .08s ease-out, transform .12s ease-out; }
 .individual-overview-signature-hitbox:hover { border: 2px solid #4f46e5; background: rgba(79, 70, 229, .14); box-shadow: 0 0 0 2px rgba(255, 255, 255, .8); }
 .individual-overview-signature-hitbox img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; transform-origin: center; transition: transform .08s ease-out; }
 .individual-overview-signature-hitbox em { color: #64748b; font-size: 8px; line-height: 1; }
-.individual-overview-controls { display: grid; grid-template-columns: 30px 48px 30px 1fr; align-items: center; gap: 6px; margin-top: 8px; }
+.individual-overview-controls { display: grid; grid-template-columns: 28px 42px 28px 28px 38px 28px 1fr; align-items: center; gap: 5px; margin-top: 8px; }
 .individual-overview-controls button { height: 28px; border: 1px solid #4f46e5; border-radius: 5px; background: #312e81; color: #fff; font-weight: 800; cursor: pointer; }
 .individual-overview-controls button:disabled { cursor: default; opacity: .4; }
 .individual-overview-controls strong { color: #c7d2fe; font-size: 10px; text-align: center; }
@@ -1892,7 +1901,7 @@ body.light-mode .signature-crop-tab-option:hover { background: #f5f3ff; border-c
 .individual-back-overview:hover { background: #4338ca; }
 .individual-preview-modal .signature-quality-notice { padding: 9px 11px; border: 1px solid #f59e0b; border-radius: 8px; background: #451a03; color: #fde68a; }
 .individual-preview-modal .signature-quality-ok { padding: 9px 11px; border-radius: 8px; background: #064e3b; color: #d1fae5; }
-.individual-signature-size-controls { display: grid; grid-template-columns: 1fr 38px 58px 38px; align-items: center; gap: 7px; margin: 9px 0; padding: 8px 10px; border: 1px solid #475569; border-radius: 8px; background: #1e293b; }
+.individual-signature-size-controls { display: grid; grid-template-columns: 1fr 38px 58px 38px 38px 48px 38px; align-items: center; gap: 7px; margin: 9px 0; padding: 8px 10px; border: 1px solid #475569; border-radius: 8px; background: #1e293b; }
 .individual-signature-size-controls > span { color: #e2e8f0; font-size: 11px; font-weight: 700; }
 .individual-signature-size-controls button { height: 32px; border: 0; border-radius: 6px; background: #4f46e5; color: #fff; font-size: 20px; font-weight: 800; cursor: pointer; }
 .individual-signature-size-controls button:disabled { cursor: wait; opacity: .45; }
@@ -1902,7 +1911,7 @@ body.light-mode .signature-crop-tab-option:hover { background: #f5f3ff; border-c
 .individual-preview-canvas-wrap { position: relative; overflow: auto; width: 100%; max-height: 68vh; border: 1px solid #475569; border-radius: 8px; background: #64748b; }
 .individual-preview-page { position: relative; width: 100%; line-height: 0; }
 .individual-preview-canvas-wrap canvas { display: block; width: 100%; height: auto; background: #fff; }
-.individual-signature-hitbox { position: absolute; z-index: 2; display: flex; align-items: center; justify-content: center; min-width: 18px; min-height: 18px; margin: 0; padding: 0; overflow: visible; border: 2px dashed transparent; border-radius: 4px; background: transparent; cursor: pointer; touch-action: none; }
+.individual-signature-hitbox { position: absolute; z-index: 2; display: flex; align-items: center; justify-content: center; min-width: 18px; min-height: 18px; margin: 0; padding: 0; overflow: visible; border: 2px dashed transparent; border-radius: 4px; background: transparent; cursor: pointer; touch-action: none; transform-origin: center; transition: left .08s ease-out, top .08s ease-out, width .08s ease-out, height .08s ease-out, transform .12s ease-out; }
 .individual-signature-preview-image { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; transform-origin: center; transition: transform .12s ease-out; }
 .individual-signature-hitbox:hover { border-color: rgba(79, 70, 229, .65); background: rgba(79, 70, 229, .08); }
 .individual-signature-hitbox.selected { border-color: #4f46e5; background: rgba(79, 70, 229, .12); box-shadow: 0 0 0 2px rgba(255, 255, 255, .8); cursor: ns-resize; }

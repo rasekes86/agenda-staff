@@ -19,6 +19,7 @@ const ZOOM_MAX = 2.5;
 const MAX_UNDO_STATES = 30;
 const PASTE_OFFSET = 30;
 const MAX_RECENT_SIGNATURES = 5;
+const SIGNATURE_PREFERENCES_KEY = 'pdfEditorSignaturePreferences';
 
 // Signature processing settings
 const SIG_WHITE_THRESHOLD = 248;   // Near-white paper is removed without erasing pale strokes
@@ -856,6 +857,7 @@ function setupEventListeners() {
   $('templateSearchInput')?.addEventListener('input', () => renderTemplatesList());
   $('btnSaveTemplateCanvas')?.addEventListener('click', confirmSaveTemplate);
   $('btnCancelTemplateCanvas')?.addEventListener('click', cancelTemplateDraft);
+  $('btnDetectTemplateFields')?.addEventListener('click', () => detectAndSuggestTemplateFields());
   $('templateNameInput')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') confirmSaveTemplate();
   });
@@ -1090,6 +1092,7 @@ function loadPdfAsNewTab(file, switchToIt = true) {
       }
       
       showStatus(`${file.name} cargado (${totalPages} pág.)`, 'success');
+      void recognizeTemplateForDocument(newDoc);
       
     } catch (err) {
       console.error('Error loading PDF:', err);
@@ -1175,6 +1178,19 @@ function switchToTab(index) {
   
   updateSplitTool();
   renderPage();
+  if (doc.recognizedTemplates?.length && !doc.activeTemplate) {
+    const matches = doc.recognizedTemplates;
+    doc.recognizedTemplates = null;
+    setTimeout(() => {
+      if (getActiveDoc() !== doc || doc.activeTemplate) return;
+      if (matches.length === 1) {
+        applyTemplate(matches[0], { silent: true });
+        showStatus(`Plantilla “${matches[0].name}” reconocida y aplicada automáticamente`, 'success');
+      } else {
+        showRecognizedTemplates(doc, matches);
+      }
+    }, 0);
+  }
 }
 
 function closeTab(docId) {
@@ -3561,13 +3577,19 @@ async function savePdf() {
             
             // Process signatures: remove white bg, feather edges, ink variance
             if (el.type === 'signature') {
+              drawX = el.x + el.width / 2;
+              drawY = height - el.y - el.height / 2;
               try {
-                const prepared = await prepareSignatureForPdf(el.pngFallback || el.src, el.width, el.height, el.signatureDisplayScale || 1);
+                const prepared = await prepareSignatureForPdf(
+                  el.pngFallback || el.src,
+                  el.width,
+                  el.height,
+                  el.signatureDisplayScale || 1,
+                  el.signatureRotation || 0
+                );
                 imageSrc = prepared.src;
                 drawWidth = prepared.width;
                 drawHeight = prepared.height;
-                drawX = el.x + (el.width - drawWidth) / 2;
-                drawY = height - el.y - (el.height + drawHeight) / 2;
                 isPng = true; // Processed signatures are always PNG (preserves transparency)
               } catch (procErr) {
                 console.warn('Signature processing failed, using original:', procErr);
@@ -3591,12 +3613,10 @@ async function savePdf() {
             
             const image = isPng ? await newPdfDoc.embedPng(imageBytes) : await newPdfDoc.embedJpg(imageBytes);
             
-            page.drawImage(image, {
-              x: drawX,
-              y: drawY,
-              width: drawWidth,
-              height: drawHeight
-            });
+            const drawOptions = el.type === 'signature'
+              ? getCenteredImageDrawOptions(drawX, drawY, drawWidth, drawHeight, el.signatureRotation || 0)
+              : { x: drawX, y: drawY, width: drawWidth, height: drawHeight };
+            page.drawImage(image, drawOptions);
           } catch (imgErr) {
             console.error('Error embedding image:', imgErr);
           }
@@ -3708,6 +3728,99 @@ let pendingTemplateSlot = null;
 let templateEditorActive = false;
 let templateFieldClipboard = [];
 let editingTemplateId = null;
+let editingTemplateFingerprints = [];
+
+function getTemplateFingerprints(template) {
+  const firstSlot = template?.slots?.[0];
+  const values = firstSlot?.documentFingerprints || (firstSlot?.documentFingerprint ? [firstSlot.documentFingerprint] : []);
+  return [...new Set(values.filter(Boolean))];
+}
+
+async function computeDocumentFingerprint(doc) {
+  if (!doc?.pdfJsDoc) return '';
+  if (doc.documentFingerprint) return doc.documentFingerprint;
+  const parts = [`pages:${doc.totalPages}`];
+  const pageLimit = Math.min(doc.totalPages, 4);
+  for (let pageNumber = 1; pageNumber <= pageLimit; pageNumber++) {
+    const page = await doc.pdfJsDoc.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: 1 });
+    const content = await page.getTextContent();
+    const text = content.items
+      .map(item => normalizeText(item.str || '').toUpperCase().replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .join('|')
+      .slice(0, 12000);
+    parts.push(`${Math.round(viewport.width)}x${Math.round(viewport.height)}:${text}`);
+  }
+  const bytes = new TextEncoder().encode(parts.join('\n'));
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  doc.documentFingerprint = [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, '0')).join('');
+  return doc.documentFingerprint;
+}
+
+async function rememberTemplateForDocument(template, doc) {
+  if (!template?.slots?.length || !doc) return;
+  try {
+    const fingerprint = await computeDocumentFingerprint(doc);
+    if (!fingerprint) return;
+    const fingerprints = getTemplateFingerprints(template);
+    if (fingerprints.includes(fingerprint)) return;
+    fingerprints.push(fingerprint);
+    const slots = JSON.parse(JSON.stringify(template.slots));
+    slots[0].documentFingerprints = fingerprints.slice(-12);
+    delete slots[0].documentFingerprint;
+    if (String(template.id).startsWith('local_')) await updateLocalTemplate(template.id, template.name, slots);
+    else await updateTemplateInSupabase(template.id, template.name, slots);
+    template.slots = slots;
+  } catch (error) {
+    console.warn('No se pudo asociar la plantilla al PDF:', error);
+  }
+}
+
+async function recognizeTemplateForDocument(doc) {
+  if (!doc || doc.activeTemplate || (getActiveDoc() === doc && templateEditorActive)) return;
+  try {
+    const fingerprint = await computeDocumentFingerprint(doc);
+    const templates = await loadTemplates();
+    const matches = templates.filter(template => getTemplateFingerprints(template).includes(fingerprint));
+    if (!matches.length || doc.activeTemplate) return;
+    if (getActiveDoc() !== doc) {
+      doc.recognizedTemplates = matches;
+      return;
+    }
+    if (matches.length === 1) {
+      applyTemplate(matches[0], { silent: true });
+      showStatus(`Plantilla “${matches[0].name}” reconocida y aplicada automáticamente`, 'success');
+      return;
+    }
+    showRecognizedTemplates(doc, matches);
+  } catch (error) {
+    console.warn('No se pudo reconocer la plantilla del PDF:', error);
+  }
+}
+
+function showRecognizedTemplates(doc, templates) {
+  document.querySelector('.recognized-template-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay show recognized-template-overlay';
+  overlay.innerHTML = `<div class="modal" style="max-width:430px;">
+    <h3>✨ Plantillas reconocidas</h3>
+    <p style="color:#94a3b8;font-size:12px;">Este PDF se ha utilizado anteriormente con varias plantillas. Elige cuál quieres aplicar.</p>
+    <div class="recognized-template-list">${templates.map((template, index) => `<button class="sidebar-btn" data-template-index="${index}">${escapeHtml(template.name)}</button>`).join('')}</div>
+    <div class="modal-actions"><button class="btn-cancel" data-close>Ahora no</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('[data-close]').onclick = close;
+  overlay.querySelectorAll('[data-template-index]').forEach(button => {
+    button.onclick = () => {
+      const index = documents.indexOf(doc);
+      if (index >= 0 && activeDocIndex !== index) switchToTab(index);
+      applyTemplate(templates[Number(button.dataset.templateIndex)]);
+      close();
+    };
+  });
+}
 
 async function ensureSession() {
   if (session?.access_token) return session;
@@ -3898,6 +4011,7 @@ function showTemplateListView() {
   templatePlacementMode = false;
   pendingTemplateSlot = null;
   editingTemplateId = null;
+  editingTemplateFingerprints = [];
   if ($('templateListView')) $('templateListView').style.display = '';
   if ($('templateSaveView')) $('templateSaveView').style.display = 'none';
   if ($('templateNameInput')) $('templateNameInput').value = '';
@@ -3912,6 +4026,7 @@ function showTemplateSaveView() {
   templatePlacementMode = false;
   pendingTemplateSlot = null;
   editingTemplateId = null;
+  editingTemplateFingerprints = [];
   templateEditorActive = true;
   $('templatesModal')?.classList.remove('show');
   if ($('templateCanvasName')) $('templateCanvasName').value = '';
@@ -3920,6 +4035,7 @@ function showTemplateSaveView() {
   renderTemplateSlotSelection();
   renderPage();
   showStatus('Haz clic en cada hueco del PDF e indica qué dato corresponde', 'success');
+  setTimeout(() => detectAndSuggestTemplateFields({ automatic: true }), 250);
 }
 
 function editTemplate(template) {
@@ -3934,6 +4050,7 @@ function editTemplate(template) {
 
   removeTemplateDraftSlots();
   editingTemplateId = template.id;
+  editingTemplateFingerprints = getTemplateFingerprints(template);
   templatePlacementMode = false;
   pendingTemplateSlot = null;
   templateEditorActive = true;
@@ -4089,6 +4206,129 @@ function placeTemplateSlotAtEvent(event, overlay, scale, activeDoc) {
   }
 }
 
+async function detectAndSuggestTemplateFields(options = {}) {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc?.pdfJsDoc || !templateEditorActive) {
+    if (!options.automatic) showStatus('Abre primero el editor de una plantilla', 'error');
+    return;
+  }
+  const button = $('btnDetectTemplateFields');
+  if (button) { button.disabled = true; button.textContent = 'Analizando…'; }
+  try {
+    const rules = [
+      { label: 'FIRMA', type: 'signature', regex: /\b(FIRMA|FDO\.?|FIRMADO)\b/i, width: 180, height: 70, below: true, maxTextLength: 90 },
+      { label: 'DNI', type: 'text', regex: /\b(DNI|NIE|NIF|DOCUMENTO\s+DE\s+IDENTIDAD)\b/i, width: 110, height: 32, maxTextLength: 90 },
+      { label: 'FECHA', type: 'text', regex: /\b(FECHA|DATE)\b/i, width: 110, height: 32, maxTextLength: 75 },
+      { label: 'NOMBRE', type: 'text', regex: /\b(NOMBRE(?:\s+Y\s+APELLIDOS)?|TRABAJADOR(?:A)?|EMPLEADO(?:A)?)\b/i, width: 220, height: 32, exclude: /EMPRESA|COMERCIAL/i, maxTextLength: 110 }
+    ];
+    const candidates = [];
+    for (let pageNumber = 1; pageNumber <= activeDoc.totalPages; pageNumber++) {
+      const page = await activeDoc.pdfJsDoc.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: 1 });
+      const content = await page.getTextContent();
+      const scaleX = activeDoc.pageWidth / viewport.width;
+      const scaleY = activeDoc.pageHeight / viewport.height;
+      const lines = [];
+      content.items.forEach(item => {
+        const text = String(item.str || '').trim();
+        if (!text) return;
+        const x = Number(item.transform?.[4] || 0);
+        const height = Math.max(8, Number(item.height || Math.abs(item.transform?.[3]) || 10));
+        const y = viewport.height - Number(item.transform?.[5] || 0) - height;
+        let line = lines.find(entry => Math.abs(entry.y - y) <= Math.max(4, height * 0.45));
+        if (!line) {
+          line = { y, height, parts: [] };
+          lines.push(line);
+        }
+        line.parts.push({ text, x, width: Number(item.width || text.length * height * 0.5) });
+        line.height = Math.max(line.height, height);
+      });
+      lines.forEach(line => {
+        line.parts.sort((a, b) => a.x - b.x);
+        const text = line.parts.map(part => part.text).join(' ');
+        const x = Math.min(...line.parts.map(part => part.x));
+        const right = Math.max(...line.parts.map(part => part.x + part.width));
+        rules.forEach(rule => {
+          if (text.length > rule.maxTextLength || !rule.regex.test(text) || rule.exclude?.test(text)) return;
+          const width = rule.width;
+          const height = rule.height;
+          const preferredX = rule.below ? x : right + 8;
+          const xPdf = preferredX + width <= viewport.width ? preferredX : Math.min(x, viewport.width - width);
+          const yPdf = rule.below ? line.y + line.height + 7 : line.y - Math.max(0, (height - line.height) / 2);
+          const candidate = {
+            page: pageNumber,
+            type: rule.type,
+            label: rule.label,
+            x: Math.min(Math.max(0, activeDoc.pageWidth - width * scaleX), Math.max(0, xPdf * scaleX)),
+            y: Math.min(Math.max(0, activeDoc.pageHeight - height * scaleY), Math.max(0, yPdf * scaleY)),
+            width: width * scaleX,
+            height: height * scaleY,
+            sourceText: text
+          };
+          const duplicate = candidates.some(existing => existing.page === candidate.page && existing.label === candidate.label && Math.abs(existing.y - candidate.y) < 12);
+          const existingDraft = (activeDoc.elements[pageNumber] || []).some(element => element.templateDraft && element.fieldGroup === candidate.label && Math.abs(element.y - candidate.y) < 18);
+          if (!duplicate && !existingDraft && candidates.length < 60) candidates.push(candidate);
+        });
+      });
+    }
+    if (!candidates.length) {
+      if (!options.automatic) showStatus('No se encontraron campos claros. Puedes marcarlos manualmente', 'error');
+      return;
+    }
+    showDetectedTemplateFields(candidates);
+  } catch (error) {
+    console.error('Automatic field detection failed:', error);
+    if (!options.automatic) showStatus(`No se pudieron detectar los campos: ${error.message}`, 'error');
+  } finally {
+    if (button) { button.disabled = false; button.textContent = '✨ Detectar campos'; }
+  }
+}
+
+function showDetectedTemplateFields(candidates) {
+  document.querySelector('.detected-template-fields-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay show detected-template-fields-overlay';
+  overlay.innerHTML = `<div class="modal" style="max-width:520px;">
+    <h3>✨ Campos encontrados</h3>
+    <p style="color:#94a3b8;font-size:12px;">Comprueba las sugerencias. Después podrás mover y redimensionar cada campo sobre el PDF.</p>
+    <div class="detected-template-fields-list">${candidates.map((candidate, index) => `<label>
+      <input type="checkbox" data-candidate-index="${index}" checked>
+      <strong>${candidate.label}</strong><span>Página ${candidate.page} · cerca de “${escapeHtml(candidate.sourceText.slice(0, 70))}”</span>
+    </label>`).join('')}</div>
+    <div class="modal-actions">
+      <button class="btn-cancel" data-cancel>Cancelar</button>
+      <button class="btn-add" data-add>Añadir seleccionados</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('[data-cancel]').onclick = close;
+  overlay.querySelector('[data-add]').onclick = () => {
+    const activeDoc = getActiveDoc();
+    if (!activeDoc) { close(); return; }
+    const selected = [...overlay.querySelectorAll('[data-candidate-index]:checked')]
+      .map(input => candidates[Number(input.dataset.candidateIndex)]);
+    selected.forEach(candidate => {
+      (activeDoc.elements[candidate.page] ||= []).push({
+        type: candidate.type,
+        x: candidate.x, y: candidate.y,
+        width: candidate.width, height: candidate.height,
+        size: DEFAULT_FONT_SIZE,
+        color: '#000000', text: '', src: '', name: '',
+        isPlaceholder: true, templateDraft: true,
+        fieldGroup: candidate.label,
+        templateFixedValue: '',
+        placeholderLabel: `${candidate.label} · sugerido`
+      });
+    });
+    updateTabModified(activeDoc.id, true);
+    renderTemplateSlotSelection();
+    renderPage();
+    close();
+    showStatus(`${selected.length} campo(s) detectado(s) añadidos. Revisa sus posiciones`, 'success');
+  };
+}
+
 function addTemplateDraftSlot(position, type, label, options = {}) {
   const activeDoc = getActiveDoc();
   if (!activeDoc) return;
@@ -4179,6 +4419,7 @@ function cancelTemplateDraft() {
   templateEditorActive = false;
   templateFieldClipboard = [];
   editingTemplateId = null;
+  editingTemplateFingerprints = [];
   if ($('templateEditorBar')) $('templateEditorBar').style.display = 'none';
   showTemplateListView();
   renderPage();
@@ -4213,6 +4454,13 @@ async function confirmSaveTemplate() {
       sourcePageHeight: activeDoc.pageHeight
     };
   });
+  try {
+    const currentFingerprint = await computeDocumentFingerprint(activeDoc);
+    const fingerprints = [...new Set([...editingTemplateFingerprints, currentFingerprint].filter(Boolean))].slice(-12);
+    if (slots[0] && fingerprints.length) slots[0].documentFingerprints = fingerprints;
+  } catch (error) {
+    console.warn('No se pudo guardar la huella del PDF con la plantilla:', error);
+  }
 
   if (editingTemplateId) {
     try {
@@ -4236,6 +4484,7 @@ async function confirmSaveTemplate() {
   templateEditorActive = false;
   templateFieldClipboard = [];
   editingTemplateId = null;
+  editingTemplateFingerprints = [];
   if ($('templateEditorBar')) $('templateEditorBar').style.display = 'none';
   updateTabModified(activeDoc.id, true);
   renderPage();
@@ -4343,6 +4592,7 @@ function applyTemplate(template, options = {}) {
   });
   if (!added) { showStatus('No hay huecos compatibles con este PDF', 'error'); return; }
   activeDoc.activeTemplate = JSON.parse(JSON.stringify(template));
+  void rememberTemplateForDocument(template, activeDoc);
   activeDoc.currentPage = Math.min(...template.slots.map(slot => slot.page || 1).filter(page => page <= activeDoc.totalPages));
   updateTabModified(activeDoc.id, true);
   if (!options.silent) $('templatesModal')?.classList.remove('show');
@@ -4730,6 +4980,38 @@ async function findSignaturesForPeople(people) {
   }));
 }
 
+function getSignaturePreferenceKey(signature, personName = '') {
+  if (signature?.id) return `id:${signature.id}`;
+  return `name:${signatureMatchKey(signature?.name || personName)}`;
+}
+
+async function loadSignaturePreferences() {
+  try {
+    const stored = await chrome.storage.local.get(SIGNATURE_PREFERENCES_KEY);
+    return stored[SIGNATURE_PREFERENCES_KEY] && typeof stored[SIGNATURE_PREFERENCES_KEY] === 'object'
+      ? stored[SIGNATURE_PREFERENCES_KEY]
+      : {};
+  } catch (error) {
+    console.warn('No se pudieron cargar los ajustes de firmas:', error);
+    return {};
+  }
+}
+
+async function saveSignaturePreference(preferenceKey, scale, rotation) {
+  if (!preferenceKey) return;
+  try {
+    const preferences = await loadSignaturePreferences();
+    preferences[preferenceKey] = {
+      scale: Math.max(0.5, Math.min(4, Number(scale) || 1)),
+      rotation: normalizeSignatureRotation(rotation),
+      updatedAt: Date.now()
+    };
+    await chrome.storage.local.set({ [SIGNATURE_PREFERENCES_KEY]: preferences });
+  } catch (error) {
+    console.warn('No se pudo recordar el ajuste de la firma:', error);
+  }
+}
+
 async function ensureSignatureVector(signature) {
   // Compatibility shim. Automatic vectorization is intentionally disabled.
   return signature;
@@ -4822,19 +5104,26 @@ async function buildIndividualPdf(activeDoc, elements, options = {}) {
         let drawWidth = element.width;
         let drawHeight = element.height;
         if (element.type === 'signature') {
-          const prepared = await prepareSignatureForPdf(element.pngFallback || source, element.width, element.height, element.signatureDisplayScale || 1);
+          const prepared = await prepareSignatureForPdf(
+            element.pngFallback || source,
+            element.width,
+            element.height,
+            element.signatureDisplayScale || 1,
+            element.signatureRotation || 0
+          );
           if (prepared.qualityLimited) qualityWarnings++;
           source = prepared.src;
           drawWidth = prepared.width;
           drawHeight = prepared.height;
-          drawX = element.x + (element.width - drawWidth) / 2;
-          drawY = height - element.y - (element.height + drawHeight) / 2;
+          drawX = element.x + element.width / 2;
+          drawY = height - element.y - element.height / 2;
           signaturePlacements.push({
             page: pageNum,
-            x: drawX,
-            y: element.y + (element.height - drawHeight) / 2,
+            x: drawX - drawWidth / 2,
+            y: element.y + element.height / 2 - drawHeight / 2,
             width: drawWidth,
             height: drawHeight,
+            rotation: prepared.rotation || 0,
             box: { x: element.x, y: element.y, width: element.width, height: element.height },
             metrics: prepared.metrics || null
           });
@@ -4850,12 +5139,10 @@ async function buildIndividualPdf(activeDoc, elements, options = {}) {
           isPng = isPng || blob.type === 'image/png' || /\.png(?:$|\?)/i.test(source);
         }
         const image = isPng ? await pdfDoc.embedPng(bytes) : await pdfDoc.embedJpg(bytes);
-        page.drawImage(image, {
-          x: drawX,
-          y: drawY,
-          width: drawWidth,
-          height: drawHeight
-        });
+        const drawOptions = element.type === 'signature'
+          ? getCenteredImageDrawOptions(drawX, drawY, drawWidth, drawHeight, element.signatureRotation || 0)
+          : { x: drawX, y: drawY, width: drawWidth, height: drawHeight };
+        page.drawImage(image, drawOptions);
       }
     }
   }
@@ -4868,11 +5155,39 @@ async function buildIndividualPdf(activeDoc, elements, options = {}) {
  * 300-DPI baseline; an explicit scale chosen in the preview is then applied
  * around the centre of the template field.
  */
-async function prepareSignatureForPdf(src, boxWidth, boxHeight, displayScale = 1) {
+function normalizeSignatureRotation(value) {
+  return ((Math.round((Number(value) || 0) / 90) * 90) % 360 + 360) % 360;
+}
+
+function getCenteredImageDrawOptions(centerX, centerY, width, height, rotation = 0) {
+  const angle = normalizeSignatureRotation(rotation);
+  const options = { width, height };
+  if (angle === 90) {
+    options.x = centerX + height / 2;
+    options.y = centerY - width / 2;
+  } else if (angle === 180) {
+    options.x = centerX + width / 2;
+    options.y = centerY + height / 2;
+  } else if (angle === 270) {
+    options.x = centerX - height / 2;
+    options.y = centerY + width / 2;
+  } else {
+    options.x = centerX - width / 2;
+    options.y = centerY - height / 2;
+  }
+  if (angle) options.rotate = window.PDFLib.degrees(angle);
+  return options;
+}
+
+async function prepareSignatureForPdf(src, boxWidth, boxHeight, displayScale = 1, rotation = 0) {
+  const normalizedRotation = normalizeSignatureRotation(rotation);
   const svgMarkup = AgendaSignatureVector?.dataUrlToSvg(src) || '';
   if (svgMarkup) {
     const vectorSize = AgendaSignatureVector.dimensions(svgMarkup);
-    const boxFit = Math.min(boxWidth / vectorSize.width, boxHeight / vectorSize.height);
+    const rotated = normalizedRotation === 90 || normalizedRotation === 270;
+    const orientedWidth = rotated ? vectorSize.height : vectorSize.width;
+    const orientedHeight = rotated ? vectorSize.width : vectorSize.height;
+    const boxFit = Math.min(boxWidth / orientedWidth, boxHeight / orientedHeight);
     const safeDisplayScale = Math.max(0.5, Math.min(4, Number(displayScale) || 1));
     const fit = boxFit * safeDisplayScale;
     const width = Math.max(1, vectorSize.width * fit);
@@ -4882,8 +5197,8 @@ async function prepareSignatureForPdf(src, boxWidth, boxHeight, displayScale = 1
     const pixelsPerPoint = 600 / 72;
     const png = await AgendaSignatureVector.renderSvg(svgMarkup, Math.ceil(width * pixelsPerPoint), Math.ceil(height * pixelsPerPoint));
     return {
-      src: png, width, height, qualityLimited: false, vector: true,
-      metrics: { kind: 'vector', sourceWidth: vectorSize.width, sourceHeight: vectorSize.height, boxFit }
+      src: png, width, height, rotation: normalizedRotation, qualityLimited: false, vector: true,
+      metrics: { kind: 'vector', sourceWidth: vectorSize.width, sourceHeight: vectorSize.height }
     };
   }
   const processedSrc = await processSignatureImage(src);
@@ -4896,7 +5211,10 @@ async function prepareSignatureForPdf(src, boxWidth, boxHeight, displayScale = 1
   });
   const naturalWidth = Math.max(1, image.naturalWidth || image.width);
   const naturalHeight = Math.max(1, image.naturalHeight || image.height);
-  const boxFit = Math.min(boxWidth / naturalWidth, boxHeight / naturalHeight);
+  const rotated = normalizedRotation === 90 || normalizedRotation === 270;
+  const orientedWidth = rotated ? naturalHeight : naturalWidth;
+  const orientedHeight = rotated ? naturalWidth : naturalHeight;
+  const boxFit = Math.min(boxWidth / orientedWidth, boxHeight / orientedHeight);
   // Start from a 300-DPI-safe size. If the user deliberately enlarges it in
   // the preview, keep that visual choice and surface the quality warning.
   const maxPrintScale = 72 / 300;
@@ -4909,8 +5227,9 @@ async function prepareSignatureForPdf(src, boxWidth, boxHeight, displayScale = 1
     src: processedSrc,
     width,
     height,
+    rotation: normalizedRotation,
     qualityLimited: boxFit > maxPrintScale + 0.0001 || fit > maxPrintScale + 0.0001,
-    metrics: { kind: 'raster', sourceWidth: naturalWidth, sourceHeight: naturalHeight, baseFit }
+    metrics: { kind: 'raster', sourceWidth: naturalWidth, sourceHeight: naturalHeight, maxPrintScale }
   };
 }
 
@@ -5030,10 +5349,13 @@ function confirmIndividualPdfPreviews(items) {
         <div data-quality></div>
         <div class="individual-preview-canvas-wrap"><canvas title="Página que contiene la firma"></canvas></div>
         <div class="individual-signature-size-controls">
-          <span>Haz clic sobre la firma y usa la rueda</span>
+          <span>Selecciona la firma y usa la rueda o los controles</span>
           <button type="button" data-smaller title="Reducir firma">−</button>
           <strong data-scale>100%</strong>
           <button type="button" data-larger title="Aumentar firma">+</button>
+          <button type="button" data-rotate-left title="Girar 90° a la izquierda">↶</button>
+          <strong data-rotation>0°</strong>
+          <button type="button" data-rotate-right title="Girar 90° a la derecha">↷</button>
         </div>
       </div>
       <div class="modal-actions">
@@ -5047,14 +5369,37 @@ function confirmIndividualPdfPreviews(items) {
 
     let overviewObserver = null;
 
+    const getPendingRegenerationCount = () => items.filter(item =>
+      item.appliedSignatureScale !== item.signatureScale || item.appliedSignatureRotation !== item.signatureRotation
+    ).length;
+
+    const refreshPendingRegenerationUi = () => {
+      const pending = getPendingRegenerationCount();
+      const acceptButton = overlay.querySelector('[data-accept-all]');
+      if (acceptButton && !acceptButton.disabled) {
+        acceptButton.textContent = pending
+          ? `✓ Regenerar ${pending} corregido${pending === 1 ? '' : 's'} y descargar`
+          : '✓ Aceptar todas y generar';
+      }
+      if (!overlay.querySelector('[data-overview-view]').hidden) {
+        overlay.querySelector('[data-counter]').textContent = pending
+          ? `${items.length} firmas · ${pending} por regenerar`
+          : `${items.length} firmas`;
+      }
+    };
+
     const getPreviewSignatureBounds = item => {
       const metrics = item.signatureMetrics;
       const box = item.signatureBox;
       if (!metrics || !box) return item.signatureBounds;
       const scale = Math.max(0.5, Math.min(4, Number(item.signatureScale) || 1));
-      const fit = metrics.kind === 'vector'
-        ? metrics.boxFit * scale
-        : metrics.baseFit * scale;
+      const rotation = normalizeSignatureRotation(item.signatureRotation);
+      const rotated = rotation === 90 || rotation === 270;
+      const orientedWidth = rotated ? metrics.sourceHeight : metrics.sourceWidth;
+      const orientedHeight = rotated ? metrics.sourceWidth : metrics.sourceHeight;
+      const boxFit = Math.min(box.width / orientedWidth, box.height / orientedHeight);
+      const baseFit = metrics.kind === 'vector' ? boxFit : Math.min(boxFit, metrics.maxPrintScale);
+      const fit = baseFit * scale;
       const width = Math.max(1, metrics.sourceWidth * fit);
       const height = Math.max(1, metrics.sourceHeight * fit);
       return {
@@ -5074,6 +5419,7 @@ function confirmIndividualPdfPreviews(items) {
       hitbox.style.top = `${bounds.y / pageHeight * 100}%`;
       hitbox.style.width = `${bounds.width / pageWidth * 100}%`;
       hitbox.style.height = `${bounds.height / pageHeight * 100}%`;
+      hitbox.style.transform = `rotate(${normalizeSignatureRotation(item.signatureRotation)}deg)`;
     };
 
     const refreshOverviewCard = index => {
@@ -5081,15 +5427,19 @@ function confirmIndividualPdfPreviews(items) {
       const card = overlay.querySelector(`[data-preview-index="${index}"]`);
       if (!card) return;
       const scale = item.signatureScale || 1;
-      card.classList.toggle('adjusted', scale !== 1);
+      const changed = item.appliedSignatureScale !== item.signatureScale || item.appliedSignatureRotation !== item.signatureRotation;
+      card.classList.toggle('adjusted', changed);
       card.classList.toggle('warning', Boolean(item.qualityWarnings) || scale > 1);
       const image = card.querySelector('.individual-overview-signature-image');
       if (image) image.style.transform = item.signatureMetrics ? 'none' : `scale(${scale})`;
       positionSignatureHitbox(card.querySelector('[data-overview-signature]'), item);
       const meta = card.querySelector('[data-overview-scale]');
       if (meta) meta.textContent = `${Math.round(scale * 100)}%`;
+      const rotationLabel = card.querySelector('[data-overview-rotation]');
+      if (rotationLabel) rotationLabel.textContent = `${normalizeSignatureRotation(item.signatureRotation)}°`;
       card.querySelector('[data-overview-smaller]')?.toggleAttribute('disabled', scale <= 0.5);
       card.querySelector('[data-overview-larger]')?.toggleAttribute('disabled', scale >= 4);
+      refreshPendingRegenerationUi();
     };
 
     const resizeOverviewSignature = (index, delta) => {
@@ -5097,6 +5447,11 @@ function confirmIndividualPdfPreviews(items) {
       const nextScale = Math.max(0.5, Math.min(4, Math.round(((item.signatureScale || 1) + delta) * 100) / 100));
       if (nextScale === item.signatureScale) return;
       item.signatureScale = nextScale;
+      refreshOverviewCard(index);
+    };
+
+    const rotateOverviewSignature = (index, delta) => {
+      items[index].signatureRotation = normalizeSignatureRotation((items[index].signatureRotation || 0) + delta);
       refreshOverviewCard(index);
     };
 
@@ -5148,9 +5503,10 @@ function confirmIndividualPdfPreviews(items) {
         const pageHeight = Math.max(1, item.pageHeight || 1);
         const bounds = getPreviewSignatureBounds(item);
         const boundsStyle = bounds
-          ? `left:${bounds.x / pageWidth * 100}%;top:${bounds.y / pageHeight * 100}%;width:${bounds.width / pageWidth * 100}%;height:${bounds.height / pageHeight * 100}%;`
+          ? `left:${bounds.x / pageWidth * 100}%;top:${bounds.y / pageHeight * 100}%;width:${bounds.width / pageWidth * 100}%;height:${bounds.height / pageHeight * 100}%;transform:rotate(${normalizeSignatureRotation(item.signatureRotation)}deg);`
           : 'display:none;';
-        return `<article class="individual-overview-card ${qualityClass}${scale !== 1 ? ' adjusted' : ''}" data-preview-index="${index}">
+        const changed = item.appliedSignatureScale !== item.signatureScale || item.appliedSignatureRotation !== item.signatureRotation;
+        return `<article class="individual-overview-card ${qualityClass}${changed ? ' adjusted' : ''}" data-preview-index="${index}">
           <span class="individual-overview-name">${escapeHtml(item.personName)}</span>
           <div class="individual-overview-document">
             <span class="individual-overview-loading">Cargando página…</span>
@@ -5163,6 +5519,9 @@ function confirmIndividualPdfPreviews(items) {
             <button type="button" data-overview-smaller title="Reducir firma">−</button>
             <strong data-overview-scale>${Math.round(scale * 100)}%</strong>
             <button type="button" data-overview-larger title="Ampliar firma">+</button>
+            <button type="button" data-overview-rotate-left title="Girar a la izquierda">↶</button>
+            <strong data-overview-rotation>${normalizeSignatureRotation(item.signatureRotation)}°</strong>
+            <button type="button" data-overview-rotate-right title="Girar a la derecha">↷</button>
             <button type="button" class="individual-overview-detail" data-open-detail>Ver grande</button>
           </div>
         </article>`;
@@ -5177,6 +5536,8 @@ function confirmIndividualPdfPreviews(items) {
         }, { passive: false });
         card.querySelector('[data-overview-smaller]')?.addEventListener('click', () => resizeOverviewSignature(index, -0.1));
         card.querySelector('[data-overview-larger]')?.addEventListener('click', () => resizeOverviewSignature(index, 0.1));
+        card.querySelector('[data-overview-rotate-left]')?.addEventListener('click', () => rotateOverviewSignature(index, -90));
+        card.querySelector('[data-overview-rotate-right]')?.addEventListener('click', () => rotateOverviewSignature(index, 90));
         card.querySelector('[data-open-detail]')?.addEventListener('click', () => {
           overviewScrollTop = grid.scrollTop;
           currentIndex = index;
@@ -5195,6 +5556,7 @@ function confirmIndividualPdfPreviews(items) {
       } else {
         grid.querySelectorAll('[data-preview-index]').forEach(card => renderOverviewPage(card, Number(card.dataset.previewIndex), token));
       }
+      refreshPendingRegenerationUi();
     };
 
     const renderCurrent = async () => {
@@ -5218,11 +5580,16 @@ function confirmIndividualPdfPreviews(items) {
       const nextButton = overlay.querySelector('[data-next]');
       const smallerButton = overlay.querySelector('[data-smaller]');
       const largerButton = overlay.querySelector('[data-larger]');
+      const rotateLeftButton = overlay.querySelector('[data-rotate-left]');
+      const rotateRightButton = overlay.querySelector('[data-rotate-right]');
       overlay.querySelector('[data-scale]').textContent = `${Math.round((item.signatureScale || 1) * 100)}%`;
+      overlay.querySelector('[data-rotation]').textContent = `${normalizeSignatureRotation(item.signatureRotation)}°`;
       previousButton.disabled = true;
       nextButton.disabled = true;
       smallerButton.disabled = true;
       largerButton.disabled = true;
+      rotateLeftButton.disabled = true;
+      rotateRightButton.disabled = true;
       nextButton.textContent = currentIndex === items.length - 1
         ? 'Todas correctas · Generar documentos'
         : 'Firma correcta · Siguiente →';
@@ -5277,6 +5644,8 @@ function confirmIndividualPdfPreviews(items) {
         nextButton.disabled = false;
         smallerButton.disabled = (item.signatureScale || 1) <= 0.5;
         largerButton.disabled = (item.signatureScale || 1) >= 4;
+        rotateLeftButton.disabled = false;
+        rotateRightButton.disabled = false;
         documentPdf.destroy?.();
       } catch (error) {
         if (token === renderToken) {
@@ -5285,6 +5654,8 @@ function confirmIndividualPdfPreviews(items) {
           nextButton.disabled = false;
           smallerButton.disabled = (item.signatureScale || 1) <= 0.5;
           largerButton.disabled = (item.signatureScale || 1) >= 4;
+          rotateLeftButton.disabled = false;
+          rotateRightButton.disabled = false;
         }
       }
     };
@@ -5292,6 +5663,7 @@ function confirmIndividualPdfPreviews(items) {
     const refreshSignatureSizeUi = item => {
       refreshOverviewCard(items.indexOf(item));
       overlay.querySelector('[data-scale]').textContent = `${Math.round((item.signatureScale || 1) * 100)}%`;
+      overlay.querySelector('[data-rotation]').textContent = `${normalizeSignatureRotation(item.signatureRotation)}°`;
       overlay.querySelector('[data-smaller]').disabled = (item.signatureScale || 1) <= 0.5;
       overlay.querySelector('[data-larger]').disabled = (item.signatureScale || 1) >= 4;
       const image = overlay.querySelector('.individual-signature-preview-image');
@@ -5317,17 +5689,25 @@ function confirmIndividualPdfPreviews(items) {
       refreshSignatureSizeUi(item);
     };
 
+    const previewRotateCurrentSignature = delta => {
+      const item = items[currentIndex];
+      item.signatureRotation = normalizeSignatureRotation((item.signatureRotation || 0) + delta);
+      refreshSignatureSizeUi(item);
+    };
+
     const applyCurrentSignatureSize = async () => {
       const item = items[currentIndex];
-      if (item.appliedSignatureScale === item.signatureScale || typeof item.resizeSignature !== 'function') return;
+      if ((item.appliedSignatureScale === item.signatureScale && item.appliedSignatureRotation === item.signatureRotation) || typeof item.resizeSignature !== 'function') return;
       overlay.querySelectorAll('button').forEach(button => { button.disabled = true; });
-      overlay.querySelector('[data-scale]').textContent = 'Aplicando…';
+      overlay.querySelector('[data-scale]').textContent = 'Regenerando…';
       try {
-        await item.resizeSignature(item.signatureScale);
+        await item.resizeSignature(item.signatureScale, item.signatureRotation);
         item.appliedSignatureScale = item.signatureScale;
+        item.appliedSignatureRotation = item.signatureRotation;
       } catch (error) {
-        showStatus(`No se pudo cambiar el tamaño de la firma: ${error.message}`, 'error');
+        showStatus(`No se pudo aplicar el ajuste de la firma: ${error.message}`, 'error');
         item.signatureScale = item.appliedSignatureScale || 1;
+        item.signatureRotation = item.appliedSignatureRotation || 0;
       } finally {
         overlay.querySelectorAll('button').forEach(button => { button.disabled = false; });
         refreshSignatureSizeUi(item);
@@ -5337,19 +5717,21 @@ function confirmIndividualPdfPreviews(items) {
     };
 
     const applyAllSignatureSizes = async () => {
-      const pending = items.filter(item => item.appliedSignatureScale !== item.signatureScale && typeof item.resizeSignature === 'function');
+      const pending = items.filter(item => (item.appliedSignatureScale !== item.signatureScale || item.appliedSignatureRotation !== item.signatureRotation) && typeof item.resizeSignature === 'function');
       if (!pending.length) return;
       const acceptButton = overlay.querySelector('[data-accept-all]');
       overlay.querySelectorAll('button').forEach(button => { button.disabled = true; });
       for (let index = 0; index < pending.length; index++) {
         const item = pending[index];
-        acceptButton.textContent = `Aplicando tamaños ${index + 1}/${pending.length}…`;
+        acceptButton.textContent = `Regenerando corregidos ${index + 1}/${pending.length}…`;
         try {
-          await item.resizeSignature(item.signatureScale);
+          await item.resizeSignature(item.signatureScale, item.signatureRotation);
           item.appliedSignatureScale = item.signatureScale;
+          item.appliedSignatureRotation = item.signatureRotation;
         } catch (error) {
           showStatus(`No se pudo cambiar la firma de ${item.personName}: ${error.message}`, 'error');
           item.signatureScale = item.appliedSignatureScale || 1;
+          item.signatureRotation = item.appliedSignatureRotation || 0;
         }
         refreshOverviewCard(items.indexOf(item));
       }
@@ -5385,6 +5767,8 @@ function confirmIndividualPdfPreviews(items) {
     };
     overlay.querySelector('[data-smaller]').onclick = () => previewResizeCurrentSignature(-0.1);
     overlay.querySelector('[data-larger]').onclick = () => previewResizeCurrentSignature(0.1);
+    overlay.querySelector('[data-rotate-left]').onclick = () => previewRotateCurrentSignature(-90);
+    overlay.querySelector('[data-rotate-right]').onclick = () => previewRotateCurrentSignature(90);
     renderOverview();
   });
 }
@@ -5423,6 +5807,7 @@ async function generateIndividualTemplatePdfs(rawText) {
   const failed = [];
   try {
     const matches = await findSignaturesForPeople(people);
+    const signaturePreferences = await loadSignaturePreferences();
     const progress = showIndividualGenerationProgress(people.length);
     const usedNames = new Map();
     for (let index = 0; index < matches.length; index++) {
@@ -5435,6 +5820,15 @@ async function generateIndividualTemplatePdfs(rawText) {
       }
       try {
         const elements = cloneElementsForIndividual(activeDoc, person, signature);
+        const preferenceKey = getSignaturePreferenceKey(signature, person.name);
+        const preference = signaturePreferences[preferenceKey] || {};
+        const preferredScale = Math.max(0.5, Math.min(4, Number(preference.scale) || 1));
+        const preferredRotation = normalizeSignatureRotation(preference.rotation);
+        Object.values(elements).forEach(pageElements => pageElements.forEach(element => {
+          if (element.type !== 'signature') return;
+          element.signatureDisplayScale = preferredScale;
+          element.signatureRotation = preferredRotation;
+        }));
         const result = await buildIndividualPdf(activeDoc, elements);
         const bytes = result.bytes;
         const signaturePage = Number(Object.keys(elements).find(page => elements[page].some(element => element.type === 'signature')) || 1);
@@ -5464,8 +5858,11 @@ async function generateIndividualTemplatePdfs(rawText) {
           } : null),
           signatureMetrics: signaturePlacement?.metrics || null,
           signaturePreviewSrc: signature.image_url || signature.svg_data || '',
-          signatureScale: 1,
-          appliedSignatureScale: 1,
+          signaturePreferenceKey: preferenceKey,
+          signatureScale: preferredScale,
+          appliedSignatureScale: preferredScale,
+          signatureRotation: preferredRotation,
+          appliedSignatureRotation: preferredRotation,
           previewPdfBytes: null,
           async getPreviewBytes() {
             if (!this.previewPdfBytes) {
@@ -5474,10 +5871,14 @@ async function generateIndividualTemplatePdfs(rawText) {
             }
             return this.previewPdfBytes;
           },
-          async resizeSignature(scale) {
+          async resizeSignature(scale, rotation = this.signatureRotation) {
             this.signatureScale = Math.max(0.5, Math.min(4, scale));
+            this.signatureRotation = normalizeSignatureRotation(rotation);
             Object.values(elements).forEach(pageElements => pageElements.forEach(element => {
-              if (element.type === 'signature') element.signatureDisplayScale = this.signatureScale;
+              if (element.type === 'signature') {
+                element.signatureDisplayScale = this.signatureScale;
+                element.signatureRotation = this.signatureRotation;
+              }
             }));
             const rebuilt = await buildIndividualPdf(activeDoc, elements);
             this.pdfBytes = rebuilt.bytes;
@@ -5489,6 +5890,7 @@ async function generateIndividualTemplatePdfs(rawText) {
               this.signatureMetrics = placement.metrics;
             }
             generatedFile.data = rebuilt.bytes;
+            await saveSignaturePreference(this.signaturePreferenceKey, this.signatureScale, this.signatureRotation);
           }
         });
       } catch (error) {
