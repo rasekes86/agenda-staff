@@ -20,6 +20,7 @@ const MAX_UNDO_STATES = 30;
 const PASTE_OFFSET = 30;
 const MAX_RECENT_SIGNATURES = 5;
 const SIGNATURE_PREFERENCES_KEY = 'pdfEditorSignaturePreferences';
+const BUTTON_HELP_DELAY_MS = 650;
 
 // Signature processing settings
 const SIG_WHITE_THRESHOLD = 248;   // Near-white paper is removed without erasing pale strokes
@@ -618,6 +619,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupSplit();
   setupMultiDocumentTabs();
   setupMobilePinchZoom();
+  setupDelayedButtonTooltips();
   
   // Delegated dblclick handler on canvasArea (M9: avoids re-attaching on every render)
   const canvasArea = $('canvasArea');
@@ -682,6 +684,133 @@ window.addEventListener('agenda-android-session', event => {
   session = event.detail?.session || session;
   currentUser = event.detail?.user || currentUser;
 });
+
+function setupDelayedButtonTooltips() {
+  if (document.getElementById('buttonHelpTooltip')) return;
+
+  const helpById = {
+    btnUpload: 'Carga uno o varios archivos PDF para comenzar a editarlos.',
+    btnAddPdfTab: 'Abre otro PDF y lo añade como una nueva pestaña.',
+    btnPrevPage: 'Muestra la página anterior del PDF.',
+    btnNextPage: 'Muestra la página siguiente del PDF.',
+    btnZoomOut: 'Reduce el zoom del documento sin modificar el PDF final.',
+    btnZoomIn: 'Amplía el documento para colocar elementos con más precisión.',
+    btnSave: 'Genera y descarga el PDF con los cambios realizados.',
+    btnToggleLightMode: 'Cambia la interfaz entre el modo claro y el modo oscuro.',
+    btnClear: 'Cierra todos los PDF cargados y limpia el área de trabajo.',
+    btnAddText: 'Inserta un texto nuevo en el PDF.',
+    btnAddImage: 'Añade una imagen al documento y permite moverla o redimensionarla.',
+    btnAddSignature: 'Busca, sube, recorta o dibuja una firma para insertarla.',
+    btnAddDate: 'Activa la fecha completa para colocarla donde pulses.',
+    btnAddDateParts: 'Inserta día, mes y año como tres textos independientes.',
+    btnAddWorkout: 'Inserta el texto WORKOUT EVENTS donde pulses.',
+    btnAddCompanyCif: 'Inserta automáticamente el CIF de la empresa.',
+    btnAddCity: 'Elige una ciudad y después colócala en el documento.',
+    btnAddCategory: 'Elige una categoría o puesto y colócalo en el PDF.',
+    btnDraw: 'Activa el dibujo libre sobre el documento.',
+    btnStampCheck: 'Activa la herramienta para insertar un check donde pulses.',
+    btnStampX: 'Activa la herramienta para insertar una X donde pulses.',
+    btnOpenTemplates: 'Abre el listado para crear, editar, aplicar o cambiar una plantilla.',
+    btnFillTemplate: 'Rellena automáticamente los campos de la plantilla aplicada.',
+    btnDetectTemplateFields: 'Analiza el PDF y propone posiciones para Nombre, DNI, Fecha y Firma.',
+    btnPlaceTemplateSlot: 'Añade un nuevo campo y permite colocarlo sobre el PDF.',
+    btnAdjustTemplateSlots: 'Vuelve al PDF para mover o redimensionar los campos de la plantilla.',
+    btnCopyElements: 'Copia todos los elementos insertados en la página actual.',
+    btnCopySelected: 'Copia únicamente los elementos que has seleccionado.',
+    btnPasteElements: 'Pega en esta página los elementos copiados anteriormente.',
+    btnClearClipboard: 'Elimina los elementos guardados en el portapapeles interno.',
+    btnDeleteSelected: 'Borra del PDF todos los elementos seleccionados.',
+    btnConvertImg: 'Crea un PDF con las imágenes cargadas y ordenadas.',
+    btnConvertWord: 'Convierte el documento Word cargado a PDF.',
+    btnMergePdfs: 'Combina varios PDF en un único documento.',
+    btnSplitPdf: 'Separa un PDF en varios archivos o rangos de páginas.',
+    btnDownloadWhiteBg: 'Descarga la fotografía procesada con fondo blanco.',
+    btnResetWhiteBg: 'Descarta el resultado y permite cargar otra fotografía.'
+  };
+
+  const tooltip = document.createElement('div');
+  tooltip.id = 'buttonHelpTooltip';
+  tooltip.className = 'button-help-tooltip';
+  tooltip.setAttribute('role', 'tooltip');
+  document.body.appendChild(tooltip);
+
+  let currentButton = null;
+  let showTimer = null;
+
+  const getHelpText = button => {
+    const explicit = helpById[button.id] || button.dataset.tooltip || button.getAttribute('aria-label') || button.getAttribute('title');
+    if (explicit) return explicit.trim();
+    const label = String(button.innerText || button.textContent || '').replace(/\s+/g, ' ').trim();
+    return label ? `Pulsa para ${label.charAt(0).toLocaleLowerCase()}${label.slice(1)}.` : '';
+  };
+
+  const restoreNativeTitle = button => {
+    if (!button?.dataset.buttonHelpNativeTitle) return;
+    button.setAttribute('title', button.dataset.buttonHelpNativeTitle);
+    delete button.dataset.buttonHelpNativeTitle;
+  };
+
+  const hide = () => {
+    if (showTimer) clearTimeout(showTimer);
+    showTimer = null;
+    tooltip.classList.remove('show');
+    tooltip.textContent = '';
+    if (currentButton) {
+      currentButton.removeAttribute('aria-describedby');
+      restoreNativeTitle(currentButton);
+    }
+    currentButton = null;
+  };
+
+  const show = button => {
+    if (currentButton !== button || !button.isConnected) return;
+    const text = button.dataset.buttonHelpText || getHelpText(button);
+    if (!text) return;
+    tooltip.textContent = text;
+    tooltip.classList.add('show');
+    button.setAttribute('aria-describedby', tooltip.id);
+
+    const rect = button.getBoundingClientRect();
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const gap = 9;
+    let left = rect.left + rect.width / 2 - tooltipRect.width / 2;
+    left = Math.max(10, Math.min(window.innerWidth - tooltipRect.width - 10, left));
+    let top = rect.bottom + gap;
+    if (top + tooltipRect.height > window.innerHeight - 10) top = rect.top - tooltipRect.height - gap;
+    tooltip.style.left = `${Math.max(10, left)}px`;
+    tooltip.style.top = `${Math.max(10, top)}px`;
+  };
+
+  const schedule = (button, delay = BUTTON_HELP_DELAY_MS) => {
+    if (!button || button.disabled) return;
+    if (currentButton === button) return;
+    hide();
+    currentButton = button;
+    button.dataset.buttonHelpText = getHelpText(button);
+    const nativeTitle = button.getAttribute('title');
+    if (nativeTitle) {
+      button.dataset.buttonHelpNativeTitle = nativeTitle;
+      button.removeAttribute('title');
+    }
+    if (!button.dataset.buttonHelpText) return;
+    showTimer = setTimeout(() => show(button), delay);
+  };
+
+  document.addEventListener('pointerover', event => schedule(event.target.closest?.('button, [role="button"]')));
+  document.addEventListener('pointerout', event => {
+    if (!currentButton) return;
+    if (event.relatedTarget && currentButton.contains(event.relatedTarget)) return;
+    hide();
+  });
+  document.addEventListener('focusin', event => schedule(event.target.closest?.('button, [role="button"]'), 350));
+  document.addEventListener('focusout', event => {
+    if (currentButton?.contains(event.target)) hide();
+  });
+  document.addEventListener('pointerdown', hide, true);
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' || event.key === 'Enter' || event.key === ' ') hide(); }, true);
+  window.addEventListener('scroll', hide, true);
+  window.addEventListener('resize', hide);
+}
 
 chrome.runtime?.onMessage?.addListener(message => {
   if (message.type === 'AGENDA_SIGNATURE_CROP_SAVED' && message.context === 'editor') {

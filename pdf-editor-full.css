@@ -776,6 +776,38 @@ body.light-mode .recent-sig-btn:hover { background: #dbeafe; border-color: #2563
   pointer-events: none;
 }
 
+.button-help-tooltip {
+  position: fixed;
+  z-index: 10000;
+  width: max-content;
+  max-width: min(300px, calc(100vw - 20px));
+  padding: 8px 10px;
+  border: 1px solid #475569;
+  border-radius: 7px;
+  background: #0f172a;
+  color: #f8fafc;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-3px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+.button-help-tooltip.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+body.light-mode .button-help-tooltip {
+  border-color: #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.2);
+}
+
 /* Upload area */
 .upload-wrapper {
   position: relative;
