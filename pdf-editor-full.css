@@ -1273,6 +1273,7 @@ body.light-mode .template-editor-bar input { background: #fff; color: #0f172a; b
 .pdf-element-placeholder {
   min-width: 70px;
   min-height: 28px;
+  box-sizing: border-box;
   border: 2px dashed #8b5cf6 !important;
   background: rgba(139, 92, 246, 0.12) !important;
   display: flex;
@@ -1288,6 +1289,66 @@ body.light-mode .template-editor-bar input { background: #fff; color: #0f172a; b
   pointer-events: none;
 }
 body:not(.light-mode) .pdf-element-placeholder .placeholder-label { color: #c4b5fd; }
+.pdf-element-placeholder.template-text-placeholder {
+  display: block;
+  min-width: 20px;
+  min-height: 20px;
+  padding: 0;
+  overflow: visible;
+  border-width: 1px !important;
+  border-style: solid !important;
+  background: rgba(139, 92, 246, 0.06) !important;
+}
+.template-text-placeholder::before {
+  content: '';
+  position: absolute;
+  top: var(--template-baseline, 14px);
+  right: 0;
+  left: 0;
+  border-top: 1px dotted rgba(124, 58, 237, 0.65);
+  pointer-events: none;
+}
+.template-text-placeholder::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #7c3aed;
+  box-shadow: 0 0 0 2px #fff;
+  pointer-events: none;
+}
+.pdf-element-placeholder.template-text-placeholder .placeholder-label {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  z-index: 2;
+  max-width: calc(100% - 4px);
+  padding: 1px 4px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: rgba(124, 58, 237, 0.88);
+  color: #fff;
+  font-size: 8px;
+  line-height: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.template-text-position-preview {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  font-family: Helvetica, Arial, sans-serif;
+  text-align: left;
+  white-space: nowrap;
+  pointer-events: none;
+}
 body.light-mode .template-help { color: #475569; }
 body.light-mode .template-slot-builder select,
 body.light-mode .template-slot-builder input { background: #fff; color: #0f172a; }

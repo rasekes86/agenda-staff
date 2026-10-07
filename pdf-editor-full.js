@@ -1481,6 +1481,49 @@ async function renderPage() {
   }
 }
 
+function getTemplateFieldPreviewText(el) {
+  if (el.templateFixedValue) return String(el.templateFixedValue);
+  const field = normalizeText(el.fieldGroup || el.placeholderLabel || '').toUpperCase();
+  const examples = {
+    NOMBRE: 'APELLIDO APELLIDO, NOMBRE',
+    DNI: '12345678A',
+    FECHA: '07/10/2026',
+    DIA: '07',
+    MES: 'OCTUBRE',
+    'AÑO': '2026',
+    'ANO': '2026',
+    'WORKOUT EVENTS': 'WORKOUT EVENTS',
+    'CIF EMPRESA': 'B84108513',
+    CIUDAD: 'MADRID',
+    CATEGORIA: 'CARGA Y DESCARGA'
+  };
+  return examples[field] || field || 'TEXTO';
+}
+
+function getTemplateFieldPreviewFontSize(el, previewText) {
+  const savedSize = Number(el.size || DEFAULT_FONT_SIZE);
+  const availableWidth = Math.max(1, Number(el.width || 150) - 4);
+  const availableHeight = Math.max(5, Number(el.height || savedSize + 8) - 4);
+  const readableFloor = getTemplateReadableFontFloor(el, availableHeight);
+  const heightBasedSize = Math.min(DEFAULT_FONT_SIZE, availableHeight * 0.72);
+  const baseSize = Math.min(availableHeight, Math.max(savedSize, heightBasedSize, readableFloor));
+  const canvas = getTemplateFieldPreviewFontSize.canvas ||= document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  context.font = `${el.italic ? 'italic' : 'normal'} ${el.bold ? '700' : '400'} ${baseSize}px Helvetica, Arial, sans-serif`;
+  const measuredWidth = Math.max(1, context.measureText(String(previewText || '')).width);
+  return Math.max(readableFloor, Math.min(baseSize, availableHeight, baseSize * availableWidth / measuredWidth));
+}
+
+function updateTemplateTextPreviewDiv(div, el, scale) {
+  if (!el.templateDraft || el.type !== 'text') return;
+  const preview = div.querySelector('.template-text-position-preview');
+  if (!preview) return;
+  const previewSize = getTemplateFieldPreviewFontSize(el, preview.textContent);
+  preview.style.fontSize = `${previewSize * scale}px`;
+  preview.style.lineHeight = `${previewSize * scale}px`;
+  div.style.setProperty('--template-baseline', `${previewSize * scale}px`);
+}
+
 function createElementDiv(el, idx, scale, activeDoc) {
   const div = document.createElement('div');
   div.className = 'pdf-element pdf-element-' + el.type;
@@ -1490,11 +1533,29 @@ function createElementDiv(el, idx, scale, activeDoc) {
   div.style.top = (el.y * scale) + 'px';
   
   if (el.isPlaceholder) {
+    const isTemplateTextDraft = el.type === 'text' && el.templateDraft;
     const placeholder = document.createElement('div');
     placeholder.className = 'placeholder-label';
     placeholder.textContent = el.placeholderLabel || el.fieldGroup || 'HUECO';
     div.appendChild(placeholder);
-    if (el.type === 'text' && !el.templateDraft) {
+    if (isTemplateTextDraft) {
+      const previewText = getTemplateFieldPreviewText(el);
+      const previewSize = getTemplateFieldPreviewFontSize(el, previewText);
+      const preview = document.createElement('span');
+      preview.className = 'template-text-position-preview';
+      preview.textContent = previewText;
+      preview.style.fontSize = `${previewSize * scale}px`;
+      preview.style.lineHeight = `${previewSize * scale}px`;
+      preview.style.color = el.color || '#000000';
+      if (el.bold) preview.style.fontWeight = '700';
+      if (el.italic) preview.style.fontStyle = 'italic';
+      if (el.underline) preview.style.textDecoration = 'underline';
+      div.classList.add('template-text-placeholder');
+      div.style.width = `${(el.width || 150) * scale}px`;
+      div.style.height = `${(el.height || Math.max(28, (el.size || 14) + 12)) * scale}px`;
+      div.appendChild(preview);
+      updateTemplateTextPreviewDiv(div, el, scale);
+    } else if (el.type === 'text') {
       div.style.width = ((el.width || 150) * scale) + 'px';
       div.style.height = ((el.height || Math.max(28, (el.size || 14) + 12)) * scale) + 'px';
     } else {
@@ -1671,6 +1732,7 @@ function makeWheelResizable(div, el, scale, activeDoc, idx) {
       div.style.height = (newHeight * scale) + 'px';
       div.style.left = (el.x * scale) + 'px';
       div.style.top = (el.y * scale) + 'px';
+      updateTemplateTextPreviewDiv(div, el, scale);
     }
 
     if (resizeTimer) clearTimeout(resizeTimer);
@@ -1976,6 +2038,7 @@ function makeResizable(div, el, scale, activeDoc) {
       div.style.height = (newHeight * scale) + 'px';
       div.style.left = (newX * scale) + 'px';
       div.style.top = (newY * scale) + 'px';
+      updateTemplateTextPreviewDiv(div, el, scale);
     }
   }
   
