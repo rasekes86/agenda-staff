@@ -766,6 +766,7 @@ function setupEventListeners() {
   $('btnAddWorkout')?.addEventListener('click', () => enterStampMode('workout'));
   $('btnAddCity')?.addEventListener('click', () => showCityPicker());
   $('btnAddCategory')?.addEventListener('click', () => showCategoryPicker());
+  $('btnAddCompanyCif')?.addEventListener('click', () => enterStampMode('companyCif'));
   $('cancelCityPicker')?.addEventListener('click', () => {
     cityPickerCallback = null;
     $('cityPickerModal')?.classList.remove('show');
@@ -2210,6 +2211,7 @@ function showQuickInsertPicker(point) {
         <button data-action="date">📅<span>Fecha completa</span></button>
         <button data-action="dateParts">🗓️<span>Fecha separada</span></button>
         <button data-action="workout">W<span>Workout Events</span></button>
+        <button data-action="companyCif">🏢<span>CIF empresa</span></button>
         <button data-action="city">📍<span>Ciudad</span></button>
         <button data-action="category">🏷️<span>Categoría</span></button>
         <button data-action="check">✅<span>Check</span></button>
@@ -4092,7 +4094,7 @@ function addTemplateDraftSlot(position, type, label, options = {}) {
   if (!activeDoc) return;
   const dimensions = type === 'signature'
     ? { width: 180, height: 70 }
-    : { width: label === 'NOMBRE' ? 220 : label === 'WORKOUT EVENTS' ? 150 : label === 'CATEGORIA' ? 240 : ['DIA', 'MES', 'AÑO'].includes(label) ? 58 : 110, height: 32 };
+    : { width: label === 'NOMBRE' ? 220 : label === 'WORKOUT EVENTS' ? 150 : label === 'CATEGORIA' ? 240 : label === 'CIF EMPRESA' ? 120 : ['DIA', 'MES', 'AÑO'].includes(label) ? 58 : 110, height: 32 };
   (activeDoc.elements[position.page] ||= []).push({
     type,
     x: Math.min(position.x, Math.max(0, activeDoc.pageWidth - dimensions.width)),
@@ -4126,6 +4128,7 @@ function showTemplateFieldPicker(position) {
       <button data-field="MES" data-type="text">📆 Mes</button>
       <button data-field="AÑO" data-type="text">📆 Año</button>
       <button data-field="WORKOUT EVENTS" data-type="text">🏢 Workout Events</button>
+      <button data-field="CIF EMPRESA" data-type="text">🏢 CIF empresa</button>
       <button data-field="CIUDAD" data-type="text">📍 Ciudad</button>
       <button data-field="CATEGORIA" data-type="text">🏷️ Categoría</button>
       <button data-field="FIRMA" data-type="signature">✍️ Firma</button>
@@ -4325,6 +4328,9 @@ function applyTemplate(template, options = {}) {
       fitTemplateTextToBox(placeholder, 'WORKOUT EVENTS');
       placeholder.bold = true;
       clearPlaceholderMetadata(placeholder);
+    } else if (normalizedLabel === 'CIF EMPRESA' && placeholder.type === 'text') {
+      fitTemplateTextToBox(placeholder, 'B84108513');
+      clearPlaceholderMetadata(placeholder);
     } else if (normalizedLabel === 'CIUDAD' && placeholder.type === 'text') {
       fitTemplateTextToBox(placeholder, slot.fixedValue || localStorage.getItem('pe_lastCity') || selectedCity || 'Madrid');
       clearPlaceholderMetadata(placeholder);
@@ -4346,10 +4352,12 @@ function applyTemplate(template, options = {}) {
 
 function updateFillTemplateVisibility() {
   const section = $('fillTemplateSection');
+  const templatesSection = $('templatesSection');
   const activeDoc = getActiveDoc();
-  if (!section) return;
-  const hasPlaceholders = activeDoc && Object.values(activeDoc.elements).some(elements => elements.some(el => el.isPlaceholder && !el.templateDraft));
-  section.style.display = hasPlaceholders ? '' : 'none';
+  if (!section || !templatesSection) return;
+  const hasAppliedTemplate = Boolean(activeDoc?.activeTemplate);
+  section.style.display = hasAppliedTemplate ? '' : 'none';
+  templatesSection.style.display = hasAppliedTemplate ? 'none' : '';
 }
 
 function getTemplateGroups() {
@@ -4478,7 +4486,7 @@ function showFillTemplateModal() {
 function getTemplateReadableFontFloor(element, availableHeight) {
   const field = normalizeText(element.templateFieldKey || element.fieldGroup || '').toUpperCase();
   const preferredFloor = ['FECHA', 'DATE', 'DIA', 'MES', 'AÑO'].includes(field) ? 8
-    : field === 'DNI' ? 7.5
+    : ['DNI', 'CIF EMPRESA'].includes(field) ? 7.5
       : 6.5;
   return Math.min(preferredFloor, availableHeight);
 }
@@ -4779,6 +4787,7 @@ async function buildIndividualPdf(activeDoc, elements, options = {}) {
   const fontItalic = await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
   const fontBoldItalic = await pdfDoc.embedFont(StandardFonts.HelveticaBoldOblique);
   let qualityWarnings = 0;
+  const signaturePlacements = [];
 
   for (let pageNum = 1; pageNum <= activeDoc.totalPages; pageNum++) {
     const page = pdfDoc.getPage(pageNum - 1);
@@ -4820,6 +4829,15 @@ async function buildIndividualPdf(activeDoc, elements, options = {}) {
           drawHeight = prepared.height;
           drawX = element.x + (element.width - drawWidth) / 2;
           drawY = height - element.y - (element.height + drawHeight) / 2;
+          signaturePlacements.push({
+            page: pageNum,
+            x: drawX,
+            y: element.y + (element.height - drawHeight) / 2,
+            width: drawWidth,
+            height: drawHeight,
+            box: { x: element.x, y: element.y, width: element.width, height: element.height },
+            metrics: prepared.metrics || null
+          });
         }
         let bytes;
         let isPng = source.startsWith('data:image/png');
@@ -4841,27 +4859,32 @@ async function buildIndividualPdf(activeDoc, elements, options = {}) {
       }
     }
   }
-  return { bytes: await flattenPdf(await pdfDoc.save()), qualityWarnings };
+  return { bytes: await flattenPdf(await pdfDoc.save()), qualityWarnings, signaturePlacements };
 }
 
 /**
  * Preserve a signature's aspect ratio and ensure enough bitmap resolution for
- * its final physical size in the PDF. Low-resolution sources are resampled
- * once with high-quality interpolation at 300 DPI instead of being stretched
- * by the PDF viewer.
+ * its final physical size in the PDF. The default placement respects a
+ * 300-DPI baseline; an explicit scale chosen in the preview is then applied
+ * around the centre of the template field.
  */
 async function prepareSignatureForPdf(src, boxWidth, boxHeight, displayScale = 1) {
   const svgMarkup = AgendaSignatureVector?.dataUrlToSvg(src) || '';
   if (svgMarkup) {
     const vectorSize = AgendaSignatureVector.dimensions(svgMarkup);
-    const fit = Math.min(boxWidth / vectorSize.width, boxHeight / vectorSize.height);
+    const boxFit = Math.min(boxWidth / vectorSize.width, boxHeight / vectorSize.height);
+    const safeDisplayScale = Math.max(0.5, Math.min(4, Number(displayScale) || 1));
+    const fit = boxFit * safeDisplayScale;
     const width = Math.max(1, vectorSize.width * fit);
     const height = Math.max(1, vectorSize.height * fit);
     // pdf-lib cannot embed SVG paths directly. Rasterize only for this exact
     // PDF placement at 600 DPI; the stored master remains fully vectorial.
     const pixelsPerPoint = 600 / 72;
     const png = await AgendaSignatureVector.renderSvg(svgMarkup, Math.ceil(width * pixelsPerPoint), Math.ceil(height * pixelsPerPoint));
-    return { src: png, width, height, qualityLimited: false, vector: true };
+    return {
+      src: png, width, height, qualityLimited: false, vector: true,
+      metrics: { kind: 'vector', sourceWidth: vectorSize.width, sourceHeight: vectorSize.height, boxFit }
+    };
   }
   const processedSrc = await processSignatureImage(src);
   const image = await new Promise((resolve, reject) => {
@@ -4874,19 +4897,20 @@ async function prepareSignatureForPdf(src, boxWidth, boxHeight, displayScale = 1
   const naturalWidth = Math.max(1, image.naturalWidth || image.width);
   const naturalHeight = Math.max(1, image.naturalHeight || image.height);
   const boxFit = Math.min(boxWidth / naturalWidth, boxHeight / naturalHeight);
-  // One image pixel may occupy at most 1/300 inch in the finished PDF.
-  // Refusing to exceed this scale is the only honest way to guarantee that a
-  // low-resolution raster signature is never enlarged into visible pixels.
+  // Start from a 300-DPI-safe size. If the user deliberately enlarges it in
+  // the preview, keep that visual choice and surface the quality warning.
   const maxPrintScale = 72 / 300;
   const safeDisplayScale = Math.max(0.5, Math.min(4, Number(displayScale) || 1));
-  const fit = Math.min(boxFit, maxPrintScale * safeDisplayScale);
+  const baseFit = Math.min(boxFit, maxPrintScale);
+  const fit = baseFit * safeDisplayScale;
   const width = Math.max(1, naturalWidth * fit);
   const height = Math.max(1, naturalHeight * fit);
   return {
     src: processedSrc,
     width,
     height,
-    qualityLimited: boxFit > maxPrintScale + 0.0001 || safeDisplayScale > 1.0001
+    qualityLimited: boxFit > maxPrintScale + 0.0001 || fit > maxPrintScale + 0.0001,
+    metrics: { kind: 'raster', sourceWidth: naturalWidth, sourceHeight: naturalHeight, baseFit }
   };
 }
 
@@ -4993,11 +5017,11 @@ function confirmIndividualPdfPreviews(items) {
     overlay.className = 'modal-overlay show individual-preview-overlay';
     overlay.innerHTML = `<div class="modal individual-preview-modal">
       <div class="individual-preview-heading">
-        <h3>🔎 Revisa todas las firmas antes de generar el ZIP</h3>
+        <h3>🔎 Revisa todas las firmas antes de generar los documentos</h3>
         <strong data-counter></strong>
       </div>
       <div class="individual-overview-view" data-overview-view>
-        <p>Comprueba todas las firmas de un vistazo. Pulsa únicamente la que quieras revisar o ajustar.</p>
+        <p>Se muestra la página completa donde irá cada firma. Pasa el ratón sobre la firma y usa la rueda para cambiar su tamaño sin abrir el documento individual.</p>
         <div class="individual-overview-grid" data-overview-grid></div>
       </div>
       <div class="individual-detail-view" data-detail-view hidden>
@@ -5014,15 +5038,103 @@ function confirmIndividualPdfPreviews(items) {
       </div>
       <div class="modal-actions">
         <button class="btn-cancel" data-cancel>Cancelar</button>
-        <button class="btn-accept-all" data-accept-all>✓ Aceptar todas y generar ZIP</button>
+        <button class="btn-accept-all" data-accept-all>✓ Aceptar todas y generar</button>
         <button class="btn-cancel" data-previous>← Anterior</button>
         <button class="btn-add" data-next></button>
       </div>
     </div>`;
     document.body.appendChild(overlay);
 
+    let overviewObserver = null;
+
+    const getPreviewSignatureBounds = item => {
+      const metrics = item.signatureMetrics;
+      const box = item.signatureBox;
+      if (!metrics || !box) return item.signatureBounds;
+      const scale = Math.max(0.5, Math.min(4, Number(item.signatureScale) || 1));
+      const fit = metrics.kind === 'vector'
+        ? metrics.boxFit * scale
+        : metrics.baseFit * scale;
+      const width = Math.max(1, metrics.sourceWidth * fit);
+      const height = Math.max(1, metrics.sourceHeight * fit);
+      return {
+        x: box.x + (box.width - width) / 2,
+        y: box.y + (box.height - height) / 2,
+        width,
+        height
+      };
+    };
+
+    const positionSignatureHitbox = (hitbox, item) => {
+      const bounds = getPreviewSignatureBounds(item);
+      if (!hitbox || !bounds) return;
+      const pageWidth = Math.max(1, item.pageWidth || 1);
+      const pageHeight = Math.max(1, item.pageHeight || 1);
+      hitbox.style.left = `${bounds.x / pageWidth * 100}%`;
+      hitbox.style.top = `${bounds.y / pageHeight * 100}%`;
+      hitbox.style.width = `${bounds.width / pageWidth * 100}%`;
+      hitbox.style.height = `${bounds.height / pageHeight * 100}%`;
+    };
+
+    const refreshOverviewCard = index => {
+      const item = items[index];
+      const card = overlay.querySelector(`[data-preview-index="${index}"]`);
+      if (!card) return;
+      const scale = item.signatureScale || 1;
+      card.classList.toggle('adjusted', scale !== 1);
+      card.classList.toggle('warning', Boolean(item.qualityWarnings) || scale > 1);
+      const image = card.querySelector('.individual-overview-signature-image');
+      if (image) image.style.transform = item.signatureMetrics ? 'none' : `scale(${scale})`;
+      positionSignatureHitbox(card.querySelector('[data-overview-signature]'), item);
+      const meta = card.querySelector('[data-overview-scale]');
+      if (meta) meta.textContent = `${Math.round(scale * 100)}%`;
+      card.querySelector('[data-overview-smaller]')?.toggleAttribute('disabled', scale <= 0.5);
+      card.querySelector('[data-overview-larger]')?.toggleAttribute('disabled', scale >= 4);
+    };
+
+    const resizeOverviewSignature = (index, delta) => {
+      const item = items[index];
+      const nextScale = Math.max(0.5, Math.min(4, Math.round(((item.signatureScale || 1) + delta) * 100) / 100));
+      if (nextScale === item.signatureScale) return;
+      item.signatureScale = nextScale;
+      refreshOverviewCard(index);
+    };
+
+    const renderOverviewPage = async (card, index, token) => {
+      if (!card || card.dataset.rendering || card.dataset.rendered) return;
+      card.dataset.rendering = 'true';
+      const item = items[index];
+      const canvas = card.querySelector('canvas');
+      const pageSurface = card.querySelector('.individual-overview-document');
+      const loading = card.querySelector('.individual-overview-loading');
+      let documentPdf;
+      try {
+        const previewBytes = typeof item.getPreviewBytes === 'function' ? await item.getPreviewBytes() : item.pdfBytes;
+        documentPdf = await window.pdfjsLib.getDocument({ data: previewBytes.slice(0) }).promise;
+        const pageNumber = Math.min(Math.max(1, item.signaturePage || 1), documentPdf.numPages);
+        const page = await documentPdf.getPage(pageNumber);
+        if (token !== renderToken || !card.isConnected) return;
+        const baseViewport = page.getViewport({ scale: 1 });
+        const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+        const viewport = page.getViewport({ scale: (300 * pixelRatio) / baseViewport.width });
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+        pageSurface.style.aspectRatio = `${baseViewport.width} / ${baseViewport.height}`;
+        await page.render({ canvasContext: canvas.getContext('2d', { alpha: false }), viewport }).promise;
+        if (token !== renderToken || !card.isConnected) return;
+        loading?.remove();
+        card.dataset.rendered = 'true';
+      } catch (error) {
+        if (token === renderToken && loading) loading.textContent = 'No se pudo mostrar';
+      } finally {
+        delete card.dataset.rendering;
+        documentPdf?.destroy?.();
+      }
+    };
+
     const renderOverview = () => {
-      renderToken++;
+      const token = ++renderToken;
+      overviewObserver?.disconnect();
       overlay.querySelector('[data-overview-view]').hidden = false;
       overlay.querySelector('[data-detail-view]').hidden = true;
       overlay.querySelector('[data-counter]').textContent = `${items.length} firmas`;
@@ -5032,26 +5144,62 @@ function confirmIndividualPdfPreviews(items) {
       grid.innerHTML = items.map((item, index) => {
         const scale = item.signatureScale || 1;
         const qualityClass = item.qualityWarnings || scale > 1 ? 'warning' : 'ok';
-        return `<button type="button" class="individual-overview-card ${qualityClass}${scale !== 1 ? ' adjusted' : ''}" data-preview-index="${index}">
+        const pageWidth = Math.max(1, item.pageWidth || 1);
+        const pageHeight = Math.max(1, item.pageHeight || 1);
+        const bounds = getPreviewSignatureBounds(item);
+        const boundsStyle = bounds
+          ? `left:${bounds.x / pageWidth * 100}%;top:${bounds.y / pageHeight * 100}%;width:${bounds.width / pageWidth * 100}%;height:${bounds.height / pageHeight * 100}%;`
+          : 'display:none;';
+        return `<article class="individual-overview-card ${qualityClass}${scale !== 1 ? ' adjusted' : ''}" data-preview-index="${index}">
           <span class="individual-overview-name">${escapeHtml(item.personName)}</span>
-          <span class="individual-overview-signature">
-            ${item.signaturePreviewSrc ? `<img src="${escapeHtml(item.signaturePreviewSrc)}" alt="Firma de ${escapeHtml(item.personName)}" style="transform:scale(${scale})">` : '<em>Sin previsualización</em>'}
-          </span>
-          <span class="individual-overview-meta">${Math.round(scale * 100)}% · Pulsar para ajustar</span>
-        </button>`;
+          <div class="individual-overview-document">
+            <span class="individual-overview-loading">Cargando página…</span>
+            <canvas aria-label="Página de ${escapeHtml(item.personName)}"></canvas>
+            <button type="button" class="individual-overview-signature-hitbox" data-overview-signature style="${boundsStyle}" title="Usa la rueda para cambiar el tamaño">
+              ${item.signaturePreviewSrc ? `<img class="individual-overview-signature-image" src="${escapeHtml(item.signaturePreviewSrc)}" alt="Firma de ${escapeHtml(item.personName)}" style="transform:${item.signatureMetrics ? 'none' : `scale(${scale})`}">` : '<em>Sin firma</em>'}
+            </button>
+          </div>
+          <div class="individual-overview-controls">
+            <button type="button" data-overview-smaller title="Reducir firma">−</button>
+            <strong data-overview-scale>${Math.round(scale * 100)}%</strong>
+            <button type="button" data-overview-larger title="Ampliar firma">+</button>
+            <button type="button" class="individual-overview-detail" data-open-detail>Ver grande</button>
+          </div>
+        </article>`;
       }).join('');
       grid.scrollTop = overviewScrollTop;
       grid.querySelectorAll('[data-preview-index]').forEach(card => {
-        card.addEventListener('click', () => {
+        const index = Number(card.dataset.previewIndex);
+        card.querySelector('[data-overview-signature]')?.addEventListener('wheel', event => {
+          event.preventDefault();
+          event.stopPropagation();
+          resizeOverviewSignature(index, event.deltaY < 0 ? 0.1 : -0.1);
+        }, { passive: false });
+        card.querySelector('[data-overview-smaller]')?.addEventListener('click', () => resizeOverviewSignature(index, -0.1));
+        card.querySelector('[data-overview-larger]')?.addEventListener('click', () => resizeOverviewSignature(index, 0.1));
+        card.querySelector('[data-open-detail]')?.addEventListener('click', () => {
           overviewScrollTop = grid.scrollTop;
-          currentIndex = Number(card.dataset.previewIndex);
+          currentIndex = index;
           renderCurrent();
         });
       });
+      if ('IntersectionObserver' in window) {
+        overviewObserver = new IntersectionObserver(entries => {
+          entries.forEach(entry => {
+            if (!entry.isIntersecting) return;
+            overviewObserver.unobserve(entry.target);
+            renderOverviewPage(entry.target, Number(entry.target.dataset.previewIndex), token);
+          });
+        }, { root: grid, rootMargin: '250px 0px' });
+        grid.querySelectorAll('[data-preview-index]').forEach(card => overviewObserver.observe(card));
+      } else {
+        grid.querySelectorAll('[data-preview-index]').forEach(card => renderOverviewPage(card, Number(card.dataset.previewIndex), token));
+      }
     };
 
     const renderCurrent = async () => {
       const token = ++renderToken;
+      overviewObserver?.disconnect();
       const item = items[currentIndex];
       overlay.querySelector('[data-overview-view]').hidden = true;
       overlay.querySelector('[data-detail-view]').hidden = false;
@@ -5076,7 +5224,7 @@ function confirmIndividualPdfPreviews(items) {
       smallerButton.disabled = true;
       largerButton.disabled = true;
       nextButton.textContent = currentIndex === items.length - 1
-        ? 'Todas correctas · Generar ZIP'
+        ? 'Todas correctas · Generar documentos'
         : 'Firma correcta · Siguiente →';
       const wrap = overlay.querySelector('.individual-preview-canvas-wrap');
       wrap.textContent = '';
@@ -5097,22 +5245,19 @@ function confirmIndividualPdfPreviews(items) {
         canvas.width = viewport.width;
         canvas.height = viewport.height;
         await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-        if (item.signatureBounds) {
+        if (getPreviewSignatureBounds(item)) {
           const hitbox = document.createElement('button');
           hitbox.type = 'button';
           hitbox.className = 'individual-signature-hitbox';
           if (item.signatureSelected) hitbox.classList.add('selected');
           hitbox.title = 'Haz clic y usa la rueda para cambiar el tamaño de esta firma';
-          hitbox.style.left = `${item.signatureBounds.x / (viewport.width / 2) * 100}%`;
-          hitbox.style.top = `${item.signatureBounds.y / (viewport.height / 2) * 100}%`;
-          hitbox.style.width = `${item.signatureBounds.width / (viewport.width / 2) * 100}%`;
-          hitbox.style.height = `${item.signatureBounds.height / (viewport.height / 2) * 100}%`;
+          positionSignatureHitbox(hitbox, item);
           if (item.signaturePreviewSrc) {
             const signatureImage = document.createElement('img');
             signatureImage.className = 'individual-signature-preview-image';
             signatureImage.src = item.signaturePreviewSrc;
             signatureImage.alt = `Firma de ${item.personName}`;
-            signatureImage.style.transform = `scale(${item.signatureScale || 1})`;
+            signatureImage.style.transform = item.signatureMetrics ? 'none' : `scale(${item.signatureScale || 1})`;
             hitbox.appendChild(signatureImage);
           }
           hitbox.addEventListener('click', () => {
@@ -5123,7 +5268,7 @@ function confirmIndividualPdfPreviews(items) {
             if (!hitbox.classList.contains('selected')) return;
             event.preventDefault();
             event.stopPropagation();
-            previewResizeCurrentSignature(event.deltaY < 0 ? 0.25 : -0.25);
+            previewResizeCurrentSignature(event.deltaY < 0 ? 0.1 : -0.1);
           }, { passive: false });
           pageSurface.appendChild(hitbox);
         }
@@ -5145,11 +5290,13 @@ function confirmIndividualPdfPreviews(items) {
     };
 
     const refreshSignatureSizeUi = item => {
+      refreshOverviewCard(items.indexOf(item));
       overlay.querySelector('[data-scale]').textContent = `${Math.round((item.signatureScale || 1) * 100)}%`;
       overlay.querySelector('[data-smaller]').disabled = (item.signatureScale || 1) <= 0.5;
       overlay.querySelector('[data-larger]').disabled = (item.signatureScale || 1) >= 4;
       const image = overlay.querySelector('.individual-signature-preview-image');
-      if (image) image.style.transform = `scale(${item.signatureScale || 1})`;
+      if (image) image.style.transform = item.signatureMetrics ? 'none' : `scale(${item.signatureScale || 1})`;
+      positionSignatureHitbox(overlay.querySelector('.individual-signature-hitbox'), item);
       const quality = overlay.querySelector('[data-quality]');
       if ((item.signatureScale || 1) > 1) {
         quality.className = 'signature-quality-notice';
@@ -5189,6 +5336,31 @@ function confirmIndividualPdfPreviews(items) {
       }
     };
 
+    const applyAllSignatureSizes = async () => {
+      const pending = items.filter(item => item.appliedSignatureScale !== item.signatureScale && typeof item.resizeSignature === 'function');
+      if (!pending.length) return;
+      const acceptButton = overlay.querySelector('[data-accept-all]');
+      overlay.querySelectorAll('button').forEach(button => { button.disabled = true; });
+      for (let index = 0; index < pending.length; index++) {
+        const item = pending[index];
+        acceptButton.textContent = `Aplicando tamaños ${index + 1}/${pending.length}…`;
+        try {
+          await item.resizeSignature(item.signatureScale);
+          item.appliedSignatureScale = item.signatureScale;
+        } catch (error) {
+          showStatus(`No se pudo cambiar la firma de ${item.personName}: ${error.message}`, 'error');
+          item.signatureScale = item.appliedSignatureScale || 1;
+        }
+        refreshOverviewCard(items.indexOf(item));
+      }
+      overlay.querySelectorAll('button').forEach(button => { button.disabled = false; });
+      acceptButton.textContent = '✓ Aceptar todas y generar';
+      overlay.querySelector('[data-previous]').disabled = currentIndex === 0;
+      overlay.querySelector('[data-next]').disabled = false;
+      items.forEach((item, index) => refreshOverviewCard(index));
+      refreshSignatureSizeUi(items[currentIndex]);
+    };
+
     const finish = accepted => {
       renderToken++;
       overlay.remove();
@@ -5196,7 +5368,7 @@ function confirmIndividualPdfPreviews(items) {
     };
     overlay.querySelector('[data-cancel]').onclick = () => finish(false);
     overlay.querySelector('[data-accept-all]').onclick = async () => {
-      await applyCurrentSignatureSize();
+      await applyAllSignatureSizes();
       finish(true);
     };
     overlay.querySelector('[data-previous]').onclick = async () => {
@@ -5209,10 +5381,10 @@ function confirmIndividualPdfPreviews(items) {
     overlay.querySelector('[data-next]').onclick = async () => {
       await applyCurrentSignatureSize();
       if (currentIndex < items.length - 1) { currentIndex++; renderCurrent(); }
-      else finish(true);
+      else { await applyAllSignatureSizes(); finish(true); }
     };
-    overlay.querySelector('[data-smaller]').onclick = () => previewResizeCurrentSignature(-0.25);
-    overlay.querySelector('[data-larger]').onclick = () => previewResizeCurrentSignature(0.25);
+    overlay.querySelector('[data-smaller]').onclick = () => previewResizeCurrentSignature(-0.1);
+    overlay.querySelector('[data-larger]').onclick = () => previewResizeCurrentSignature(0.1);
     renderOverview();
   });
 }
@@ -5267,6 +5439,7 @@ async function generateIndividualTemplatePdfs(rawText) {
         const bytes = result.bytes;
         const signaturePage = Number(Object.keys(elements).find(page => elements[page].some(element => element.type === 'signature')) || 1);
         const signatureElement = (elements[signaturePage] || []).find(element => element.type === 'signature');
+        const signaturePlacement = result.signaturePlacements?.find(placement => placement.page === signaturePage) || result.signaturePlacements?.[0] || null;
         const base = `${sanitizeDownloadName(activeDoc.fileName.replace(/\.pdf$/i, ''))}_${sanitizeDownloadName(person.name)}`;
         const occurrence = (usedNames.get(base) || 0) + 1;
         usedNames.set(base, occurrence);
@@ -5277,12 +5450,19 @@ async function generateIndividualTemplatePdfs(rawText) {
           personName: person.name,
           qualityWarnings: result.qualityWarnings,
           signaturePage,
-          signatureBounds: signatureElement ? {
-            x: signatureElement.x,
-            y: signatureElement.y,
-            width: signatureElement.width,
-            height: signatureElement.height
+          pageWidth: activeDoc.pageWidth,
+          pageHeight: activeDoc.pageHeight,
+          signatureBounds: signaturePlacement ? {
+            x: signaturePlacement.x,
+            y: signaturePlacement.y,
+            width: signaturePlacement.width,
+            height: signaturePlacement.height
           } : null,
+          signatureBox: signaturePlacement?.box || (signatureElement ? {
+            x: signatureElement.x, y: signatureElement.y,
+            width: signatureElement.width, height: signatureElement.height
+          } : null),
+          signatureMetrics: signaturePlacement?.metrics || null,
           signaturePreviewSrc: signature.image_url || signature.svg_data || '',
           signatureScale: 1,
           appliedSignatureScale: 1,
@@ -5302,6 +5482,12 @@ async function generateIndividualTemplatePdfs(rawText) {
             const rebuilt = await buildIndividualPdf(activeDoc, elements);
             this.pdfBytes = rebuilt.bytes;
             this.qualityWarnings = rebuilt.qualityWarnings;
+            const placement = rebuilt.signaturePlacements?.find(entry => entry.page === this.signaturePage) || rebuilt.signaturePlacements?.[0];
+            if (placement) {
+              this.signatureBounds = { x: placement.x, y: placement.y, width: placement.width, height: placement.height };
+              this.signatureBox = placement.box;
+              this.signatureMetrics = placement.metrics;
+            }
             generatedFile.data = rebuilt.bytes;
           }
         });
@@ -5871,7 +6057,7 @@ function enterStampMode(type) {
   stampMode = type;
   const buttonIds = {
     check: 'btnStampCheck', x: 'btnStampX', date: 'btnAddDate', dateParts: 'btnAddDateParts',
-    workout: 'btnAddWorkout', city: 'btnAddCity', category: 'btnAddCategory'
+    workout: 'btnAddWorkout', companyCif: 'btnAddCompanyCif', city: 'btnAddCity', category: 'btnAddCategory'
   };
   Object.values(buttonIds).forEach(id => $(id)?.classList.remove('active'));
   $(buttonIds[type])?.classList.add('active');
@@ -5881,6 +6067,7 @@ function enterStampMode(type) {
     : type === 'x' ? '✗ X'
       : type === 'dateParts' ? '📅 Fecha separada'
         : type === 'workout' ? '🏢 WORKOUT EVENTS'
+          : type === 'companyCif' ? '🏢 CIF B84108513'
           : type === 'city' ? `📍 ${selectedCity}`
             : type === 'category' ? `🏷️ ${selectedCategory}` : '📅 Fecha completa';
   showStatus(`Modo ${modeLabel} activado - haz clic en el PDF para colocar`, 'success');
@@ -5888,7 +6075,7 @@ function enterStampMode(type) {
 
 function exitStampMode() {
   stampMode = null;
-  ['btnStampCheck', 'btnStampX', 'btnAddDate', 'btnAddDateParts', 'btnAddWorkout', 'btnAddCity', 'btnAddCategory'].forEach(id => $(id)?.classList.remove('active'));
+  ['btnStampCheck', 'btnStampX', 'btnAddDate', 'btnAddDateParts', 'btnAddWorkout', 'btnAddCompanyCif', 'btnAddCity', 'btnAddCategory'].forEach(id => $(id)?.classList.remove('active'));
   getCanvasContainer()?.querySelector('.elements-overlay')?.classList.remove('placement-mode');
 }
 
@@ -5909,8 +6096,10 @@ function onStampClick(e) {
   const clickY = e.clientY - rect.top;
   const scale = activeDoc.zoom;
 
-  if (stampMode === 'workout' || stampMode === 'city' || stampMode === 'category') {
-    const text = stampMode === 'workout' ? 'WORKOUT EVENTS' : stampMode === 'city' ? selectedCity : selectedCategory;
+  if (stampMode === 'workout' || stampMode === 'companyCif' || stampMode === 'city' || stampMode === 'category') {
+    const text = stampMode === 'workout' ? 'WORKOUT EVENTS'
+      : stampMode === 'companyCif' ? 'B84108513'
+        : stampMode === 'city' ? selectedCity : selectedCategory;
     const fontSize = 14;
     const estimatedWidth = text.length * fontSize * 0.58;
     pushElement(activeDoc, activeDoc.currentPage, {

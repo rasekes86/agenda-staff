@@ -114,6 +114,7 @@
         ['📅', 'Fecha completa', 'btnAddDate'],
         ['🗓️', 'Fecha separada', 'btnAddDateParts'],
         ['W', 'Workout Events', 'btnAddWorkout'],
+        ['🏢', 'CIF empresa', 'btnAddCompanyCif'],
         ['📍', 'Ciudad', 'btnAddCity'],
         ['🏷️', 'Categoría', 'btnAddCategory'],
         ['✏️', 'Dibujar', 'btnDraw'],
