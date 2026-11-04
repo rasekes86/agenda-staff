@@ -4571,3 +4571,35 @@ body {
 @media (max-width: 300px) {
   .signatures-preview-grid { grid-template-columns: 1fr; }
 }
+
+/* Color reference below the side panel controls */
+.color-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 8px 16px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--bor);
+}
+
+.color-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--txt2);
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.color-legend-dot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  border-radius: 50%;
+}
+
+.color-legend-dot.pending { background: var(--pri); }
+.color-legend-dot.services { background: var(--danger); }
+.color-legend-dot.interview { background: var(--warn); }
