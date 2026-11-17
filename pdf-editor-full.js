@@ -602,7 +602,7 @@ async function autoSave() {
   if (isAutoSaving) return;
   isAutoSaving = true;
   try {
-    const modifiedDocs = documents.filter(doc => doc.modified || docHasEditableContent(doc));
+    const modifiedDocs = documents.filter(doc => doc.draftId && (doc.modified || docHasEditableContent(doc)));
     for (const doc of modifiedDocs) await persistPdfDraft(doc);
     const drafts = await getPdfDraftRecords();
     updateDraftRecoveryButton(drafts);
@@ -1173,7 +1173,10 @@ function setupEventListeners() {
     if (e.target === $('templatesModal')) $('templatesModal').classList.remove('show');
   });
   $('fillTemplateModal')?.addEventListener('click', (e) => {
-    if (e.target === $('fillTemplateModal')) $('fillTemplateModal').classList.remove('show');
+    if (e.target === $('fillTemplateModal')) {
+      hideTemplateFillPreview();
+      $('fillTemplateModal').classList.remove('show');
+    }
   });
   
   // Clipboard buttons
@@ -5328,6 +5331,7 @@ function showTemplateFillPreview(title, rows, warnings, confirmLabel, action) {
       if (!doc) return;
       templatePreviewTarget = { docId: doc.id, page: Number(button.dataset.previewPage), index: Number(button.dataset.previewIndex) };
       doc.currentPage = templatePreviewTarget.page;
+      hideTemplateFillPreview();
       $('fillTemplateModal')?.classList.remove('show');
       void renderPage().then(() => {
         const target = document.querySelector('.pdf-element.template-preview-target');
