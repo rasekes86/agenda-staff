@@ -7239,6 +7239,22 @@ async function renderPageThumbnails() {
     label.className = 'page-thumb-label';
     label.textContent = `Pág. ${i}`;
     thumb.appendChild(label);
+
+    const actions = document.createElement('div');
+    actions.className = 'page-thumb-actions';
+    actions.innerHTML = `<button type="button" class="page-thumb-action" data-page-duplicate="${i}" title="Duplicar página ${i}" aria-label="Duplicar página ${i}">⧉</button>
+      <button type="button" class="page-thumb-action danger" data-page-delete="${i}" title="Eliminar página ${i}" aria-label="Eliminar página ${i}">×</button>`;
+    actions.querySelector('[data-page-duplicate]').addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      void duplicatePage(i);
+    });
+    actions.querySelector('[data-page-delete]').addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      void deletePage(i);
+    });
+    thumb.appendChild(actions);
     
     // Click to navigate
     thumb.addEventListener('click', () => {
@@ -7282,66 +7298,83 @@ async function renderPageThumbnails() {
   }
 }
 
-async function reorderPages(fromIndex, toIndex) {
+async function applyPdfPageOrder(pageOrder, nextCurrentPage, statusMessage) {
   const activeDoc = getActiveDoc();
-  if (!activeDoc || !activeDoc.originalPdfBytes) return;
-  
+  if (!activeDoc || !activeDoc.originalPdfBytes || !pageOrder.length) return false;
+
+  const previous = {
+    type: 'documentSnapshot',
+    originalPdfBytes: new Uint8Array(activeDoc.originalPdfBytes),
+    elements: clonePdfEditorValue(activeDoc.elements),
+    currentPage: activeDoc.currentPage
+  };
   try {
-    const pdfLib = window.PDFLib;
-    const { PDFDocument } = pdfLib;
-    
-    const srcPdf = await PDFDocument.load(activeDoc.originalPdfBytes, { ignoreEncryption: true });
-    const newPdfDoc = await PDFDocument.create();
-    
-    // Build new page order
-    const pageOrder = [];
-    for (let i = 1; i <= activeDoc.totalPages; i++) pageOrder.push(i);
-    
-    // Move fromIndex to toIndex
-    const moved = pageOrder.splice(fromIndex - 1, 1)[0];
-    pageOrder.splice(toIndex - 1, 0, moved);
-    
-    // Copy pages in new order
-    for (const pageNum of pageOrder) {
-      const [copiedPage] = await newPdfDoc.copyPages(srcPdf, [pageNum - 1]);
-      newPdfDoc.addPage(copiedPage);
+    const { PDFDocument } = window.PDFLib;
+    const sourcePdf = await PDFDocument.load(activeDoc.originalPdfBytes, { ignoreEncryption: true });
+    const outputPdf = await PDFDocument.create();
+    for (const sourcePageNumber of pageOrder) {
+      const [page] = await outputPdf.copyPages(sourcePdf, [sourcePageNumber - 1]);
+      outputPdf.addPage(page);
     }
-    
-    const newPdfBytes = await newPdfDoc.save();
-    
-    // Update the document with new PDF bytes
-    activeDoc.originalPdfBytes = newPdfBytes;
-    
-    // Re-load with pdfjs
-    const pdfjsDoc = await window.pdfjsLib.getDocument({ data: newPdfBytes.slice(0) }).promise;
-    activeDoc.pdfJsDoc = pdfjsDoc;
-    activeDoc.totalPages = pdfjsDoc.numPages;
-    
-    // Remap elements: elements were keyed by old page numbers
-    // After reorder, element on old page X is now on new position
-    const oldElements = activeDoc.elements;
-    const newElements = {};
-    pageOrder.forEach((oldPageNum, newPageNum) => {
-      newElements[newPageNum + 1] = oldElements[oldPageNum] || [];
+    const bytes = await outputPdf.save();
+    const remappedElements = {};
+    pageOrder.forEach((sourcePageNumber, index) => {
+      remappedElements[index + 1] = clonePdfEditorValue(activeDoc.elements[sourcePageNumber] || []);
     });
-    activeDoc.elements = newElements;
-    
-    // Ensure current page is valid
-    if (activeDoc.currentPage > activeDoc.totalPages) {
-      activeDoc.currentPage = activeDoc.totalPages;
-    }
-    
+
+    activeDoc.originalPdfBytes = bytes;
+    activeDoc.pdfBytes = bytes.slice();
+    activeDoc.pdfJsDoc = await window.pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+    activeDoc.pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    activeDoc.totalPages = activeDoc.pdfJsDoc.numPages;
+    activeDoc.elements = remappedElements;
+    activeDoc.currentPage = Math.max(1, Math.min(nextCurrentPage || 1, activeDoc.totalPages));
+    pushUndo(activeDoc.id, previous);
     updateTabModified(activeDoc.id, true);
     renderPage();
-    renderPageThumbnails();
-    showStatus(`Página ${fromIndex} movida a posición ${toIndex}`, 'success');
+    await renderPageThumbnails();
+    showStatus(statusMessage, 'success');
     scheduleAutoSave();
-    
+    return true;
   } catch (err) {
-    console.error('Reorder error:', err);
-    showStatus('Error al reordenar: ' + err.message, 'error');
+    console.error('Page operation error:', err);
+    showStatus('No se pudo modificar la página: ' + (err.message || 'error'), 'error');
+    return false;
   }
 }
+
+async function reorderPages(fromIndex, toIndex) {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc || fromIndex < 1 || toIndex < 1 || fromIndex > activeDoc.totalPages || toIndex > activeDoc.totalPages) return;
+  const pageOrder = Array.from({ length: activeDoc.totalPages }, (_, index) => index + 1);
+  pageOrder.splice(toIndex - 1, 0, pageOrder.splice(fromIndex - 1, 1)[0]);
+  const nextCurrentPage = pageOrder.indexOf(activeDoc.currentPage) + 1;
+  await applyPdfPageOrder(pageOrder, nextCurrentPage, `Página ${fromIndex} movida a posición ${toIndex}`);
+}
+
+async function duplicatePage(pageNumber) {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc || pageNumber < 1 || pageNumber > activeDoc.totalPages) return;
+  const pageOrder = Array.from({ length: activeDoc.totalPages }, (_, index) => index + 1);
+  pageOrder.splice(pageNumber, 0, pageNumber);
+  await applyPdfPageOrder(pageOrder, pageNumber + 1, `Página ${pageNumber} duplicada`);
+}
+
+async function deletePage(pageNumber) {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc || pageNumber < 1 || pageNumber > activeDoc.totalPages) return;
+  if (activeDoc.totalPages <= 1) {
+    showStatus('El PDF debe conservar al menos una página', 'error');
+    return;
+  }
+  if (!confirm(`¿Eliminar la página ${pageNumber}? Puedes deshacer esta acción.`)) return;
+  const pageOrder = Array.from({ length: activeDoc.totalPages }, (_, index) => index + 1).filter(page => page !== pageNumber);
+  const nextCurrentPage = activeDoc.currentPage === pageNumber
+    ? Math.min(pageNumber, pageOrder.length)
+    : activeDoc.currentPage > pageNumber ? activeDoc.currentPage - 1 : activeDoc.currentPage;
+  await applyPdfPageOrder(pageOrder, nextCurrentPage, `Página ${pageNumber} eliminada`);
+}
+
 // ============================================
 
 function setupSplit() {
