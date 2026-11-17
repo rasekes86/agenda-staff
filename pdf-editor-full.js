@@ -110,7 +110,9 @@ function pushUndo(docId, action) {
   while (undoStacks[docId].filter(item => item.type === 'documentSnapshot').length > MAX_UNDO_DOCUMENT_SNAPSHOTS) {
     const oldestSnapshot = undoStacks[docId].findIndex(item => item.type === 'documentSnapshot');
     if (oldestSnapshot < 0) break;
-    undoStacks[docId].splice(oldestSnapshot, 1);
+    // Drop the history that leads into the pruned page snapshot as well; those
+    // earlier element indexes no longer describe the document's current page map.
+    undoStacks[docId].splice(0, oldestSnapshot + 1);
   }
   redoStacks[docId] = [];
   updateUndoRedoUI();
