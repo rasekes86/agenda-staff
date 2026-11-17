@@ -488,90 +488,198 @@ function startMultiDrag(e, scale, activeDoc) {
 // ============================================
 let autoSaveTimer = null;
 let isAutoSaving = false;
-const AUTO_SAVE_DELAY = 3000; // 3 seconds after last change
+const AUTO_SAVE_DELAY = 1200;
+const PDF_DRAFT_DB_NAME = 'agendaStaffPdfEditorDrafts';
+const PDF_DRAFT_STORE_NAME = 'drafts';
+let pdfDraftDatabasePromise = null;
 
 function scheduleAutoSave() {
   if (autoSaveTimer) clearTimeout(autoSaveTimer);
-  autoSaveTimer = setTimeout(autoSave, AUTO_SAVE_DELAY);
+  autoSaveTimer = setTimeout(() => { void autoSave(); }, AUTO_SAVE_DELAY);
+}
+
+function openPdfDraftDatabase() {
+  if (pdfDraftDatabasePromise) return pdfDraftDatabasePromise;
+  pdfDraftDatabasePromise = new Promise((resolve, reject) => {
+    const request = indexedDB.open(PDF_DRAFT_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(PDF_DRAFT_STORE_NAME)) db.createObjectStore(PDF_DRAFT_STORE_NAME, { keyPath: 'draftId' });
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('No se pudo abrir el almacenamiento local'));
+  });
+  return pdfDraftDatabasePromise;
+}
+
+async function savePdfDraftRecord(record) {
+  const db = await openPdfDraftDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(PDF_DRAFT_STORE_NAME, 'readwrite');
+    transaction.objectStore(PDF_DRAFT_STORE_NAME).put(record);
+    transaction.oncomplete = () => resolve(true);
+    transaction.onerror = () => reject(transaction.error || new Error('No se pudo guardar el borrador'));
+    transaction.onabort = () => reject(transaction.error || new Error('Se canceló el guardado del borrador'));
+  });
+}
+
+async function getPdfDraftRecords() {
+  const db = await openPdfDraftDatabase();
+  return new Promise((resolve, reject) => {
+    const request = db.transaction(PDF_DRAFT_STORE_NAME, 'readonly').objectStore(PDF_DRAFT_STORE_NAME).getAll();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error || new Error('No se pudieron leer los borradores'));
+  });
+}
+
+async function deletePdfDraftRecord(draftId) {
+  if (!draftId) return;
+  const db = await openPdfDraftDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(PDF_DRAFT_STORE_NAME, 'readwrite');
+    transaction.objectStore(PDF_DRAFT_STORE_NAME).delete(draftId);
+    transaction.oncomplete = () => resolve(true);
+    transaction.onerror = () => reject(transaction.error || new Error('No se pudo eliminar el borrador'));
+  });
+}
+
+function docHasEditableContent(doc) {
+  return Object.values(doc?.elements || {}).some(elements => elements?.length > 0);
+}
+
+async function persistPdfDraft(doc) {
+  if (!doc?.draftId || !doc.originalPdfBytes) return;
+  const bytes = new Uint8Array(doc.originalPdfBytes);
+  const record = {
+    draftId: doc.draftId,
+    fileName: doc.fileName || 'documento.pdf',
+    updatedAt: Date.now(),
+    originalPdfBytes: bytes,
+    elements: clonePdfEditorValue(doc.elements),
+    currentPage: doc.currentPage,
+    totalPages: doc.totalPages,
+    pageWidth: doc.pageWidth,
+    pageHeight: doc.pageHeight,
+    zoom: doc.zoom,
+    activeTemplate: clonePdfEditorValue(doc.activeTemplate),
+    undoStack: clonePdfEditorValue(undoStacks[doc.id] || []),
+    redoStack: clonePdfEditorValue(redoStacks[doc.id] || [])
+  };
+  await savePdfDraftRecord(record);
 }
 
 async function autoSave() {
-  const activeDoc = getActiveDoc();
-  if (!activeDoc || isAutoSaving) return;
-
-  // Check if any document has elements
-  let hasElements = false;
-  const saveData = {};
-  documents.forEach(doc => {
-    const docElements = {};
-    let docHasElements = false;
-    for (const page in doc.elements) {
-      if (doc.elements[page].length > 0) {
-        docElements[page] = doc.elements[page];
-        docHasElements = true;
-        hasElements = true;
-      }
-    }
-    if (docHasElements) {
-      saveData[doc.id] = {
-        elements: docElements,
-        currentPage: doc.currentPage,
-        fileName: doc.fileName
-      };
-    }
-  });
-
-  if (!hasElements) {
-    await chrome.storage.local.remove(['pdfEditorAutoSave', 'pdfEditorAutoSaveTime']);
-    return;
-  }
-
+  if (isAutoSaving) return;
   isAutoSaving = true;
   try {
-    await chrome.storage.local.set({ pdfEditorAutoSave: saveData, pdfEditorAutoSaveTime: Date.now() });
+    const modifiedDocs = documents.filter(doc => doc.modified || docHasEditableContent(doc));
+    for (const doc of modifiedDocs) await persistPdfDraft(doc);
+    const drafts = await getPdfDraftRecords();
+    updateDraftRecoveryButton(drafts);
     const indicator = $('autoSaveIndicator');
-    if (indicator) {
-      indicator.textContent = '✓ Guardado';
+    if (indicator && modifiedDocs.length) {
+      indicator.textContent = '✓ Borrador guardado';
       indicator.classList.add('auto-saved');
-      setTimeout(() => { indicator.textContent = ''; indicator.classList.remove('auto-saved'); }, 2000);
+      setTimeout(() => { indicator.textContent = ''; indicator.classList.remove('auto-saved'); }, 2200);
     }
   } catch (err) {
     console.error('Auto-save error:', err);
+    const indicator = $('autoSaveIndicator');
+    if (indicator) indicator.textContent = 'No se pudo guardar el borrador';
+  } finally {
+    isAutoSaving = false;
   }
-  isAutoSaving = false;
 }
 
-async function restoreAutoSave() {
+function updateDraftRecoveryButton(drafts) {
+  const button = $('btnRecoverDrafts');
+  const count = $('recoverDraftCount');
+  const total = drafts?.length || 0;
+  if (button) button.style.display = total ? '' : 'none';
+  if (count) count.textContent = String(total);
+}
+
+async function loadRecoverableDrafts() {
   try {
-    const stored = await chrome.storage.local.get(['pdfEditorAutoSave', 'pdfEditorAutoSaveTime']);
-    if (!stored.pdfEditorAutoSave) return;
-    const saveTime = stored.pdfEditorAutoSaveTime ? new Date(stored.pdfEditorAutoSaveTime) : null;
-    const timeStr = saveTime ? ` (${saveTime.toLocaleTimeString()})` : '';
-
-    // Check if any saved data matches currently open documents
-    let restored = false;
-    for (const docId in stored.pdfEditorAutoSave) {
-      const doc = documents.find(d => d.id === docId);
-      if (doc) {
-        const saved = stored.pdfEditorAutoSave[docId];
-        for (const page in saved.elements) {
-          doc.elements[parseInt(page)] = saved.elements[page];
-        }
-        doc.currentPage = saved.currentPage || doc.currentPage;
-        restored = true;
-      }
-    }
-
-    if (restored) {
-      showStatus(`Estado anterior restaurado${timeStr}`, 'success');
-      updateTabModified(getActiveDoc().id, true);
-      renderPage();
-    }
-
-    // Clean old auto-save data
-    await chrome.storage.local.remove(['pdfEditorAutoSave', 'pdfEditorAutoSaveTime']);
+    const drafts = (await getPdfDraftRecords()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    updateDraftRecoveryButton(drafts);
+    if (drafts.length) renderDraftRecoveryList(drafts);
   } catch (err) {
-    console.error('Auto-restore error:', err);
+    console.warn('No se pudieron cargar los borradores locales:', err);
+  }
+}
+
+function renderDraftRecoveryList(drafts) {
+  const list = $('draftRecoveryList');
+  if (!list) return;
+  if (!drafts.length) {
+    list.innerHTML = '<div class="sidebar-info">No hay borradores guardados.</div>';
+    return;
+  }
+  list.innerHTML = drafts.map(draft => {
+    const date = new Date(draft.updatedAt || Date.now()).toLocaleString();
+    return `<div class="draft-recovery-card">
+      <div class="draft-recovery-info"><strong>${escapeHtml(draft.fileName || 'Documento PDF')}</strong><span>${draft.totalPages || '?'} páginas · Guardado ${escapeHtml(date)}</span></div>
+      <div class="draft-recovery-actions">
+        <button type="button" data-draft-recover="${escapeHtml(draft.draftId)}">Recuperar</button>
+        <button type="button" class="draft-delete" data-draft-delete="${escapeHtml(draft.draftId)}">Eliminar</button>
+      </div>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('[data-draft-recover]').forEach(button => {
+    button.addEventListener('click', () => restorePdfDraft(button.dataset.draftRecover));
+  });
+  list.querySelectorAll('[data-draft-delete]').forEach(button => {
+    button.addEventListener('click', async () => {
+      await deletePdfDraftRecord(button.dataset.draftDelete);
+      renderDraftRecoveryList((await getPdfDraftRecords()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)));
+      await loadRecoverableDrafts();
+    });
+  });
+}
+
+async function restorePdfDraft(draftId) {
+  try {
+    const record = (await getPdfDraftRecords()).find(item => item.draftId === draftId);
+    if (!record?.originalPdfBytes) return;
+    if (documents.some(doc => doc.draftId === draftId)) {
+      const existingIndex = documents.findIndex(doc => doc.draftId === draftId);
+      switchToTab(existingIndex);
+      $('draftRecoveryModal')?.classList.remove('show');
+      showStatus('Ese borrador ya está abierto', 'success');
+      return;
+    }
+    const bytes = new Uint8Array(record.originalPdfBytes);
+    const pdfJsDoc = await window.pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+    const pdfDoc = await window.PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true });
+    const doc = createDocState(`draft_${Date.now()}_${documents.length}`);
+    doc.draftId = record.draftId;
+    doc.fileName = record.fileName || 'documento.pdf';
+    doc.pdfBytes = bytes.slice();
+    doc.originalPdfBytes = bytes;
+    doc.pdfJsDoc = pdfJsDoc;
+    doc.pdfDoc = pdfDoc;
+    doc.totalPages = pdfJsDoc.numPages;
+    doc.currentPage = Math.max(1, Math.min(record.currentPage || 1, doc.totalPages));
+    doc.pageWidth = record.pageWidth || pdfDoc.getPage(0).getSize().width;
+    doc.pageHeight = record.pageHeight || pdfDoc.getPage(0).getSize().height;
+    doc.zoom = record.zoom || 1;
+    doc.elements = clonePdfEditorValue(record.elements || {});
+    doc.activeTemplate = clonePdfEditorValue(record.activeTemplate || null);
+    doc.modified = true;
+    for (let page = 1; page <= doc.totalPages; page++) if (!doc.elements[page]) doc.elements[page] = [];
+    undoStacks[doc.id] = clonePdfEditorValue(record.undoStack || []);
+    redoStacks[doc.id] = clonePdfEditorValue(record.redoStack || []);
+    documents.push(doc);
+    createTab(doc);
+    updateDocumentTabsVisibility();
+    switchToTab(documents.length - 1);
+    $('draftRecoveryModal')?.classList.remove('show');
+    updateUndoRedoUI();
+    showStatus(`Borrador recuperado: ${doc.fileName}`, 'success');
+  } catch (err) {
+    console.error('Draft restore error:', err);
+    showStatus('No se pudo recuperar el borrador: ' + (err.message || 'error desconocido'), 'error');
   }
 }
 
