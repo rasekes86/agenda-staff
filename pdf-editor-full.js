@@ -4886,6 +4886,8 @@ function applyTemplateVariableFields(container, options = {}) {
   return changed > 0;
 }
 
+let pendingSignerRegionRequestId = null;
+
 async function chooseSignerCaptureTab() {
   try {
     const response = await chrome.runtime.sendMessage({ type: 'AGENDA_GET_CAPTURE_TABS' });
@@ -4908,6 +4910,7 @@ async function chooseSignerCaptureTab() {
         button.disabled = true;
         try {
           const requestId = `signer-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          pendingSignerRegionRequestId = requestId;
           const started = await chrome.runtime.sendMessage({
             type: 'AGENDA_START_SIGNER_REGION_CAPTURE',
             tabId: Number(button.dataset.tabId),
@@ -4917,6 +4920,7 @@ async function chooseSignerCaptureTab() {
           overlay.remove();
           showStatus('Marca con el ratón el área de los datos. Pulsa Esc para cancelar.', 'success');
         } catch (error) {
+          pendingSignerRegionRequestId = null;
           button.disabled = false;
           showStatus(error.message || 'No se pudo iniciar la selección', 'error');
         }
@@ -4959,11 +4963,13 @@ async function finishSignerRegionCapture(message) {
 }
 
 chrome.runtime.onMessage.addListener(message => {
-  if (message?.type === 'SIGNER_REGION_TEXT_CAPTURE_RESULT') {
+  if (!message?.type?.startsWith('SIGNER_REGION_TEXT_CAPTURE_') || message.requestId !== pendingSignerRegionRequestId) return;
+  pendingSignerRegionRequestId = null;
+  if (message.type === 'SIGNER_REGION_TEXT_CAPTURE_RESULT') {
     finishSignerRegionCapture(message);
-  } else if (message?.type === 'SIGNER_REGION_TEXT_CAPTURE_CANCELLED') {
+  } else if (message.type === 'SIGNER_REGION_TEXT_CAPTURE_CANCELLED') {
     showStatus('Selección cancelada.', 'success');
-  } else if (message?.type === 'SIGNER_REGION_TEXT_CAPTURE_ERROR') {
+  } else if (message.type === 'SIGNER_REGION_TEXT_CAPTURE_ERROR') {
     showStatus(message.error || 'Error al seleccionar el área.', 'error');
   }
 });
