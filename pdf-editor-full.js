@@ -4070,7 +4070,7 @@ async function savePdf() {
 
 function resetDocumentAfterSave(activeDoc) {
   const filledElements = clonePdfEditorValue(activeDoc.elements);
-  const previousUndoStack = undoStacks[activeDoc.id] || [];
+  const previousUndoStack = clonePdfEditorHistory(undoStacks[activeDoc.id] || []);
   for (let page = 1; page <= activeDoc.totalPages; page++) activeDoc.elements[page] = [];
   addedSignaturesCount = 0;
   clearSelection();
