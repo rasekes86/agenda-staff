@@ -4937,53 +4937,59 @@ function normalizeSignerCaptureText(rawText) {
     line.replace(/([XYZ]?\s*\d(?:[\s.-]*\d){6,7}[\s.-]*[A-Z])/gi, value => value.replace(/[\s.-]+/g, '')).replace(/\s+/g, ' ').trim()
   ).filter(Boolean);
 
-  // Reunir los fragmentos del DNI que OCR haya separado en líneas distintas.
+  // Reunir DNI/NIE que OCR haya partido entre renglones consecutivos.
   for (let i = 0; i < lines.length - 1;) {
     const match = lines[i].match(/^(.*?)([XYZ]?\d[\d\s.-]{2,10})$/i);
     if (!match) { i++; continue; }
     let idPart = match[2].replace(/[\s.-]+/g, '');
     let next = i + 1;
+    let merged = false;
     while (next < lines.length && /^[XYZ0-9]{1,9}$/i.test(lines[next].replace(/\s+/g, '')) && idPart.length < 10) {
       idPart += lines[next].replace(/\s+/g, '');
       if (dniPattern.test(idPart)) {
-        lines[i] = match[1].trim() + ' ' + idPart;
+        lines[i] = (match[1].trim() + ' ' + idPart).trim();
         lines.splice(i + 1, next - i);
+        merged = true;
         break;
       }
       next++;
     }
-    if (next >= lines.length || !dniPattern.test(idPart)) i++;
+    if (!merged) i++;
   }
 
-  // Si el nombre y el DNI ocupan dos líneas, presentarlos juntos.
-  const combined = [];
-  for (const line of lines) {
-    if (dniPattern.test(line)) {
-      const idMatch = line.match(/(?:[0-9]{8}|[XYZ][0-9]{7})[A-Z]/i);
-      const prefix = idMatch ? line.slice(0, idMatch.index).trim() : '';
-      if (!prefix && combined.length && /[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]{2,}/.test(combined[combined.length - 1]) && !dniPattern.test(combined[combined.length - 1])) {
-        combined[combined.length - 1] += ' ' + line;
-      } else {
-        combined.push(line);
-      }
-    } else {
-      combined.push(line);
-    }
+  function cleanName(value) {
+    const candidate = String(value || '')
+      .replace(/[✓✔☑☒]/g, ' ')
+      .replace(/\bFirma\b/gi, ' ')
+      .replace(/\b\d+\b/g, ' ')
+      .replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ,.'’\- ]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .replace(/^[,.'’\- ]+|[,.'’\- ]+$/g, '')
+      .trim();
+    const words = candidate.match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+/g) || [];
+    if (words.length < 2 || words.some(word => /^firma$/i.test(word))) return '';
+    return candidate;
   }
 
-  // El cuadro de firmantes solo necesita las filas que contengan un DNI/NIE.
+  const usedNameLines = new Set();
   const signerRows = [];
-  for (let i = 0; i < combined.length; i++) {
-    if (!dniPattern.test(combined[i])) continue;
-    const idMatch = combined[i].match(/(?:[0-9]{8}|[XYZ][0-9]{7})[A-Z]/i);
-    const name = idMatch ? combined[i].slice(0, idMatch.index).trim() : '';
-    if (name) {
-      signerRows.push(combined[i]);
-    } else if (i > 0 && /[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]{2,}/.test(combined[i - 1]) && !dniPattern.test(combined[i - 1])) {
-      signerRows.push(combined[i - 1] + ' ' + combined[i]);
-    } else {
-      signerRows.push(combined[i]);
+  for (let i = 0; i < lines.length; i++) {
+    const idMatch = lines[i].match(/(?:[0-9]{8}|[XYZ][0-9]{7})[A-Z]/i);
+    if (!idMatch) continue;
+
+    let name = cleanName(lines[i].slice(0, idMatch.index));
+    if (!name) {
+      for (let distance = 1; distance <= 4 && i - distance >= 0; distance++) {
+        const candidateIndex = i - distance;
+        if (usedNameLines.has(candidateIndex)) continue;
+        name = cleanName(lines[candidateIndex]);
+        if (name) {
+          usedNameLines.add(candidateIndex);
+          break;
+        }
+      }
     }
+    if (name) signerRows.push(name + ' ' + idMatch[0].toUpperCase());
   }
   return [...new Set(signerRows)].join('\n').trim();
 }
