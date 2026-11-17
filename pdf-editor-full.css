@@ -2090,3 +2090,20 @@ body.light-mode .status-msg { color: #ffffff; }
 body.light-mode .draft-recovery-card { background: #f8fafc; border-color: #cbd5e1; }
 body.light-mode .draft-recovery-info strong { color: #0f172a; }
 body.light-mode .page-thumb-action { background: #f8fafc; color: #0f172a; border-color: #cbd5e1; }
+
+
+.template-fill-preview { color: #e2e8f0; }
+.template-fill-preview h4 { margin: 0 0 8px; color: #f8fafc; }
+.template-fill-preview .preview-summary { margin: 0 0 10px; color: #cbd5e1; font-size: 12px; }
+.template-fill-preview .preview-warning { padding: 8px; margin: 6px 0; border-radius: 6px; background: #422006; color: #fde68a; font-size: 11px; }
+.template-fill-preview .preview-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.template-fill-preview .preview-table th,
+.template-fill-preview .preview-table td { padding: 6px; border-bottom: 1px solid #334155; text-align: left; vertical-align: top; }
+.template-fill-preview .preview-table th { position: sticky; top: 0; background: #1e293b; color: #cbd5e1; }
+.template-fill-preview .preview-ok { color: #86efac; }
+.template-fill-preview .preview-missing { color: #fca5a5; }
+body.light-mode .template-fill-preview { color: #0f172a; }
+body.light-mode .template-fill-preview h4 { color: #0f172a; }
+body.light-mode .template-fill-preview .preview-summary { color: #334155; }
+body.light-mode .template-fill-preview .preview-table th { background: #e2e8f0; color: #0f172a; }
+body.light-mode .template-fill-preview .preview-table td { border-color: #cbd5e1; }
