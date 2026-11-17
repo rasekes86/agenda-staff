@@ -141,6 +141,7 @@ async function executeUndoAction(action, activeDoc) {
       type: 'documentSnapshot',
       originalPdfBytes: new Uint8Array(activeDoc.originalPdfBytes),
       elements: clonePdfEditorValue(activeDoc.elements),
+      activeTemplate: clonePdfEditorValue(activeDoc.activeTemplate),
       currentPage: activeDoc.currentPage
     };
     await restoreDocumentSnapshot(activeDoc, action);
@@ -223,6 +224,7 @@ async function restoreDocumentSnapshot(doc, snapshot) {
   doc.pdfDoc = await window.PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true });
   doc.totalPages = pdfjsDoc.numPages;
   doc.elements = clonePdfEditorValue(snapshot.elements);
+  doc.activeTemplate = clonePdfEditorValue(snapshot.activeTemplate || null);
   doc.currentPage = Math.max(1, Math.min(snapshot.currentPage || 1, doc.totalPages));
   const firstPage = await pdfjsDoc.getPage(doc.currentPage);
   const viewport = firstPage.getViewport({ scale: 1 });
@@ -5018,6 +5020,7 @@ function applyTemplateVariableFields(container, options = {}) {
     { field: 'CATEGORIA', value: categoryInput?.value.trim() || '', storage: 'pe_lastCategory' }
   ];
   let changed = 0;
+  const previousElements = clonePdfEditorValue(activeDoc.elements);
   updates.forEach(update => {
     if (!update.value) return;
     const items = getTemplateFieldElements(update.field);
@@ -5032,6 +5035,7 @@ function applyTemplateVariableFields(container, options = {}) {
   if (cityInput?.value.trim()) selectedCity = cityInput.value.trim();
   if (categoryInput?.value.trim()) selectedCategory = categoryInput.value.trim();
   if (changed) {
+    pushUndo(activeDoc.id, { type: 'elementsSnapshot', elements: previousElements });
     updateTabModified(activeDoc.id, true);
     renderPage();
     if (!options.silent) showStatus('Ciudad y puesto actualizados', 'success');
@@ -5497,11 +5501,13 @@ function fillTemplateTextGroup(groupName, rawValues) {
   const activeDoc = getActiveDoc();
   const slots = getTemplateGroups()[groupName] || [];
   const count = Math.min(values.length, slots.length);
+  const previousElements = clonePdfEditorValue(activeDoc.elements);
   for (let i = 0; i < count; i++) {
     const el = activeDoc.elements[slots[i].page][slots[i].index];
     fitTemplateTextToBox(el, values[i]);
     clearPlaceholderMetadata(el);
   }
+  pushUndo(activeDoc.id, { type: 'elementsSnapshot', elements: previousElements });
   updateTabModified(activeDoc.id, true);
   renderPage();
   showStatus(`${count} campo(s) de ${groupName} rellenado(s)`, 'success');
@@ -5568,6 +5574,7 @@ async function fillTemplatePeople(rawText) {
     signatureMatches = people.map(person => ({ person, signature: null }));
   }
 
+  const previousElements = clonePdfEditorValue(activeDoc.elements);
   for (let index = 0; index < people.length; index++) {
     const person = people[index];
     if (nameSlots[index]) {
@@ -5619,6 +5626,9 @@ async function fillTemplatePeople(rawText) {
     }
   });
 
+  if (namesFilled || dniFilled || signaturesFilled || datesFilled) {
+    pushUndo(activeDoc.id, { type: 'elementsSnapshot', elements: previousElements });
+  }
   updateTabModified(activeDoc.id, true);
   renderPage();
   $('fillTemplateModal')?.classList.remove('show');
@@ -7433,6 +7443,7 @@ async function applyPdfPageOrder(pageOrder, nextCurrentPage, statusMessage) {
     type: 'documentSnapshot',
     originalPdfBytes: new Uint8Array(activeDoc.originalPdfBytes),
     elements: clonePdfEditorValue(activeDoc.elements),
+    activeTemplate: clonePdfEditorValue(activeDoc.activeTemplate),
     currentPage: activeDoc.currentPage
   };
   try {
