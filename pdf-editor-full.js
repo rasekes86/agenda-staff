@@ -86,66 +86,114 @@ let clipboardElements = null;
 let undoStacks = {};   // { [docId]: [ { action, page, element, index, prevProps }, ... ] }
 let redoStacks = {};   // { [docId]: [ { action, page, element, index, prevProps }, ... ] }
 const MAX_UNDO = 50;
+const MAX_UNDO_DOCUMENT_SNAPSHOTS = 5;
+
+function clonePdfEditorValue(value) {
+  return JSON.parse(JSON.stringify(value ?? null));
+}
+
+function clonePdfEditorHistory(stack) {
+  return (stack || []).map(action => {
+    const copy = { ...action };
+    if (action.originalPdfBytes) copy.originalPdfBytes = new Uint8Array(action.originalPdfBytes);
+    if (action.elements) copy.elements = clonePdfEditorValue(action.elements);
+    if (action.element) copy.element = clonePdfEditorValue(action.element);
+    return copy;
+  });
+}
 
 function pushUndo(docId, action) {
   if (!undoStacks[docId]) undoStacks[docId] = [];
   if (!redoStacks[docId]) redoStacks[docId] = [];
   undoStacks[docId].push(action);
   if (undoStacks[docId].length > MAX_UNDO) undoStacks[docId].shift();
-  // Clear redo on new action
+  while (undoStacks[docId].filter(item => item.type === 'documentSnapshot').length > MAX_UNDO_DOCUMENT_SNAPSHOTS) {
+    const oldestSnapshot = undoStacks[docId].findIndex(item => item.type === 'documentSnapshot');
+    if (oldestSnapshot < 0) break;
+    // Drop the history that leads into the pruned page snapshot as well; those
+    // earlier element indexes no longer describe the document's current page map.
+    undoStacks[docId].splice(0, oldestSnapshot + 1);
+  }
   redoStacks[docId] = [];
   updateUndoRedoUI();
+  scheduleAutoSave();
 }
 
-function undo() {
+async function undo() {
   const activeDoc = getActiveDoc();
   if (!activeDoc) return;
   const stack = undoStacks[activeDoc.id];
   if (!stack || stack.length === 0) { showStatus('Nada que deshacer', 'error'); return; }
   const action = stack.pop();
-  const redoAction = executeUndoAction(action, activeDoc);
-  if (!redoStacks[activeDoc.id]) redoStacks[activeDoc.id] = [];
-  redoStacks[activeDoc.id].push(redoAction);
-  updateTabModified(activeDoc.id, true);
-  renderPage();
-  updateUndoRedoUI();
-  autoSave();
-  showStatus('Deshacer', 'success');
+  try {
+    const redoAction = await executeUndoAction(action, activeDoc);
+    if (!redoStacks[activeDoc.id]) redoStacks[activeDoc.id] = [];
+    redoStacks[activeDoc.id].push(redoAction);
+    updateTabModified(activeDoc.id, true);
+    await renderPage();
+    await renderPageThumbnails();
+    updateUndoRedoUI();
+    await autoSave();
+    showStatus('Deshacer', 'success');
+  } catch (error) {
+    stack.push(action);
+    console.error('Undo error:', error);
+    showStatus('No se pudo deshacer esta acción', 'error');
+  }
 }
 
-function redo() {
+async function redo() {
   const activeDoc = getActiveDoc();
   if (!activeDoc) return;
   const stack = redoStacks[activeDoc.id];
   if (!stack || stack.length === 0) { showStatus('Nada que rehacer', 'error'); return; }
   const action = stack.pop();
-  const undoAction = executeUndoAction(action, activeDoc);
-  if (!undoStacks[activeDoc.id]) undoStacks[activeDoc.id] = [];
-  undoStacks[activeDoc.id].push(undoAction);
-  updateTabModified(activeDoc.id, true);
-  renderPage();
-  updateUndoRedoUI();
-  autoSave();
-  showStatus('Rehacer', 'success');
+  try {
+    const undoAction = await executeUndoAction(action, activeDoc);
+    if (!undoStacks[activeDoc.id]) undoStacks[activeDoc.id] = [];
+    undoStacks[activeDoc.id].push(undoAction);
+    updateTabModified(activeDoc.id, true);
+    renderPage();
+    renderPageThumbnails();
+    updateUndoRedoUI();
+    await autoSave();
+    showStatus('Rehacer', 'success');
+  } catch (error) {
+    stack.push(action);
+    console.error('Redo error:', error);
+    showStatus('No se pudo rehacer esta acción', 'error');
+  }
 }
 
-function executeUndoAction(action, activeDoc) {
-  // Returns the inverse action for redo
+async function executeUndoAction(action, activeDoc) {
+  if (action.type === 'documentSnapshot') {
+    const current = {
+      type: 'documentSnapshot',
+      originalPdfBytes: new Uint8Array(activeDoc.originalPdfBytes),
+      elements: clonePdfEditorValue(activeDoc.elements),
+      activeTemplate: clonePdfEditorValue(activeDoc.activeTemplate),
+      currentPage: activeDoc.currentPage
+    };
+    await restoreDocumentSnapshot(activeDoc, action);
+    return current;
+  }
+  if (action.type === 'elementsSnapshot') {
+    const current = clonePdfEditorValue(activeDoc.elements);
+    activeDoc.elements = clonePdfEditorValue(action.elements);
+    return { type: 'elementsSnapshot', elements: current };
+  }
+
   const pageElements = activeDoc.elements[action.page] || [];
   switch (action.type) {
     case 'add': {
-      // Undo add = remove the element
-      const el = pageElements[action.index];
       const removed = pageElements.splice(action.index, 1);
       return { type: 'add', page: action.page, index: action.index, element: removed[0] };
     }
     case 'delete': {
-      // Undo delete = re-insert the element
       pageElements.splice(action.index, 0, action.element);
       return { type: 'delete', page: action.page, index: action.index, element: action.element };
     }
     case 'move': {
-      // Undo move = restore previous position
       const el = pageElements[action.index];
       if (el) {
         const prev = { x: el.x, y: el.y };
@@ -156,13 +204,11 @@ function executeUndoAction(action, activeDoc) {
       return action;
     }
     case 'resize': {
-      // Undo resize = restore previous dimensions
       const el = pageElements[action.index];
       if (el) {
         const prev = { ...action.currentProps };
-        if (el.type === 'text') {
-          el.size = action.prevProps.size;
-        } else {
+        if (el.type === 'text') el.size = action.prevProps.size;
+        else {
           el.x = action.prevProps.x;
           el.y = action.prevProps.y;
           el.width = action.prevProps.width;
@@ -173,12 +219,10 @@ function executeUndoAction(action, activeDoc) {
       return action;
     }
     case 'clear': {
-      // Undo clear = restore all elements
-      activeDoc.elements[action.page] = JSON.parse(JSON.stringify(action.elements));
+      activeDoc.elements[action.page] = clonePdfEditorValue(action.elements);
       return { type: 'clear', page: action.page, elements: [] };
     }
     case 'edit': {
-      // Undo edit = restore previous text/size/color
       const el = pageElements[action.index];
       if (el) {
         const prev = { text: el.text, size: el.size, color: el.color };
@@ -190,17 +234,32 @@ function executeUndoAction(action, activeDoc) {
       return action;
     }
     case 'multiMove': {
-      // Undo multi-move = restore all previous positions
-      const movedElements = action.elements;
-      movedElements.forEach(item => {
+      action.elements.forEach(item => {
         const el = pageElements[item.index];
         if (el) { el.x -= item.dx; el.y -= item.dy; }
       });
-      return { type: 'multiMove', page: action.page, elements: movedElements.map(m => ({ index: m.index, dx: -m.dx, dy: -m.dy })) };
+      return { type: 'multiMove', page: action.page, elements: action.elements.map(m => ({ index: m.index, dx: -m.dx, dy: -m.dy })) };
     }
     default:
       return action;
   }
+}
+
+async function restoreDocumentSnapshot(doc, snapshot) {
+  const bytes = new Uint8Array(snapshot.originalPdfBytes);
+  const pdfjsDoc = await window.pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+  doc.originalPdfBytes = bytes;
+  doc.pdfBytes = bytes.slice();
+  doc.pdfJsDoc = pdfjsDoc;
+  doc.pdfDoc = await window.PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true });
+  doc.totalPages = pdfjsDoc.numPages;
+  doc.elements = clonePdfEditorValue(snapshot.elements);
+  doc.activeTemplate = clonePdfEditorValue(snapshot.activeTemplate || null);
+  doc.currentPage = Math.max(1, Math.min(snapshot.currentPage || 1, doc.totalPages));
+  const firstPage = await pdfjsDoc.getPage(doc.currentPage);
+  const viewport = firstPage.getViewport({ scale: 1 });
+  doc.pageWidth = viewport.width;
+  doc.pageHeight = viewport.height;
 }
 
 function updateUndoRedoUI() {
@@ -461,90 +520,203 @@ function startMultiDrag(e, scale, activeDoc) {
 // ============================================
 let autoSaveTimer = null;
 let isAutoSaving = false;
-const AUTO_SAVE_DELAY = 3000; // 3 seconds after last change
+const AUTO_SAVE_DELAY = 1200;
+const PDF_DRAFT_DB_NAME = 'agendaStaffPdfEditorDrafts';
+const PDF_DRAFT_STORE_NAME = 'drafts';
+let pdfDraftDatabasePromise = null;
 
 function scheduleAutoSave() {
   if (autoSaveTimer) clearTimeout(autoSaveTimer);
-  autoSaveTimer = setTimeout(autoSave, AUTO_SAVE_DELAY);
+  autoSaveTimer = setTimeout(() => { void autoSave(); }, AUTO_SAVE_DELAY);
+}
+
+function openPdfDraftDatabase() {
+  if (pdfDraftDatabasePromise) return pdfDraftDatabasePromise;
+  pdfDraftDatabasePromise = new Promise((resolve, reject) => {
+    const request = indexedDB.open(PDF_DRAFT_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(PDF_DRAFT_STORE_NAME)) db.createObjectStore(PDF_DRAFT_STORE_NAME, { keyPath: 'draftId' });
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('No se pudo abrir el almacenamiento local'));
+  });
+  return pdfDraftDatabasePromise;
+}
+
+async function savePdfDraftRecord(record) {
+  const db = await openPdfDraftDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(PDF_DRAFT_STORE_NAME, 'readwrite');
+    transaction.objectStore(PDF_DRAFT_STORE_NAME).put(record);
+    transaction.oncomplete = () => resolve(true);
+    transaction.onerror = () => reject(transaction.error || new Error('No se pudo guardar el borrador'));
+    transaction.onabort = () => reject(transaction.error || new Error('Se canceló el guardado del borrador'));
+  });
+}
+
+async function getPdfDraftRecords() {
+  const db = await openPdfDraftDatabase();
+  return new Promise((resolve, reject) => {
+    const request = db.transaction(PDF_DRAFT_STORE_NAME, 'readonly').objectStore(PDF_DRAFT_STORE_NAME).getAll();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error || new Error('No se pudieron leer los borradores'));
+  });
+}
+
+async function deletePdfDraftRecord(draftId) {
+  if (!draftId) return;
+  const db = await openPdfDraftDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(PDF_DRAFT_STORE_NAME, 'readwrite');
+    transaction.objectStore(PDF_DRAFT_STORE_NAME).delete(draftId);
+    transaction.oncomplete = () => resolve(true);
+    transaction.onerror = () => reject(transaction.error || new Error('No se pudo eliminar el borrador'));
+  });
+}
+
+function docHasEditableContent(doc) {
+  return Object.values(doc?.elements || {}).some(elements => elements?.length > 0);
+}
+
+async function persistPdfDraft(doc) {
+  if (!doc?.draftId || !doc.originalPdfBytes) return;
+  const bytes = new Uint8Array(doc.originalPdfBytes);
+  const record = {
+    draftId: doc.draftId,
+    fileName: doc.fileName || 'documento.pdf',
+    updatedAt: Date.now(),
+    originalPdfBytes: bytes,
+    elements: clonePdfEditorValue(doc.elements),
+    currentPage: doc.currentPage,
+    totalPages: doc.totalPages,
+    pageWidth: doc.pageWidth,
+    pageHeight: doc.pageHeight,
+    zoom: doc.zoom,
+    activeTemplate: clonePdfEditorValue(doc.activeTemplate),
+    undoStack: clonePdfEditorHistory(undoStacks[doc.id] || []),
+    redoStack: clonePdfEditorHistory(redoStacks[doc.id] || [])
+  };
+  await savePdfDraftRecord(record);
 }
 
 async function autoSave() {
-  const activeDoc = getActiveDoc();
-  if (!activeDoc || isAutoSaving) return;
-
-  // Check if any document has elements
-  let hasElements = false;
-  const saveData = {};
-  documents.forEach(doc => {
-    const docElements = {};
-    let docHasElements = false;
-    for (const page in doc.elements) {
-      if (doc.elements[page].length > 0) {
-        docElements[page] = doc.elements[page];
-        docHasElements = true;
-        hasElements = true;
-      }
-    }
-    if (docHasElements) {
-      saveData[doc.id] = {
-        elements: docElements,
-        currentPage: doc.currentPage,
-        fileName: doc.fileName
-      };
-    }
-  });
-
-  if (!hasElements) {
-    await chrome.storage.local.remove(['pdfEditorAutoSave', 'pdfEditorAutoSaveTime']);
-    return;
-  }
-
+  if (isAutoSaving) return;
   isAutoSaving = true;
   try {
-    await chrome.storage.local.set({ pdfEditorAutoSave: saveData, pdfEditorAutoSaveTime: Date.now() });
+    const modifiedDocs = documents.filter(doc => doc.draftId && (doc.modified || docHasEditableContent(doc)));
+    for (const doc of modifiedDocs) await persistPdfDraft(doc);
+    const drafts = await getPdfDraftRecords();
+    updateDraftRecoveryButton(drafts);
     const indicator = $('autoSaveIndicator');
-    if (indicator) {
-      indicator.textContent = '✓ Guardado';
+    if (indicator && modifiedDocs.length) {
+      indicator.textContent = '✓ Borrador guardado';
       indicator.classList.add('auto-saved');
-      setTimeout(() => { indicator.textContent = ''; indicator.classList.remove('auto-saved'); }, 2000);
+      setTimeout(() => { indicator.textContent = ''; indicator.classList.remove('auto-saved'); }, 2200);
     }
   } catch (err) {
     console.error('Auto-save error:', err);
+    const indicator = $('autoSaveIndicator');
+    if (indicator) indicator.textContent = 'No se pudo guardar el borrador';
+  } finally {
+    isAutoSaving = false;
   }
-  isAutoSaving = false;
 }
 
-async function restoreAutoSave() {
+function updateDraftRecoveryButton(drafts) {
+  const button = $('btnRecoverDrafts');
+  const count = $('recoverDraftCount');
+  const total = drafts?.length || 0;
+  if (button) button.style.display = total ? '' : 'none';
+  if (count) count.textContent = String(total);
+}
+
+async function loadRecoverableDrafts() {
   try {
-    const stored = await chrome.storage.local.get(['pdfEditorAutoSave', 'pdfEditorAutoSaveTime']);
-    if (!stored.pdfEditorAutoSave) return;
-    const saveTime = stored.pdfEditorAutoSaveTime ? new Date(stored.pdfEditorAutoSaveTime) : null;
-    const timeStr = saveTime ? ` (${saveTime.toLocaleTimeString()})` : '';
-
-    // Check if any saved data matches currently open documents
-    let restored = false;
-    for (const docId in stored.pdfEditorAutoSave) {
-      const doc = documents.find(d => d.id === docId);
-      if (doc) {
-        const saved = stored.pdfEditorAutoSave[docId];
-        for (const page in saved.elements) {
-          doc.elements[parseInt(page)] = saved.elements[page];
-        }
-        doc.currentPage = saved.currentPage || doc.currentPage;
-        restored = true;
-      }
-    }
-
-    if (restored) {
-      showStatus(`Estado anterior restaurado${timeStr}`, 'success');
-      updateTabModified(getActiveDoc().id, true);
-      renderPage();
-    }
-
-    // Clean old auto-save data
-    await chrome.storage.local.remove(['pdfEditorAutoSave', 'pdfEditorAutoSaveTime']);
+    const drafts = (await getPdfDraftRecords()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    updateDraftRecoveryButton(drafts);
+    if (drafts.length) renderDraftRecoveryList(drafts);
   } catch (err) {
-    console.error('Auto-restore error:', err);
+    console.warn('No se pudieron cargar los borradores locales:', err);
+  }
+}
+
+function renderDraftRecoveryList(drafts) {
+  const list = $('draftRecoveryList');
+  if (!list) return;
+  if (!drafts.length) {
+    list.innerHTML = '<div class="sidebar-info">No hay borradores guardados.</div>';
+    return;
+  }
+  list.innerHTML = drafts.map(draft => {
+    const date = new Date(draft.updatedAt || Date.now()).toLocaleString();
+    return `<div class="draft-recovery-card">
+      <div class="draft-recovery-info"><strong>${escapeHtml(draft.fileName || 'Documento PDF')}</strong><span>${draft.totalPages || '?'} páginas · Guardado ${escapeHtml(date)}</span></div>
+      <div class="draft-recovery-actions">
+        <button type="button" data-draft-recover="${escapeHtml(draft.draftId)}">Recuperar</button>
+        <button type="button" class="draft-delete" data-draft-delete="${escapeHtml(draft.draftId)}">Eliminar</button>
+      </div>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('[data-draft-recover]').forEach(button => {
+    button.addEventListener('click', () => restorePdfDraft(button.dataset.draftRecover));
+  });
+  list.querySelectorAll('[data-draft-delete]').forEach(button => {
+    button.addEventListener('click', async () => {
+      const draftId = button.dataset.draftDelete;
+      const openDoc = documents.find(doc => doc.draftId === draftId);
+      if (openDoc) openDoc.draftId = null;
+      await deletePdfDraftRecord(draftId);
+      const drafts = (await getPdfDraftRecords()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      renderDraftRecoveryList(drafts);
+      updateDraftRecoveryButton(drafts);
+    });
+  });
+}
+
+async function restorePdfDraft(draftId) {
+  try {
+    const record = (await getPdfDraftRecords()).find(item => item.draftId === draftId);
+    if (!record?.originalPdfBytes) return;
+    if (documents.some(doc => doc.draftId === draftId)) {
+      const existingIndex = documents.findIndex(doc => doc.draftId === draftId);
+      switchToTab(existingIndex);
+      $('draftRecoveryModal')?.classList.remove('show');
+      showStatus('Ese borrador ya está abierto', 'success');
+      return;
+    }
+    const bytes = new Uint8Array(record.originalPdfBytes);
+    const pdfJsDoc = await window.pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+    const pdfDoc = await window.PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true });
+    const doc = createDocState(`draft_${Date.now()}_${documents.length}`);
+    doc.draftId = record.draftId;
+    doc.fileName = record.fileName || 'documento.pdf';
+    doc.pdfBytes = bytes.slice();
+    doc.originalPdfBytes = bytes;
+    doc.pdfJsDoc = pdfJsDoc;
+    doc.pdfDoc = pdfDoc;
+    doc.totalPages = pdfJsDoc.numPages;
+    doc.currentPage = Math.max(1, Math.min(record.currentPage || 1, doc.totalPages));
+    doc.pageWidth = record.pageWidth || pdfDoc.getPage(0).getSize().width;
+    doc.pageHeight = record.pageHeight || pdfDoc.getPage(0).getSize().height;
+    doc.zoom = record.zoom || 1;
+    doc.elements = clonePdfEditorValue(record.elements || {});
+    doc.activeTemplate = clonePdfEditorValue(record.activeTemplate || null);
+    doc.modified = true;
+    for (let page = 1; page <= doc.totalPages; page++) if (!doc.elements[page]) doc.elements[page] = [];
+    undoStacks[doc.id] = clonePdfEditorHistory(record.undoStack || []);
+    redoStacks[doc.id] = clonePdfEditorHistory(record.redoStack || []);
+    documents.push(doc);
+    createTab(doc);
+    updateDocumentTabsVisibility();
+    updateTabModified(doc.id, true);
+    switchToTab(documents.length - 1);
+    $('draftRecoveryModal')?.classList.remove('show');
+    updateUndoRedoUI();
+    showStatus(`Borrador recuperado: ${doc.fileName}`, 'success');
+  } catch (err) {
+    console.error('Draft restore error:', err);
+    showStatus('No se pudo recuperar el borrador: ' + (err.message || 'error desconocido'), 'error');
   }
 }
 
@@ -568,6 +740,8 @@ function getActiveDoc() {
 function createDocState(id) {
   return {
     id: id,
+    draftId: `pdf-draft-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    modified: false,
     pdfJsDoc: null,
     pdfDoc: null,
     pdfBytes: null,
@@ -668,8 +842,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
   
-  // Try to restore auto-saved state after a short delay (wait for PDFs to load)
-  setTimeout(restoreAutoSave, 1500);
+  // Show locally saved drafts for optional recovery after the editor restarts.
+  setTimeout(() => { void loadRecoverableDrafts(); }, 500);
+  setInterval(() => { if (documents.some(doc => doc.modified)) void autoSave(); }, 15000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') void autoSave(); });
+  window.addEventListener('pagehide', () => { void autoSave(); });
   
   // The sidebar is always available; remove preferences from the old collapse control.
   localStorage.removeItem('pe_sidebarCollapsed');
@@ -982,7 +1159,12 @@ function setupEventListeners() {
     button.addEventListener('click', () => beginQuickTemplatePlacement(button.dataset.templateQuickType, button.dataset.templateQuickField));
   });
   $('closeTemplatesModal')?.addEventListener('click', () => $('templatesModal')?.classList.remove('show'));
-  $('closeFillTemplateModal')?.addEventListener('click', () => $('fillTemplateModal')?.classList.remove('show'));
+  $('confirmTemplatePreview')?.addEventListener('click', () => { void confirmTemplateFillPreview(); });
+  $('cancelTemplatePreview')?.addEventListener('click', hideTemplateFillPreview);
+  $('closeFillTemplateModal')?.addEventListener('click', () => {
+    hideTemplateFillPreview();
+    $('fillTemplateModal')?.classList.remove('show');
+  });
   $('templateSearchInput')?.addEventListener('input', () => renderTemplatesList());
   $('btnSaveTemplateCanvas')?.addEventListener('click', confirmSaveTemplate);
   $('btnCancelTemplateCanvas')?.addEventListener('click', cancelTemplateDraft);
@@ -994,7 +1176,10 @@ function setupEventListeners() {
     if (e.target === $('templatesModal')) $('templatesModal').classList.remove('show');
   });
   $('fillTemplateModal')?.addEventListener('click', (e) => {
-    if (e.target === $('fillTemplateModal')) $('fillTemplateModal').classList.remove('show');
+    if (e.target === $('fillTemplateModal')) {
+      hideTemplateFillPreview();
+      $('fillTemplateModal').classList.remove('show');
+    }
   });
   
   // Clipboard buttons
@@ -1018,6 +1203,15 @@ function setupEventListeners() {
   if (btnUndo) btnUndo.addEventListener('click', undo);
   const btnRedo = $('btnRedo');
   if (btnRedo) btnRedo.addEventListener('click', redo);
+  $('btnRecoverDrafts')?.addEventListener('click', async () => {
+    const drafts = (await getPdfDraftRecords()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    renderDraftRecoveryList(drafts);
+    $('draftRecoveryModal')?.classList.add('show');
+  });
+  $('closeDraftRecoveryModal')?.addEventListener('click', () => $('draftRecoveryModal')?.classList.remove('show'));
+  $('draftRecoveryModal')?.addEventListener('click', event => {
+    if (event.target === $('draftRecoveryModal')) $('draftRecoveryModal').classList.remove('show');
+  });
 
   // Multi-select action buttons
   const btnDeleteSelected = $('btnDeleteSelected');
@@ -1327,11 +1521,10 @@ function closeTab(docId) {
   if (idx < 0) return;
   
   const doc = documents[idx];
-  const hasElements = Object.values(doc.elements).some(arr => arr.length > 0);
+  const hasElements = docHasEditableContent(doc);
   
-  if (hasElements && !confirm(`¿Cerrar "${doc.fileName}" sin guardar los cambios?`)) {
-    return;
-  }
+  if (hasElements && !confirm(`¿Cerrar "${doc.fileName}"? El borrador se conservará en este navegador para recuperarlo después.`)) return;
+  if (hasElements || doc.modified) void persistPdfDraft(doc).catch(error => console.warn('No se pudo guardar el borrador antes de cerrar:', error));
   
   documents.splice(idx, 1);
   
@@ -1419,17 +1612,16 @@ function showUploadArea() {
 }
 
 function updateTabModified(docId, hasChanges) {
+  const doc = documents.find(item => item.id === docId);
+  if (doc) doc.modified = Boolean(hasChanges);
   const tab = document.querySelector(`.doc-tab[data-doc-id="${docId}"]`);
-  if (!tab) return;
-  
-  const nameEl = tab.querySelector('.doc-tab-name');
-  if (!nameEl) return;
-  
-  // Use data attribute instead of fragile string manipulation
-  if (hasChanges) {
-    tab.dataset.modified = 'true';
-  } else {
-    delete tab.dataset.modified;
+  if (tab) {
+    if (hasChanges) tab.dataset.modified = 'true';
+    else delete tab.dataset.modified;
+  }
+  if (hasChanges) scheduleAutoSave();
+  else if (doc?.draftId) {
+    void deletePdfDraftRecord(doc.draftId).then(loadRecoverableDrafts).catch(error => console.warn('No se pudo limpiar el borrador:', error));
   }
 }
 
@@ -1662,6 +1854,9 @@ function createElementDiv(el, idx, scale, activeDoc) {
   div.className = 'pdf-element pdf-element-' + el.type;
   if (el.isPlaceholder) div.classList.add('pdf-element-placeholder');
   div.dataset.idx = idx;
+  if (templatePreviewTarget?.docId === activeDoc.id && templatePreviewTarget.page === activeDoc.currentPage && templatePreviewTarget.index === idx) {
+    div.classList.add('template-preview-target');
+  }
   div.style.left = (el.x * scale) + 'px';
   div.style.top = (el.y * scale) + 'px';
   
@@ -3877,18 +4072,20 @@ async function savePdf() {
 }
 
 function resetDocumentAfterSave(activeDoc) {
+  const filledElements = clonePdfEditorValue(activeDoc.elements);
+  const previousUndoStack = clonePdfEditorHistory(undoStacks[activeDoc.id] || []);
   for (let page = 1; page <= activeDoc.totalPages; page++) activeDoc.elements[page] = [];
-  undoStacks[activeDoc.id] = [];
-  redoStacks[activeDoc.id] = [];
   addedSignaturesCount = 0;
   clearSelection();
 
-  if (activeDoc.activeTemplate) {
-    applyTemplate(activeDoc.activeTemplate, { silent: true });
-  } else {
-    renderPage();
-  }
-  updateTabModified(activeDoc.id, false);
+  if (activeDoc.activeTemplate) applyTemplate(activeDoc.activeTemplate, { silent: true });
+  else renderPage();
+
+  // Saving exports the PDF but leaves the editor ready for the next document.
+  // Keep one undo step so the filled state is still recoverable after export.
+  undoStacks[activeDoc.id] = previousUndoStack;
+  pushUndo(activeDoc.id, { type: 'elementsSnapshot', elements: filledElements });
+  updateTabModified(activeDoc.id, true);
   scheduleAutoSave();
 }
 
@@ -3896,11 +4093,12 @@ function clearEditor() {
   // Clear ALL loaded PDFs and return to upload screen
   if (documents.length === 0) return;
   
-  const hasAnyElements = documents.some(doc => 
-    Object.values(doc.elements).some(arr => arr.length > 0)
-  );
-  if (hasAnyElements && !confirm('¿Limpiar todos los documentos? Se perderán los cambios no guardados.')) return;
+  const hasUnsavedChanges = documents.some(doc => doc.modified || docHasEditableContent(doc));
+  if (hasUnsavedChanges && !confirm('¿Limpiar todos los documentos y sus borradores guardados? Se perderán los cambios no guardados.')) return;
+  if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer = null; }
   
+  // Remove recoverable drafts only after the user confirms clearing the workspace.
+  documents.forEach(doc => { if (doc.draftId) void deletePdfDraftRecord(doc.draftId); });
   // Remove all documents at once
   documents.length = 0;
   activeDocIndex = -1;
@@ -3925,6 +4123,8 @@ let templateEditorActive = false;
 let templateFieldClipboard = [];
 let editingTemplateId = null;
 let editingTemplateFingerprints = [];
+let pendingTemplatePreviewAction = null;
+let templatePreviewTarget = null;
 
 function getTemplateFingerprints(template) {
   const firstSlot = template?.slots?.[0];
@@ -4865,6 +5065,7 @@ function applyTemplateVariableFields(container, options = {}) {
     { field: 'CATEGORIA', value: categoryInput?.value.trim() || '', storage: 'pe_lastCategory' }
   ];
   let changed = 0;
+  const previousElements = clonePdfEditorValue(activeDoc.elements);
   updates.forEach(update => {
     if (!update.value) return;
     const items = getTemplateFieldElements(update.field);
@@ -4879,6 +5080,7 @@ function applyTemplateVariableFields(container, options = {}) {
   if (cityInput?.value.trim()) selectedCity = cityInput.value.trim();
   if (categoryInput?.value.trim()) selectedCategory = categoryInput.value.trim();
   if (changed) {
+    pushUndo(activeDoc.id, { type: 'elementsSnapshot', elements: previousElements });
     updateTabModified(activeDoc.id, true);
     renderPage();
     if (!options.silent) showStatus('Ciudad y puesto actualizados', 'success');
@@ -5098,11 +5300,152 @@ chrome.runtime.onMessage.addListener(message => {
   }
 });
 
+function hideTemplateFillPreview() {
+  pendingTemplatePreviewAction = null;
+  const content = $('fillTemplateContent');
+  const preview = $('templateFillPreview');
+  if (content) content.style.display = '';
+  if (preview) preview.style.display = 'none';
+  if ($('cancelTemplatePreview')) $('cancelTemplatePreview').style.display = 'none';
+  if ($('confirmTemplatePreview')) {
+    $('confirmTemplatePreview').style.display = 'none';
+    $('confirmTemplatePreview').disabled = false;
+    $('confirmTemplatePreview').textContent = 'Confirmar';
+  }
+}
+
+function showTemplateFillPreview(title, rows, warnings, confirmLabel, action) {
+  const content = $('fillTemplateContent');
+  const preview = $('templateFillPreview');
+  const confirmButton = $('confirmTemplatePreview');
+  if (!content || !preview || !confirmButton) return;
+  pendingTemplatePreviewAction = action;
+  content.style.display = 'none';
+  preview.style.display = 'block';
+  const warningHtml = warnings.map(warning => `<div class="preview-warning">⚠️ ${escapeHtml(warning)}</div>`).join('');
+  const rowHtml = rows.map(row => `<tr><td>${escapeHtml(row.value)}</td><td>${escapeHtml(row.destination)}</td><td class="${row.ok ? 'preview-ok' : 'preview-missing'}">${escapeHtml(row.status)}</td><td>${row.target ? `<button type="button" class="template-preview-location" data-preview-page="${row.target.page}" data-preview-index="${row.target.index}">Ver</button>` : '—'}</td></tr>`).join('');
+  preview.innerHTML = `<h4>${escapeHtml(title)}</h4>
+    <p class="preview-summary">Comprueba el destino y los campos pendientes. No se aplicará nada hasta confirmar.</p>
+    ${warningHtml}
+    <table class="preview-table"><thead><tr><th>Dato</th><th>Destino</th><th>Estado</th><th>PDF</th></tr></thead><tbody>${rowHtml || '<tr><td colspan="4">No hay valores para aplicar.</td></tr>'}</tbody></table>`;
+  preview.querySelectorAll('[data-preview-page]').forEach(button => {
+    button.addEventListener('click', () => {
+      const doc = getActiveDoc();
+      if (!doc) return;
+      templatePreviewTarget = { docId: doc.id, page: Number(button.dataset.previewPage), index: Number(button.dataset.previewIndex) };
+      doc.currentPage = templatePreviewTarget.page;
+      hideTemplateFillPreview();
+      $('fillTemplateModal')?.classList.remove('show');
+      void renderPage().then(() => {
+        const target = document.querySelector('.pdf-element.template-preview-target');
+        target?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+        setTimeout(() => {
+          if (templatePreviewTarget?.docId === doc.id) {
+            templatePreviewTarget = null;
+            void renderPage();
+          }
+        }, 3500);
+      });
+    });
+  });
+  confirmButton.textContent = confirmLabel;
+  confirmButton.style.display = '';
+  const cancelButton = $('cancelTemplatePreview');
+  if (cancelButton) cancelButton.style.display = '';
+}
+
+function previewTemplateTextGroup(groupName, rawValues) {
+  const values = String(rawValues || '').split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+  if (!values.length) { showStatus('Introduce al menos un valor', 'error'); return; }
+  const slots = getTemplateGroups()[groupName] || [];
+  const rows = values.map((value, index) => {
+    const slot = slots[index];
+    return {
+      value,
+      destination: slot ? `${groupName} · página ${slot.page}` : groupName,
+      status: slot ? 'Se colocará en este campo' : 'No hay campo disponible',
+      target: slot ? { page: slot.page, index: slot.index } : null,
+      ok: Boolean(slot)
+    };
+  });
+  const warnings = [];
+  if (values.length > slots.length) warnings.push(`${values.length - slots.length} valor(es) exceden los ${slots.length} campos disponibles y no se aplicarán.`);
+  if (values.length < slots.length) warnings.push(`Quedarán ${slots.length - values.length} campo(s) de ${groupName} sin rellenar.`);
+  showTemplateFillPreview(`Vista previa · ${groupName}`, rows, warnings, 'Confirmar y rellenar', async () => fillTemplateTextGroup(groupName, rawValues));
+}
+
+async function previewTemplatePeople(rawText, mode) {
+  const people = parseTemplatePeople(rawText);
+  if (!people.length) { showStatus('Pega al menos una persona', 'error'); return; }
+  const groups = getTemplateGroups();
+  const names = groups.NOMBRE || [];
+  const dni = groups.DNI || [];
+  const signatures = groups.FIRMA || [];
+  let matches = [];
+  try { matches = await findSignaturesForPeople(people); }
+  catch (error) { console.warn('No se pudieron comprobar las firmas para la vista previa:', error); }
+  const rows = people.map((person, index) => {
+    const destinations = [];
+    const issues = [];
+    if (names[index]) destinations.push(`nombre · pág. ${names[index].page}`);
+    else issues.push('sin campo de nombre');
+    if (person.dni && dni[index]) destinations.push(`DNI/NIE · pág. ${dni[index].page}`);
+    else if (person.dni) issues.push('sin campo DNI/NIE');
+    else issues.push('sin DNI/NIE');
+    if (signatures[index]) {
+      destinations.push(`firma · pág. ${signatures[index].page}`);
+      const hasSignature = Boolean(matches[index]?.signature?.image_url || matches[index]?.signature?.svg_data);
+      if (!hasSignature) issues.push(mode === 'individual' ? 'sin firma guardada' : 'firma pendiente');
+    } else if (groups.FIRMA?.length) {
+      issues.push('sin campo de firma');
+    }
+    return {
+      value: person.name + (person.dni ? ` · ${person.dni}` : ''),
+      destination: destinations.join(' / ') || 'Sin destino',
+      status: issues.length ? issues.join(', ') : mode === 'individual' ? 'Listo para PDF individual' : 'Listo',
+      target: names[index] ? { page: names[index].page, index: names[index].index } : dni[index] ? { page: dni[index].page, index: dni[index].index } : null,
+      ok: issues.length === 0
+    };
+  });
+  const warnings = [];
+  if (people.length > names.length) warnings.push(`${people.length - names.length} persona(s) exceden los campos de nombre disponibles.`);
+  if (people.filter(person => person.dni).length > dni.length) warnings.push('Hay más DNI/NIE que campos disponibles.');
+  if (mode === 'individual') {
+    const missing = rows.filter(row => row.status.includes('sin firma guardada') || row.status.includes('sin campo de firma')).length;
+    if (missing) warnings.push(`${missing} persona(s) no generarán PDF individual porque falta su firma guardada o un campo de firma.`);
+  }
+  showTemplateFillPreview(
+    mode === 'individual' ? 'Vista previa · PDFs individuales' : 'Vista previa · documento colectivo',
+    rows,
+    warnings,
+    mode === 'individual' ? 'Confirmar y generar PDFs' : 'Confirmar y rellenar',
+    async () => {
+      applyTemplateVariableFields($('fillTemplateContent'), { silent: true });
+      if (mode === 'individual') await generateIndividualTemplatePdfs(rawText);
+      else await fillTemplatePeople(rawText);
+    }
+  );
+}
+
+async function confirmTemplateFillPreview() {
+  const action = pendingTemplatePreviewAction;
+  if (!action) return;
+  const button = $('confirmTemplatePreview');
+  if (button) { button.disabled = true; button.textContent = 'Aplicando…'; }
+  hideTemplateFillPreview();
+  try { await action(); }
+  catch (error) {
+    console.error('Template preview confirmation error:', error);
+    showStatus(error.message || 'No se pudo aplicar la vista previa', 'error');
+  }
+}
+
 function showFillTemplateModal() {
   const modal = $('fillTemplateModal');
   const content = $('fillTemplateContent');
   const groups = getTemplateGroups();
   if (!modal || !content) return;
+  hideTemplateFillPreview();
   const names = Object.keys(groups).sort();
   if (!names.length) { showStatus('No quedan huecos por rellenar', 'error'); return; }
   const cityFields = getTemplateFieldElements('CIUDAD');
@@ -5143,20 +5486,25 @@ function showFillTemplateModal() {
   });
   content.querySelector('.capture-signer-region')?.addEventListener('click', () => chooseSignerCaptureTab());
   content.querySelector('.fill-template-people')?.addEventListener('click', () => {
-    applyTemplateVariableFields(content, { silent: true });
-    fillTemplatePeople($('templatePeopleInput')?.value || '');
+    void previewTemplatePeople($('templatePeopleInput')?.value || '', 'collective');
   });
   content.querySelector('.generate-individual-documents')?.addEventListener('click', () => {
-    applyTemplateVariableFields(content, { silent: true });
-    generateIndividualTemplatePdfs($('templatePeopleInput')?.value || '');
+    void previewTemplatePeople($('templatePeopleInput')?.value || '', 'individual');
   });
   content.querySelectorAll('.fill-template-text').forEach(button => {
     button.onclick = () => {
       const input = content.querySelector(`.fill-template-values[data-group="${CSS.escape(button.dataset.group)}"]`);
-      fillTemplateTextGroup(button.dataset.group, input?.value || '');
+      previewTemplateTextGroup(button.dataset.group, input?.value || '');
     };
   });
-  content.querySelectorAll('.fill-template-date').forEach(button => { button.onclick = () => fillTemplateDateGroup(button.dataset.group); });
+  content.querySelectorAll('.fill-template-date').forEach(button => {
+    button.onclick = () => {
+      const now = new Date();
+      const value = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
+      const slots = getTemplateGroups()[button.dataset.group] || [];
+      previewTemplateTextGroup(button.dataset.group, slots.map(() => value).join('\\n'));
+    };
+  });
   content.querySelectorAll('.fill-template-signature').forEach(button => {
     button.onclick = () => { modal.classList.remove('show'); showSignatureModal(); };
   });
@@ -5223,11 +5571,13 @@ function fillTemplateTextGroup(groupName, rawValues) {
   const activeDoc = getActiveDoc();
   const slots = getTemplateGroups()[groupName] || [];
   const count = Math.min(values.length, slots.length);
+  const previousElements = clonePdfEditorValue(activeDoc.elements);
   for (let i = 0; i < count; i++) {
     const el = activeDoc.elements[slots[i].page][slots[i].index];
     fitTemplateTextToBox(el, values[i]);
     clearPlaceholderMetadata(el);
   }
+  pushUndo(activeDoc.id, { type: 'elementsSnapshot', elements: previousElements });
   updateTabModified(activeDoc.id, true);
   renderPage();
   showStatus(`${count} campo(s) de ${groupName} rellenado(s)`, 'success');
@@ -5294,6 +5644,7 @@ async function fillTemplatePeople(rawText) {
     signatureMatches = people.map(person => ({ person, signature: null }));
   }
 
+  const previousElements = clonePdfEditorValue(activeDoc.elements);
   for (let index = 0; index < people.length; index++) {
     const person = people[index];
     if (nameSlots[index]) {
@@ -5345,6 +5696,9 @@ async function fillTemplatePeople(rawText) {
     }
   });
 
+  if (namesFilled || dniFilled || signaturesFilled || datesFilled) {
+    pushUndo(activeDoc.id, { type: 'elementsSnapshot', elements: previousElements });
+  }
   updateTabModified(activeDoc.id, true);
   renderPage();
   $('fillTemplateModal')?.classList.remove('show');
@@ -7092,6 +7446,22 @@ async function renderPageThumbnails() {
     label.className = 'page-thumb-label';
     label.textContent = `Pág. ${i}`;
     thumb.appendChild(label);
+
+    const actions = document.createElement('div');
+    actions.className = 'page-thumb-actions';
+    actions.innerHTML = `<button type="button" class="page-thumb-action" data-page-duplicate="${i}" title="Duplicar página ${i}" aria-label="Duplicar página ${i}">⧉</button>
+      <button type="button" class="page-thumb-action danger" data-page-delete="${i}" title="Eliminar página ${i}" aria-label="Eliminar página ${i}">×</button>`;
+    actions.querySelector('[data-page-duplicate]').addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      void duplicatePage(i);
+    });
+    actions.querySelector('[data-page-delete]').addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      void deletePage(i);
+    });
+    thumb.appendChild(actions);
     
     // Click to navigate
     thumb.addEventListener('click', () => {
@@ -7135,66 +7505,93 @@ async function renderPageThumbnails() {
   }
 }
 
-async function reorderPages(fromIndex, toIndex) {
+async function applyPdfPageOrder(pageOrder, nextCurrentPage, statusMessage) {
   const activeDoc = getActiveDoc();
-  if (!activeDoc || !activeDoc.originalPdfBytes) return;
-  
+  if (!activeDoc || !activeDoc.originalPdfBytes || !pageOrder.length) return false;
+
+  const previous = {
+    type: 'documentSnapshot',
+    originalPdfBytes: new Uint8Array(activeDoc.originalPdfBytes),
+    elements: clonePdfEditorValue(activeDoc.elements),
+    activeTemplate: clonePdfEditorValue(activeDoc.activeTemplate),
+    currentPage: activeDoc.currentPage
+  };
   try {
-    const pdfLib = window.PDFLib;
-    const { PDFDocument } = pdfLib;
-    
-    const srcPdf = await PDFDocument.load(activeDoc.originalPdfBytes, { ignoreEncryption: true });
-    const newPdfDoc = await PDFDocument.create();
-    
-    // Build new page order
-    const pageOrder = [];
-    for (let i = 1; i <= activeDoc.totalPages; i++) pageOrder.push(i);
-    
-    // Move fromIndex to toIndex
-    const moved = pageOrder.splice(fromIndex - 1, 1)[0];
-    pageOrder.splice(toIndex - 1, 0, moved);
-    
-    // Copy pages in new order
-    for (const pageNum of pageOrder) {
-      const [copiedPage] = await newPdfDoc.copyPages(srcPdf, [pageNum - 1]);
-      newPdfDoc.addPage(copiedPage);
+    const { PDFDocument } = window.PDFLib;
+    const sourcePdf = await PDFDocument.load(activeDoc.originalPdfBytes, { ignoreEncryption: true });
+    const outputPdf = await PDFDocument.create();
+    for (const sourcePageNumber of pageOrder) {
+      const [page] = await outputPdf.copyPages(sourcePdf, [sourcePageNumber - 1]);
+      outputPdf.addPage(page);
     }
-    
-    const newPdfBytes = await newPdfDoc.save();
-    
-    // Update the document with new PDF bytes
-    activeDoc.originalPdfBytes = newPdfBytes;
-    
-    // Re-load with pdfjs
-    const pdfjsDoc = await window.pdfjsLib.getDocument({ data: newPdfBytes.slice(0) }).promise;
-    activeDoc.pdfJsDoc = pdfjsDoc;
-    activeDoc.totalPages = pdfjsDoc.numPages;
-    
-    // Remap elements: elements were keyed by old page numbers
-    // After reorder, element on old page X is now on new position
-    const oldElements = activeDoc.elements;
-    const newElements = {};
-    pageOrder.forEach((oldPageNum, newPageNum) => {
-      newElements[newPageNum + 1] = oldElements[oldPageNum] || [];
+    const bytes = await outputPdf.save();
+    const remappedElements = {};
+    pageOrder.forEach((sourcePageNumber, index) => {
+      remappedElements[index + 1] = clonePdfEditorValue(activeDoc.elements[sourcePageNumber] || []);
     });
-    activeDoc.elements = newElements;
-    
-    // Ensure current page is valid
-    if (activeDoc.currentPage > activeDoc.totalPages) {
-      activeDoc.currentPage = activeDoc.totalPages;
+    if (activeDoc.activeTemplate?.slots) {
+      const remappedSlots = [];
+      pageOrder.forEach((sourcePageNumber, index) => {
+        activeDoc.activeTemplate.slots
+          .filter(slot => (slot.page || 1) === sourcePageNumber)
+          .forEach(slot => remappedSlots.push({ ...slot, page: index + 1 }));
+      });
+      activeDoc.activeTemplate = { ...activeDoc.activeTemplate, slots: remappedSlots };
     }
-    
+
+    activeDoc.originalPdfBytes = bytes;
+    activeDoc.pdfBytes = bytes.slice();
+    activeDoc.pdfJsDoc = await window.pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+    activeDoc.pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    activeDoc.totalPages = activeDoc.pdfJsDoc.numPages;
+    activeDoc.elements = remappedElements;
+    activeDoc.currentPage = Math.max(1, Math.min(nextCurrentPage || 1, activeDoc.totalPages));
+    pushUndo(activeDoc.id, previous);
     updateTabModified(activeDoc.id, true);
-    renderPage();
-    renderPageThumbnails();
-    showStatus(`Página ${fromIndex} movida a posición ${toIndex}`, 'success');
+    await renderPage();
+    await renderPageThumbnails();
+    showStatus(statusMessage, 'success');
     scheduleAutoSave();
-    
+    return true;
   } catch (err) {
-    console.error('Reorder error:', err);
-    showStatus('Error al reordenar: ' + err.message, 'error');
+    console.error('Page operation error:', err);
+    showStatus('No se pudo modificar la página: ' + (err.message || 'error'), 'error');
+    return false;
   }
 }
+
+async function reorderPages(fromIndex, toIndex) {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc || fromIndex < 1 || toIndex < 1 || fromIndex > activeDoc.totalPages || toIndex > activeDoc.totalPages) return;
+  const pageOrder = Array.from({ length: activeDoc.totalPages }, (_, index) => index + 1);
+  pageOrder.splice(toIndex - 1, 0, pageOrder.splice(fromIndex - 1, 1)[0]);
+  const nextCurrentPage = pageOrder.indexOf(activeDoc.currentPage) + 1;
+  await applyPdfPageOrder(pageOrder, nextCurrentPage, `Página ${fromIndex} movida a posición ${toIndex}`);
+}
+
+async function duplicatePage(pageNumber) {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc || pageNumber < 1 || pageNumber > activeDoc.totalPages) return;
+  const pageOrder = Array.from({ length: activeDoc.totalPages }, (_, index) => index + 1);
+  pageOrder.splice(pageNumber, 0, pageNumber);
+  await applyPdfPageOrder(pageOrder, pageNumber + 1, `Página ${pageNumber} duplicada`);
+}
+
+async function deletePage(pageNumber) {
+  const activeDoc = getActiveDoc();
+  if (!activeDoc || pageNumber < 1 || pageNumber > activeDoc.totalPages) return;
+  if (activeDoc.totalPages <= 1) {
+    showStatus('El PDF debe conservar al menos una página', 'error');
+    return;
+  }
+  if (!confirm(`¿Eliminar la página ${pageNumber}? Puedes deshacer esta acción.`)) return;
+  const pageOrder = Array.from({ length: activeDoc.totalPages }, (_, index) => index + 1).filter(page => page !== pageNumber);
+  const nextCurrentPage = activeDoc.currentPage === pageNumber
+    ? Math.min(pageNumber, pageOrder.length)
+    : activeDoc.currentPage > pageNumber ? activeDoc.currentPage - 1 : activeDoc.currentPage;
+  await applyPdfPageOrder(pageOrder, nextCurrentPage, `Página ${pageNumber} eliminada`);
+}
+
 // ============================================
 
 function setupSplit() {
