@@ -703,6 +703,8 @@ function getActiveDoc() {
 function createDocState(id) {
   return {
     id: id,
+    draftId: `pdf-draft-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    modified: false,
     pdfJsDoc: null,
     pdfDoc: null,
     pdfBytes: null,
@@ -803,8 +805,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
   
-  // Try to restore auto-saved state after a short delay (wait for PDFs to load)
-  setTimeout(restoreAutoSave, 1500);
+  // Show locally saved drafts for optional recovery after the editor restarts.
+  setTimeout(() => { void loadRecoverableDrafts(); }, 500);
+  setInterval(() => { if (documents.some(doc => doc.modified)) void autoSave(); }, 15000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') void autoSave(); });
   
   // The sidebar is always available; remove preferences from the old collapse control.
   localStorage.removeItem('pe_sidebarCollapsed');
@@ -1153,6 +1157,15 @@ function setupEventListeners() {
   if (btnUndo) btnUndo.addEventListener('click', undo);
   const btnRedo = $('btnRedo');
   if (btnRedo) btnRedo.addEventListener('click', redo);
+  $('btnRecoverDrafts')?.addEventListener('click', async () => {
+    const drafts = (await getPdfDraftRecords()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    renderDraftRecoveryList(drafts);
+    $('draftRecoveryModal')?.classList.add('show');
+  });
+  $('closeDraftRecoveryModal')?.addEventListener('click', () => $('draftRecoveryModal')?.classList.remove('show'));
+  $('draftRecoveryModal')?.addEventListener('click', event => {
+    if (event.target === $('draftRecoveryModal')) $('draftRecoveryModal').classList.remove('show');
+  });
 
   // Multi-select action buttons
   const btnDeleteSelected = $('btnDeleteSelected');
@@ -1554,17 +1567,16 @@ function showUploadArea() {
 }
 
 function updateTabModified(docId, hasChanges) {
+  const doc = documents.find(item => item.id === docId);
+  if (doc) doc.modified = Boolean(hasChanges);
   const tab = document.querySelector(`.doc-tab[data-doc-id="${docId}"]`);
-  if (!tab) return;
-  
-  const nameEl = tab.querySelector('.doc-tab-name');
-  if (!nameEl) return;
-  
-  // Use data attribute instead of fragile string manipulation
-  if (hasChanges) {
-    tab.dataset.modified = 'true';
-  } else {
-    delete tab.dataset.modified;
+  if (tab) {
+    if (hasChanges) tab.dataset.modified = 'true';
+    else delete tab.dataset.modified;
+  }
+  if (hasChanges) scheduleAutoSave();
+  else if (doc?.draftId) {
+    void deletePdfDraftRecord(doc.draftId).then(loadRecoverableDrafts).catch(error => console.warn('No se pudo limpiar el borrador:', error));
   }
 }
 
