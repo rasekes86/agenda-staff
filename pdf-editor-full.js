@@ -4886,6 +4886,88 @@ function applyTemplateVariableFields(container, options = {}) {
   return changed > 0;
 }
 
+async function chooseSignerCaptureTab() {
+  try {
+    const response = await chrome.runtime.sendMessage({ type: 'AGENDA_GET_CAPTURE_TABS' });
+    if (!response?.success) throw new Error(response?.error || 'No se pudieron consultar las pestañas');
+    const tabs = response.tabs || [];
+    if (!tabs.length) {
+      showStatus('Abre primero el correo o documento que contiene los datos.', 'error');
+      return;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay show';
+    overlay.style.zIndex = '10050';
+    const options = tabs.map(tab => `<button type="button" class="sidebar-btn signer-capture-tab" data-tab-id="${Number(tab.id)}" style="width:100%;margin:5px 0;text-align:left;">${escapeHtml(tab.title || tab.url || 'Pestaña')}</button>`).join('');
+    overlay.innerHTML = `<div class="modal" style="max-width:440px;"><h3>Selecciona el correo o documento</h3><p style="font-size:12px;color:#94a3b8;">Después podrás marcar el área que contiene nombres y DNI/NIE.</p><div>${options}</div><div class="modal-actions"><button type="button" class="btn-cancel signer-capture-cancel">Cancelar</button></div></div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('.signer-capture-cancel')?.addEventListener('click', () => overlay.remove());
+    overlay.querySelectorAll('.signer-capture-tab').forEach(button => {
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        try {
+          const requestId = `signer-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          const started = await chrome.runtime.sendMessage({
+            type: 'AGENDA_START_SIGNER_REGION_CAPTURE',
+            tabId: Number(button.dataset.tabId),
+            requestId
+          });
+          if (!started?.success) throw new Error(started?.error || 'No se pudo iniciar la selección');
+          overlay.remove();
+          showStatus('Marca con el ratón el área de los datos. Pulsa Esc para cancelar.', 'success');
+        } catch (error) {
+          button.disabled = false;
+          showStatus(error.message || 'No se pudo iniciar la selección', 'error');
+        }
+      });
+    });
+  } catch (error) {
+    showStatus(error.message || 'No se pudieron consultar las pestañas', 'error');
+  }
+}
+
+async function finishSignerRegionCapture(message) {
+  const input = $('templatePeopleInput');
+  if (!input) {
+    showStatus('Vuelve a abrir “Rellenar listado de personal” para insertar los datos.', 'error');
+    return;
+  }
+
+  let text = String(message.selectedText || '').trim();
+  if (!text && message.dataUrl && typeof TextDetector === 'function') {
+    try {
+      const imageResponse = await fetch(message.dataUrl);
+      const bitmap = await createImageBitmap(await imageResponse.blob());
+      const detections = await new TextDetector().detect(bitmap);
+      text = detections.map(item => item.rawValue || '').filter(Boolean).join('\n').trim();
+      bitmap.close?.();
+    } catch (error) {
+      console.warn('OCR del área seleccionada no disponible:', error);
+    }
+  }
+  if (!text) {
+    showStatus('No se pudo reconocer texto en esa área. Prueba seleccionando texto del correo o un documento con texto legible.', 'error');
+    return;
+  }
+
+  const existing = input.value.trimEnd();
+  input.value = existing ? `${existing}\n${text}` : text;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.focus();
+  showStatus('Texto añadido al listado. Revísalo antes de rellenar la plantilla.', 'success');
+}
+
+chrome.runtime.onMessage.addListener(message => {
+  if (message?.type === 'SIGNER_REGION_TEXT_CAPTURE_RESULT') {
+    finishSignerRegionCapture(message);
+  } else if (message?.type === 'SIGNER_REGION_TEXT_CAPTURE_CANCELLED') {
+    showStatus('Selección cancelada.', 'success');
+  } else if (message?.type === 'SIGNER_REGION_TEXT_CAPTURE_ERROR') {
+    showStatus(message.error || 'Error al seleccionar el área.', 'error');
+  }
+});
+
 function showFillTemplateModal() {
   const modal = $('fillTemplateModal');
   const content = $('fillTemplateContent');
@@ -4911,6 +4993,8 @@ function showFillTemplateModal() {
     <strong>👥 Rellenar listado de personal</strong>
     <p style="font-size:10px;color:#bfdbfe;margin:5px 0 7px;">El DNI/NIE puede ir en la misma línea o justo debajo del nombre.</p>
     <textarea id="templatePeopleInput" rows="6" placeholder="GARCÍA LÓPEZ, ANA&#10;12345678A&#10;PÉREZ MARTÍN, LUIS    87654321B" style="width:100%;padding:7px;background:#0f172a;border:1px solid #3b82f6;border-radius:6px;color:#f1f5f9;resize:vertical;"></textarea>
+    <button class="sidebar-btn capture-signer-region" style="width:100%;margin-top:7px;background:#0f766e;color:white;justify-content:center;">📷 Capturar texto de la pantalla</button>
+    <p style="font-size:10px;color:#bfdbfe;margin:5px 0 7px;">El texto reconocido se añadirá aquí para que lo revises. No se aplicará automáticamente.</p>
     <div class="template-people-modes">
       <button class="sidebar-btn fill-template-people" style="background:#2563eb;color:white;justify-content:center;">📋 Documento colectivo</button>
       <button class="sidebar-btn generate-individual-documents" style="background:#047857;color:white;justify-content:center;">📄 Un PDF por persona</button>
@@ -4927,6 +5011,7 @@ function showFillTemplateModal() {
   content.querySelector('.apply-template-variables')?.addEventListener('click', () => {
     applyTemplateVariableFields(content);
   });
+  content.querySelector('.capture-signer-region')?.addEventListener('click', () => chooseSignerCaptureTab());
   content.querySelector('.fill-template-people')?.addEventListener('click', () => {
     applyTemplateVariableFields(content, { silent: true });
     fillTemplatePeople($('templatePeopleInput')?.value || '');
