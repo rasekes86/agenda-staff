@@ -178,7 +178,7 @@
       .sort((a, b) => a.top - b.top)
       .map(row => row.fragments.sort((a, b) => a.left - b.left).map(item => item.text).join(' ').replace(/\s+/g, ' ').trim())
       .filter(Boolean)
-      .join('\\n')
+      .join('\n')
       .slice(0, 12000);
   }
 
