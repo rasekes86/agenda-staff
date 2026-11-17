@@ -844,6 +844,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setTimeout(() => { void loadRecoverableDrafts(); }, 500);
   setInterval(() => { if (documents.some(doc => doc.modified)) void autoSave(); }, 15000);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') void autoSave(); });
+  window.addEventListener('pagehide', () => { void autoSave(); });
   
   // The sidebar is always available; remove preferences from the old collapse control.
   localStorage.removeItem('pe_sidebarCollapsed');
@@ -5389,9 +5390,12 @@ async function previewTemplatePeople(rawText, mode) {
     if (person.dni && dni[index]) destinations.push(`DNI/NIE · pág. ${dni[index].page}`);
     else if (person.dni) issues.push('sin campo DNI/NIE');
     else issues.push('sin DNI/NIE');
-    if (mode === 'individual') {
-      if (!signatures[index]) issues.push('sin campo de firma');
-      else if (!(matches[index]?.signature?.image_url || matches[index]?.signature?.svg_data)) issues.push('sin firma guardada');
+    if (signatures[index]) {
+      destinations.push(`firma · pág. ${signatures[index].page}`);
+      const hasSignature = Boolean(matches[index]?.signature?.image_url || matches[index]?.signature?.svg_data);
+      if (!hasSignature) issues.push(mode === 'individual' ? 'sin firma guardada' : 'firma pendiente');
+    } else if (groups.FIRMA?.length) {
+      issues.push('sin campo de firma');
     }
     return {
       value: person.name + (person.dni ? ` · ${person.dni}` : ''),
