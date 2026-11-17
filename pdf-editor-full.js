@@ -4933,7 +4933,8 @@ async function chooseSignerCaptureTab() {
 
 function normalizeSignerCaptureText(rawText) {
   const dniPattern = /(?:[0-9]{8}|[XYZ][0-9]{7})[A-Z]/i;
-  const lines = String(rawText || '').split(/\r?\n/).map(line =>
+  const normalizedText = String(rawText || '').replace(/\\r?\\n/g, '\n');
+  const lines = normalizedText.split(/\r?\n/).map(line =>
     line.replace(/([XYZ]?\s*\d(?:[\s.-]*\d){6,7}[\s.-]*[A-Z])/gi, value => value.replace(/[\s.-]+/g, '')).replace(/\s+/g, ' ').trim()
   ).filter(Boolean);
 
