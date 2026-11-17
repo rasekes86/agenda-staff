@@ -52,6 +52,15 @@
       <span class="toolbar-label">Guardar</span>
     </button>
     
+    <button class="toolbar-btn secondary undo-redo-btn" id="btnUndo" disabled title="Deshacer">
+      <span aria-hidden="true">↶</span><span class="toolbar-label">Deshacer</span>
+    </button>
+    <button class="toolbar-btn secondary undo-redo-btn" id="btnRedo" disabled title="Rehacer">
+      <span aria-hidden="true">↷</span><span class="toolbar-label">Rehacer</span>
+    </button>
+    <button class="toolbar-btn secondary recover-drafts-btn" id="btnRecoverDrafts" style="display:none;" title="Recuperar borradores">
+      <span aria-hidden="true">⟲</span><span class="toolbar-label">Borradores</span><span id="recoverDraftCount" class="draft-count">0</span>
+    </button>
     <button class="toolbar-btn secondary" id="btnToggleLightMode" title="Cambiar entre modo oscuro y modo claro">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="12" cy="12" r="5"></circle>
@@ -83,7 +92,6 @@
     <button class="toolbar-btn secondary mobile-only" id="btnMobileLogout" title="Cerrar sesión">Salir</button>
   </header>
   
-  <!-- Undo/Redo removed from UI — Ctrl+Z / Ctrl+Y still work via keyboard -->
   <span id="autoSaveIndicator" class="auto-save-indicator" style="position:fixed;top:68px;right:16px;z-index:200;"></span>
   
   <!-- Document Tabs -->
@@ -744,6 +752,16 @@
       <div class="modal-actions">
         <button class="btn-cancel" id="closeFillTemplateModal">Cerrar</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Recoverable PDF drafts -->
+  <div class="modal-overlay" id="draftRecoveryModal">
+    <div class="modal" style="max-width:560px;">
+      <h3>♻️ Recuperar borradores</h3>
+      <p style="margin-bottom:10px;color:#94a3b8;font-size:12px;">Estos borradores se guardan solo en este navegador. Puedes reabrirlos o eliminarlos.</p>
+      <div id="draftRecoveryList" class="draft-recovery-list"></div>
+      <div class="modal-actions"><button class="btn-cancel" id="closeDraftRecoveryModal">Cerrar</button></div>
     </div>
   </div>
 
