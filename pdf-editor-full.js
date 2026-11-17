@@ -1121,7 +1121,12 @@ function setupEventListeners() {
     button.addEventListener('click', () => beginQuickTemplatePlacement(button.dataset.templateQuickType, button.dataset.templateQuickField));
   });
   $('closeTemplatesModal')?.addEventListener('click', () => $('templatesModal')?.classList.remove('show'));
-  $('closeFillTemplateModal')?.addEventListener('click', () => $('fillTemplateModal')?.classList.remove('show'));
+  $('confirmTemplatePreview')?.addEventListener('click', () => { void confirmTemplateFillPreview(); });
+  $('cancelTemplatePreview')?.addEventListener('click', hideTemplateFillPreview);
+  $('closeFillTemplateModal')?.addEventListener('click', () => {
+    hideTemplateFillPreview();
+    $('fillTemplateModal')?.classList.remove('show');
+  });
   $('templateSearchInput')?.addEventListener('input', () => renderTemplatesList());
   $('btnSaveTemplateCanvas')?.addEventListener('click', confirmSaveTemplate);
   $('btnCancelTemplateCanvas')?.addEventListener('click', cancelTemplateDraft);
@@ -4072,6 +4077,7 @@ let templateEditorActive = false;
 let templateFieldClipboard = [];
 let editingTemplateId = null;
 let editingTemplateFingerprints = [];
+let pendingTemplatePreviewAction = null;
 
 function getTemplateFingerprints(template) {
   const firstSlot = template?.slots?.[0];
@@ -5245,11 +5251,127 @@ chrome.runtime.onMessage.addListener(message => {
   }
 });
 
+function hideTemplateFillPreview() {
+  pendingTemplatePreviewAction = null;
+  const content = $('fillTemplateContent');
+  const preview = $('templateFillPreview');
+  if (content) content.style.display = '';
+  if (preview) preview.style.display = 'none';
+  if ($('cancelTemplatePreview')) $('cancelTemplatePreview').style.display = 'none';
+  if ($('confirmTemplatePreview')) {
+    $('confirmTemplatePreview').style.display = 'none';
+    $('confirmTemplatePreview').disabled = false;
+    $('confirmTemplatePreview').textContent = 'Confirmar';
+  }
+}
+
+function showTemplateFillPreview(title, rows, warnings, confirmLabel, action) {
+  const content = $('fillTemplateContent');
+  const preview = $('templateFillPreview');
+  const confirmButton = $('confirmTemplatePreview');
+  if (!content || !preview || !confirmButton) return;
+  pendingTemplatePreviewAction = action;
+  content.style.display = 'none';
+  preview.style.display = 'block';
+  const warningHtml = warnings.map(warning => `<div class="preview-warning">⚠️ ${escapeHtml(warning)}</div>`).join('');
+  const rowHtml = rows.map(row => `<tr><td>${escapeHtml(row.value)}</td><td>${escapeHtml(row.destination)}</td><td class="${row.ok ? 'preview-ok' : 'preview-missing'}">${escapeHtml(row.status)}</td></tr>`).join('');
+  preview.innerHTML = `<h4>${escapeHtml(title)}</h4>
+    <p class="preview-summary">Comprueba el destino y los campos pendientes. No se aplicará nada hasta confirmar.</p>
+    ${warningHtml}
+    <table class="preview-table"><thead><tr><th>Dato</th><th>Destino</th><th>Estado</th></tr></thead><tbody>${rowHtml || '<tr><td colspan="3">No hay valores para aplicar.</td></tr>'}</tbody></table>`;
+  confirmButton.textContent = confirmLabel;
+  confirmButton.style.display = '';
+  const cancelButton = $('cancelTemplatePreview');
+  if (cancelButton) cancelButton.style.display = '';
+}
+
+function previewTemplateTextGroup(groupName, rawValues) {
+  const values = String(rawValues || '').split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+  if (!values.length) { showStatus('Introduce al menos un valor', 'error'); return; }
+  const slots = getTemplateGroups()[groupName] || [];
+  const rows = values.map((value, index) => {
+    const slot = slots[index];
+    return {
+      value,
+      destination: slot ? `${groupName} · página ${slot.page}` : groupName,
+      status: slot ? 'Se colocará en este campo' : 'No hay campo disponible',
+      ok: Boolean(slot)
+    };
+  });
+  const warnings = [];
+  if (values.length > slots.length) warnings.push(`${values.length - slots.length} valor(es) exceden los ${slots.length} campos disponibles y no se aplicarán.`);
+  if (values.length < slots.length) warnings.push(`Quedarán ${slots.length - values.length} campo(s) de ${groupName} sin rellenar.`);
+  showTemplateFillPreview(`Vista previa · ${groupName}`, rows, warnings, 'Confirmar y rellenar', async () => fillTemplateTextGroup(groupName, rawValues));
+}
+
+async function previewTemplatePeople(rawText, mode) {
+  const people = parseTemplatePeople(rawText);
+  if (!people.length) { showStatus('Pega al menos una persona', 'error'); return; }
+  const groups = getTemplateGroups();
+  const names = groups.NOMBRE || [];
+  const dni = groups.DNI || [];
+  const signatures = groups.FIRMA || [];
+  let matches = [];
+  try { matches = await findSignaturesForPeople(people); }
+  catch (error) { console.warn('No se pudieron comprobar las firmas para la vista previa:', error); }
+  const rows = people.map((person, index) => {
+    const destinations = [];
+    const issues = [];
+    if (names[index]) destinations.push(`nombre · pág. ${names[index].page}`);
+    else issues.push('sin campo de nombre');
+    if (person.dni && dni[index]) destinations.push(`DNI/NIE · pág. ${dni[index].page}`);
+    else if (person.dni) issues.push('sin campo DNI/NIE');
+    else issues.push('sin DNI/NIE');
+    if (mode === 'individual') {
+      if (!signatures[index]) issues.push('sin campo de firma');
+      else if (!(matches[index]?.signature?.image_url || matches[index]?.signature?.svg_data)) issues.push('sin firma guardada');
+    }
+    return {
+      value: person.name + (person.dni ? ` · ${person.dni}` : ''),
+      destination: destinations.join(' / ') || 'Sin destino',
+      status: issues.length ? issues.join(', ') : mode === 'individual' ? 'Listo para PDF individual' : 'Listo',
+      ok: issues.length === 0
+    };
+  });
+  const warnings = [];
+  if (people.length > names.length) warnings.push(`${people.length - names.length} persona(s) exceden los campos de nombre disponibles.`);
+  if (people.filter(person => person.dni).length > dni.length) warnings.push('Hay más DNI/NIE que campos disponibles.');
+  if (mode === 'individual') {
+    const missing = rows.filter(row => row.status.includes('sin firma guardada') || row.status.includes('sin campo de firma')).length;
+    if (missing) warnings.push(`${missing} persona(s) no generarán PDF individual porque falta su firma guardada o un campo de firma.`);
+  }
+  showTemplateFillPreview(
+    mode === 'individual' ? 'Vista previa · PDFs individuales' : 'Vista previa · documento colectivo',
+    rows,
+    warnings,
+    mode === 'individual' ? 'Confirmar y generar PDFs' : 'Confirmar y rellenar',
+    async () => {
+      applyTemplateVariableFields($('fillTemplateContent'), { silent: true });
+      if (mode === 'individual') await generateIndividualTemplatePdfs(rawText);
+      else await fillTemplatePeople(rawText);
+    }
+  );
+}
+
+async function confirmTemplateFillPreview() {
+  const action = pendingTemplatePreviewAction;
+  if (!action) return;
+  const button = $('confirmTemplatePreview');
+  if (button) { button.disabled = true; button.textContent = 'Aplicando…'; }
+  hideTemplateFillPreview();
+  try { await action(); }
+  catch (error) {
+    console.error('Template preview confirmation error:', error);
+    showStatus(error.message || 'No se pudo aplicar la vista previa', 'error');
+  }
+}
+
 function showFillTemplateModal() {
   const modal = $('fillTemplateModal');
   const content = $('fillTemplateContent');
   const groups = getTemplateGroups();
   if (!modal || !content) return;
+  hideTemplateFillPreview();
   const names = Object.keys(groups).sort();
   if (!names.length) { showStatus('No quedan huecos por rellenar', 'error'); return; }
   const cityFields = getTemplateFieldElements('CIUDAD');
@@ -5290,20 +5412,25 @@ function showFillTemplateModal() {
   });
   content.querySelector('.capture-signer-region')?.addEventListener('click', () => chooseSignerCaptureTab());
   content.querySelector('.fill-template-people')?.addEventListener('click', () => {
-    applyTemplateVariableFields(content, { silent: true });
-    fillTemplatePeople($('templatePeopleInput')?.value || '');
+    void previewTemplatePeople($('templatePeopleInput')?.value || '', 'collective');
   });
   content.querySelector('.generate-individual-documents')?.addEventListener('click', () => {
-    applyTemplateVariableFields(content, { silent: true });
-    generateIndividualTemplatePdfs($('templatePeopleInput')?.value || '');
+    void previewTemplatePeople($('templatePeopleInput')?.value || '', 'individual');
   });
   content.querySelectorAll('.fill-template-text').forEach(button => {
     button.onclick = () => {
       const input = content.querySelector(`.fill-template-values[data-group="${CSS.escape(button.dataset.group)}"]`);
-      fillTemplateTextGroup(button.dataset.group, input?.value || '');
+      previewTemplateTextGroup(button.dataset.group, input?.value || '');
     };
   });
-  content.querySelectorAll('.fill-template-date').forEach(button => { button.onclick = () => fillTemplateDateGroup(button.dataset.group); });
+  content.querySelectorAll('.fill-template-date').forEach(button => {
+    button.onclick = () => {
+      const now = new Date();
+      const value = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
+      const slots = getTemplateGroups()[button.dataset.group] || [];
+      previewTemplateTextGroup(button.dataset.group, slots.map(() => value).join('\\n'));
+    };
+  });
   content.querySelectorAll('.fill-template-signature').forEach(button => {
     button.onclick = () => { modal.classList.remove('show'); showSignatureModal(); };
   });
