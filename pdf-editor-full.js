@@ -87,65 +87,82 @@ let undoStacks = {};   // { [docId]: [ { action, page, element, index, prevProps
 let redoStacks = {};   // { [docId]: [ { action, page, element, index, prevProps }, ... ] }
 const MAX_UNDO = 50;
 
+function clonePdfEditorValue(value) {
+  return JSON.parse(JSON.stringify(value ?? null));
+}
+
 function pushUndo(docId, action) {
   if (!undoStacks[docId]) undoStacks[docId] = [];
   if (!redoStacks[docId]) redoStacks[docId] = [];
   undoStacks[docId].push(action);
   if (undoStacks[docId].length > MAX_UNDO) undoStacks[docId].shift();
-  // Clear redo on new action
   redoStacks[docId] = [];
   updateUndoRedoUI();
+  scheduleAutoSave();
 }
 
-function undo() {
+async function undo() {
   const activeDoc = getActiveDoc();
   if (!activeDoc) return;
   const stack = undoStacks[activeDoc.id];
   if (!stack || stack.length === 0) { showStatus('Nada que deshacer', 'error'); return; }
   const action = stack.pop();
-  const redoAction = executeUndoAction(action, activeDoc);
+  const redoAction = await executeUndoAction(action, activeDoc);
   if (!redoStacks[activeDoc.id]) redoStacks[activeDoc.id] = [];
   redoStacks[activeDoc.id].push(redoAction);
   updateTabModified(activeDoc.id, true);
   renderPage();
+  renderPageThumbnails();
   updateUndoRedoUI();
-  autoSave();
+  await autoSave();
   showStatus('Deshacer', 'success');
 }
 
-function redo() {
+async function redo() {
   const activeDoc = getActiveDoc();
   if (!activeDoc) return;
   const stack = redoStacks[activeDoc.id];
   if (!stack || stack.length === 0) { showStatus('Nada que rehacer', 'error'); return; }
   const action = stack.pop();
-  const undoAction = executeUndoAction(action, activeDoc);
+  const undoAction = await executeUndoAction(action, activeDoc);
   if (!undoStacks[activeDoc.id]) undoStacks[activeDoc.id] = [];
   undoStacks[activeDoc.id].push(undoAction);
   updateTabModified(activeDoc.id, true);
   renderPage();
+  renderPageThumbnails();
   updateUndoRedoUI();
-  autoSave();
+  await autoSave();
   showStatus('Rehacer', 'success');
 }
 
-function executeUndoAction(action, activeDoc) {
-  // Returns the inverse action for redo
+async function executeUndoAction(action, activeDoc) {
+  if (action.type === 'documentSnapshot') {
+    const current = {
+      type: 'documentSnapshot',
+      originalPdfBytes: new Uint8Array(activeDoc.originalPdfBytes),
+      elements: clonePdfEditorValue(activeDoc.elements),
+      currentPage: activeDoc.currentPage
+    };
+    await restoreDocumentSnapshot(activeDoc, action);
+    return current;
+  }
+  if (action.type === 'elementsSnapshot') {
+    const current = clonePdfEditorValue(activeDoc.elements);
+    activeDoc.elements = clonePdfEditorValue(action.elements);
+    return { type: 'elementsSnapshot', elements: current };
+  }
+
   const pageElements = activeDoc.elements[action.page] || [];
   switch (action.type) {
     case 'add': {
-      // Undo add = remove the element
-      const el = pageElements[action.index];
       const removed = pageElements.splice(action.index, 1);
       return { type: 'add', page: action.page, index: action.index, element: removed[0] };
     }
     case 'delete': {
-      // Undo delete = re-insert the element
       pageElements.splice(action.index, 0, action.element);
       return { type: 'delete', page: action.page, index: action.index, element: action.element };
     }
     case 'move': {
-      // Undo move = restore previous position
       const el = pageElements[action.index];
       if (el) {
         const prev = { x: el.x, y: el.y };
@@ -156,13 +173,11 @@ function executeUndoAction(action, activeDoc) {
       return action;
     }
     case 'resize': {
-      // Undo resize = restore previous dimensions
       const el = pageElements[action.index];
       if (el) {
         const prev = { ...action.currentProps };
-        if (el.type === 'text') {
-          el.size = action.prevProps.size;
-        } else {
+        if (el.type === 'text') el.size = action.prevProps.size;
+        else {
           el.x = action.prevProps.x;
           el.y = action.prevProps.y;
           el.width = action.prevProps.width;
@@ -173,12 +188,10 @@ function executeUndoAction(action, activeDoc) {
       return action;
     }
     case 'clear': {
-      // Undo clear = restore all elements
-      activeDoc.elements[action.page] = JSON.parse(JSON.stringify(action.elements));
+      activeDoc.elements[action.page] = clonePdfEditorValue(action.elements);
       return { type: 'clear', page: action.page, elements: [] };
     }
     case 'edit': {
-      // Undo edit = restore previous text/size/color
       const el = pageElements[action.index];
       if (el) {
         const prev = { text: el.text, size: el.size, color: el.color };
@@ -190,17 +203,31 @@ function executeUndoAction(action, activeDoc) {
       return action;
     }
     case 'multiMove': {
-      // Undo multi-move = restore all previous positions
-      const movedElements = action.elements;
-      movedElements.forEach(item => {
+      action.elements.forEach(item => {
         const el = pageElements[item.index];
         if (el) { el.x -= item.dx; el.y -= item.dy; }
       });
-      return { type: 'multiMove', page: action.page, elements: movedElements.map(m => ({ index: m.index, dx: -m.dx, dy: -m.dy })) };
+      return { type: 'multiMove', page: action.page, elements: action.elements.map(m => ({ index: m.index, dx: -m.dx, dy: -m.dy })) };
     }
     default:
       return action;
   }
+}
+
+async function restoreDocumentSnapshot(doc, snapshot) {
+  const bytes = new Uint8Array(snapshot.originalPdfBytes);
+  const pdfjsDoc = await window.pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+  doc.originalPdfBytes = bytes;
+  doc.pdfBytes = bytes.slice();
+  doc.pdfJsDoc = pdfjsDoc;
+  doc.pdfDoc = await window.PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true });
+  doc.totalPages = pdfjsDoc.numPages;
+  doc.elements = clonePdfEditorValue(snapshot.elements);
+  doc.currentPage = Math.max(1, Math.min(snapshot.currentPage || 1, doc.totalPages));
+  const firstPage = await pdfjsDoc.getPage(doc.currentPage);
+  const viewport = firstPage.getViewport({ scale: 1 });
+  doc.pageWidth = viewport.width;
+  doc.pageHeight = viewport.height;
 }
 
 function updateUndoRedoUI() {
