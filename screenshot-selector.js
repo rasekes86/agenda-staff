@@ -130,11 +130,39 @@
     selection.style.height = height + 'px';
   }
   
+  function extractTextWithinRect(rect) {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const text = String(node.nodeValue || '').replace(/\\s+/g, ' ').trim();
+        const parent = node.parentElement;
+        if (!text || !parent || parent.closest('#__screenshot_overlay__')) return NodeFilter.FILTER_REJECT;
+        const style = window.getComputedStyle(parent);
+        if (style.display === 'none' || style.visibility === 'hidden') return NodeFilter.FILTER_REJECT;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const intersects = [...range.getClientRects()].some(item =>
+          item.width > 0 && item.height > 0 &&
+          item.right > rect.left && item.left < rect.right &&
+          item.bottom > rect.top && item.top < rect.bottom
+        );
+        return intersects ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      }
+    });
+    const chunks = [];
+    let node;
+    while ((node = walker.nextNode()) && chunks.join(' ').length < 12000) {
+      const text = String(node.nodeValue || '').replace(/\\s+/g, ' ').trim();
+      if (text) chunks.push(text);
+    }
+    return [...new Set(chunks)].join('\\n').slice(0, 12000);
+  }
+
   function handleMouseUp(e) {
     if (!isSelecting || isCapturing) return;
     isSelecting = false;
     
     const rect = selection.getBoundingClientRect();
+    const selectedText = extractTextWithinRect(rect);
     
     // Área mínima
     if (rect.width < MIN_SELECTION_SIZE_PX || rect.height < MIN_SELECTION_SIZE_PX) {
@@ -142,8 +170,8 @@
       return;
     }
     
-    // Capturar la selección
-    captureSelection(rect);
+    // Capturar el área y el texto DOM que intersecta la selección
+    captureSelection(rect, selectedText);
   }
   
   function handleKeyDown(e) {
@@ -158,7 +186,7 @@
     chrome.runtime.sendMessage({ type: 'SCREENSHOT_CANCELLED' });
   }
   
-  async function captureSelection(rect) {
+  async function captureSelection(rect, selectedText) {
     // Prevenir doble captura
     if (isCapturing) return;
     isCapturing = true;
@@ -190,7 +218,8 @@
           width: Math.round(rect.width * dpr),
           height: Math.round(rect.height * dpr),
           dpr: dpr
-        }
+        },
+        selectedText
       });
       
       if (response && response.success) {
