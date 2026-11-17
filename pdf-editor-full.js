@@ -5028,8 +5028,8 @@ async function finishSignerRegionCapture(message) {
     return;
   }
 
-  let text = String(message.selectedText || '').trim();
-  if (!text && message.dataUrl && typeof TextDetector === 'function') {
+  let text = '';
+  if (message.dataUrl && typeof TextDetector === 'function') {
     try {
       const imageResponse = await fetch(message.dataUrl);
       const bitmap = await createImageBitmap(await imageResponse.blob());
@@ -5040,6 +5040,7 @@ async function finishSignerRegionCapture(message) {
       console.warn('OCR del área seleccionada no disponible:', error);
     }
   }
+  if (!text) text = String(message.selectedText || '').trim();
   text = normalizeSignerCaptureText(text);
   if (!text) {
     showStatus('No se detectaron filas completas con nombre y DNI/NIE. Ajusta el área para incluir ambos datos o revisa el texto manualmente.', 'error');
