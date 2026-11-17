@@ -92,6 +92,16 @@ function clonePdfEditorValue(value) {
   return JSON.parse(JSON.stringify(value ?? null));
 }
 
+function clonePdfEditorHistory(stack) {
+  return (stack || []).map(action => {
+    const copy = { ...action };
+    if (action.originalPdfBytes) copy.originalPdfBytes = new Uint8Array(action.originalPdfBytes);
+    if (action.elements) copy.elements = clonePdfEditorValue(action.elements);
+    if (action.element) copy.element = clonePdfEditorValue(action.element);
+    return copy;
+  });
+}
+
 function pushUndo(docId, action) {
   if (!undoStacks[docId]) undoStacks[docId] = [];
   if (!redoStacks[docId]) redoStacks[docId] = [];
@@ -570,8 +580,8 @@ async function persistPdfDraft(doc) {
     pageHeight: doc.pageHeight,
     zoom: doc.zoom,
     activeTemplate: clonePdfEditorValue(doc.activeTemplate),
-    undoStack: clonePdfEditorValue(undoStacks[doc.id] || []),
-    redoStack: clonePdfEditorValue(redoStacks[doc.id] || [])
+    undoStack: clonePdfEditorHistory(undoStacks[doc.id] || []),
+    redoStack: clonePdfEditorHistory(redoStacks[doc.id] || [])
   };
   await savePdfDraftRecord(record);
 }
@@ -676,8 +686,8 @@ async function restorePdfDraft(draftId) {
     doc.activeTemplate = clonePdfEditorValue(record.activeTemplate || null);
     doc.modified = true;
     for (let page = 1; page <= doc.totalPages; page++) if (!doc.elements[page]) doc.elements[page] = [];
-    undoStacks[doc.id] = clonePdfEditorValue(record.undoStack || []);
-    redoStacks[doc.id] = clonePdfEditorValue(record.redoStack || []);
+    undoStacks[doc.id] = clonePdfEditorHistory(record.undoStack || []);
+    redoStacks[doc.id] = clonePdfEditorHistory(record.redoStack || []);
     documents.push(doc);
     createTab(doc);
     updateDocumentTabsVisibility();
