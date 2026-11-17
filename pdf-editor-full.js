@@ -5045,16 +5045,21 @@ async function finishSignerRegionCapture(message) {
     showStatus('No se detectaron filas completas con nombre y DNI/NIE. Ajusta el área para incluir ambos datos o revisa el texto manualmente.', 'error');
     return;
   }
-  const rowKey = value => String(value || '')
-    .replace(/(?:[0-9]{8}|[XYZ][0-9]{7})[A-Z]/ig, '')
-    .replace(/[✓✔☑☒]/g, ' ')
-    .replace(/\bFirma\b/gi, ' ')
-    .replace(/\b\d+\b/g, ' ')
-    .replace(/\s+n$/gi, '')
-    .replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ,.'’\- ]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleUpperCase();
+  const rowKey = value => {
+    const raw = String(value || '');
+    const idMatch = raw.match(/(?:[0-9]{8}|[XYZ][0-9]{7})[A-Z]/i);
+    if (!idMatch) return '';
+    const name = raw.replace(idMatch[0], '')
+      .replace(/[✓✔☑☒]/g, ' ')
+      .replace(/\bFirma\b/gi, ' ')
+      .replace(/\b\d+\b/g, ' ')
+      .replace(/\s+n$/gi, '')
+      .replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ,.'’\- ]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleUpperCase();
+    return name ? name + '|' + idMatch[0].toUpperCase() : '';
+  };
   const existingLines = input.value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   const known = new Set();
   const cleanExisting = [];
