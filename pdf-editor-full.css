@@ -2107,3 +2107,14 @@ body.light-mode .template-fill-preview h4 { color: #0f172a; }
 body.light-mode .template-fill-preview .preview-summary { color: #334155; }
 body.light-mode .template-fill-preview .preview-table th { background: #e2e8f0; color: #0f172a; }
 body.light-mode .template-fill-preview .preview-table td { border-color: #cbd5e1; }
+
+.template-preview-target {
+  outline: 3px solid #f59e0b !important;
+  box-shadow: 0 0 0 6px rgb(245 158 11 / 35%), 0 0 18px rgb(245 158 11 / 75%) !important;
+  z-index: 50 !important;
+}
+.template-preview-location {
+  border: 1px solid #3b82f6; border-radius: 4px; padding: 3px 7px;
+  background: #1d4ed8; color: white; cursor: pointer; font-size: 10px;
+}
+.template-preview-location:hover { background: #2563eb; }
