@@ -133,7 +133,7 @@
   function extractTextWithinRect(rect) {
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
-        const text = String(node.nodeValue || '').replace(/\\s+/g, ' ').trim();
+        const text = String(node.nodeValue || '').replace(/\s+/g, ' ').trim();
         const parent = node.parentElement;
         if (!text || !parent || parent.closest('#__screenshot_overlay__')) return NodeFilter.FILTER_REJECT;
         const style = window.getComputedStyle(parent);
@@ -151,10 +151,10 @@
     const chunks = [];
     let node;
     while ((node = walker.nextNode()) && chunks.join(' ').length < 12000) {
-      const text = String(node.nodeValue || '').replace(/\\s+/g, ' ').trim();
+      const text = String(node.nodeValue || '').replace(/\s+/g, ' ').trim();
       if (text) chunks.push(text);
     }
-    return [...new Set(chunks)].join('\\n').slice(0, 12000);
+    return [...new Set(chunks)].join('\n').slice(0, 12000);
   }
 
   function handleMouseUp(e) {
