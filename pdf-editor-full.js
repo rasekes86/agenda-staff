@@ -86,6 +86,7 @@ let clipboardElements = null;
 let undoStacks = {};   // { [docId]: [ { action, page, element, index, prevProps }, ... ] }
 let redoStacks = {};   // { [docId]: [ { action, page, element, index, prevProps }, ... ] }
 const MAX_UNDO = 50;
+const MAX_UNDO_DOCUMENT_SNAPSHOTS = 5;
 
 function clonePdfEditorValue(value) {
   return JSON.parse(JSON.stringify(value ?? null));
@@ -96,6 +97,11 @@ function pushUndo(docId, action) {
   if (!redoStacks[docId]) redoStacks[docId] = [];
   undoStacks[docId].push(action);
   if (undoStacks[docId].length > MAX_UNDO) undoStacks[docId].shift();
+  while (undoStacks[docId].filter(item => item.type === 'documentSnapshot').length > MAX_UNDO_DOCUMENT_SNAPSHOTS) {
+    const oldestSnapshot = undoStacks[docId].findIndex(item => item.type === 'documentSnapshot');
+    if (oldestSnapshot < 0) break;
+    undoStacks[docId].splice(oldestSnapshot, 1);
+  }
   redoStacks[docId] = [];
   updateUndoRedoUI();
   scheduleAutoSave();
@@ -1482,11 +1488,10 @@ function closeTab(docId) {
   if (idx < 0) return;
   
   const doc = documents[idx];
-  const hasElements = Object.values(doc.elements).some(arr => arr.length > 0);
+  const hasElements = docHasEditableContent(doc);
   
-  if (hasElements && !confirm(`¿Cerrar "${doc.fileName}" sin guardar los cambios?`)) {
-    return;
-  }
+  if (hasElements && !confirm(`¿Cerrar "${doc.fileName}"? El borrador se conservará en este navegador para recuperarlo después.`)) return;
+  if (hasElements || doc.modified) void persistPdfDraft(doc).catch(error => console.warn('No se pudo guardar el borrador antes de cerrar:', error));
   
   documents.splice(idx, 1);
   
@@ -4031,18 +4036,20 @@ async function savePdf() {
 }
 
 function resetDocumentAfterSave(activeDoc) {
+  const filledElements = clonePdfEditorValue(activeDoc.elements);
+  const previousUndoStack = undoStacks[activeDoc.id] || [];
   for (let page = 1; page <= activeDoc.totalPages; page++) activeDoc.elements[page] = [];
-  undoStacks[activeDoc.id] = [];
-  redoStacks[activeDoc.id] = [];
   addedSignaturesCount = 0;
   clearSelection();
 
-  if (activeDoc.activeTemplate) {
-    applyTemplate(activeDoc.activeTemplate, { silent: true });
-  } else {
-    renderPage();
-  }
-  updateTabModified(activeDoc.id, false);
+  if (activeDoc.activeTemplate) applyTemplate(activeDoc.activeTemplate, { silent: true });
+  else renderPage();
+
+  // Saving exports the PDF but leaves the editor ready for the next document.
+  // Keep one undo step so the filled state is still recoverable after export.
+  undoStacks[activeDoc.id] = previousUndoStack;
+  pushUndo(activeDoc.id, { type: 'elementsSnapshot', elements: filledElements });
+  updateTabModified(activeDoc.id, true);
   scheduleAutoSave();
 }
 
@@ -4055,6 +4062,8 @@ function clearEditor() {
   );
   if (hasAnyElements && !confirm('¿Limpiar todos los documentos? Se perderán los cambios no guardados.')) return;
   
+  // Remove recoverable drafts only after the user confirms clearing the workspace.
+  documents.forEach(doc => { if (doc.draftId) void deletePdfDraftRecord(doc.draftId); });
   // Remove all documents at once
   documents.length = 0;
   activeDocIndex = -1;
