@@ -1831,6 +1831,9 @@ function createElementDiv(el, idx, scale, activeDoc) {
   div.className = 'pdf-element pdf-element-' + el.type;
   if (el.isPlaceholder) div.classList.add('pdf-element-placeholder');
   div.dataset.idx = idx;
+  if (templatePreviewTarget?.docId === activeDoc.id && templatePreviewTarget.page === activeDoc.currentPage && templatePreviewTarget.index === idx) {
+    div.classList.add('template-preview-target');
+  }
   div.style.left = (el.x * scale) + 'px';
   div.style.top = (el.y * scale) + 'px';
   
@@ -4099,6 +4102,7 @@ let templateFieldClipboard = [];
 let editingTemplateId = null;
 let editingTemplateFingerprints = [];
 let pendingTemplatePreviewAction = null;
+let templatePreviewTarget = null;
 
 function getTemplateFingerprints(template) {
   const firstSlot = template?.slots?.[0];
@@ -5297,11 +5301,30 @@ function showTemplateFillPreview(title, rows, warnings, confirmLabel, action) {
   content.style.display = 'none';
   preview.style.display = 'block';
   const warningHtml = warnings.map(warning => `<div class="preview-warning">⚠️ ${escapeHtml(warning)}</div>`).join('');
-  const rowHtml = rows.map(row => `<tr><td>${escapeHtml(row.value)}</td><td>${escapeHtml(row.destination)}</td><td class="${row.ok ? 'preview-ok' : 'preview-missing'}">${escapeHtml(row.status)}</td></tr>`).join('');
+  const rowHtml = rows.map(row => `<tr><td>${escapeHtml(row.value)}</td><td>${escapeHtml(row.destination)}</td><td class="${row.ok ? 'preview-ok' : 'preview-missing'}">${escapeHtml(row.status)}</td><td>${row.target ? `<button type="button" class="template-preview-location" data-preview-page="${row.target.page}" data-preview-index="${row.target.index}">Ver</button>` : '—'}</td></tr>`).join('');
   preview.innerHTML = `<h4>${escapeHtml(title)}</h4>
     <p class="preview-summary">Comprueba el destino y los campos pendientes. No se aplicará nada hasta confirmar.</p>
     ${warningHtml}
-    <table class="preview-table"><thead><tr><th>Dato</th><th>Destino</th><th>Estado</th></tr></thead><tbody>${rowHtml || '<tr><td colspan="3">No hay valores para aplicar.</td></tr>'}</tbody></table>`;
+    <table class="preview-table"><thead><tr><th>Dato</th><th>Destino</th><th>Estado</th><th>PDF</th></tr></thead><tbody>${rowHtml || '<tr><td colspan="4">No hay valores para aplicar.</td></tr>'}</tbody></table>`;
+  preview.querySelectorAll('[data-preview-page]').forEach(button => {
+    button.addEventListener('click', () => {
+      const doc = getActiveDoc();
+      if (!doc) return;
+      templatePreviewTarget = { docId: doc.id, page: Number(button.dataset.previewPage), index: Number(button.dataset.previewIndex) };
+      doc.currentPage = templatePreviewTarget.page;
+      $('fillTemplateModal')?.classList.remove('show');
+      void renderPage().then(() => {
+        const target = document.querySelector('.pdf-element.template-preview-target');
+        target?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+        setTimeout(() => {
+          if (templatePreviewTarget?.docId === doc.id) {
+            templatePreviewTarget = null;
+            void renderPage();
+          }
+        }, 3500);
+      });
+    });
+  });
   confirmButton.textContent = confirmLabel;
   confirmButton.style.display = '';
   const cancelButton = $('cancelTemplatePreview');
@@ -5318,6 +5341,7 @@ function previewTemplateTextGroup(groupName, rawValues) {
       value,
       destination: slot ? `${groupName} · página ${slot.page}` : groupName,
       status: slot ? 'Se colocará en este campo' : 'No hay campo disponible',
+      target: slot ? { page: slot.page, index: slot.index } : null,
       ok: Boolean(slot)
     };
   });
@@ -5353,6 +5377,7 @@ async function previewTemplatePeople(rawText, mode) {
       value: person.name + (person.dni ? ` · ${person.dni}` : ''),
       destination: destinations.join(' / ') || 'Sin destino',
       status: issues.length ? issues.join(', ') : mode === 'individual' ? 'Listo para PDF individual' : 'Listo',
+      target: names[index] ? { page: names[index].page, index: names[index].index } : dni[index] ? { page: dni[index].page, index: dni[index].index } : null,
       ok: issues.length === 0
     };
   });
@@ -7478,6 +7503,15 @@ async function applyPdfPageOrder(pageOrder, nextCurrentPage, statusMessage) {
     pageOrder.forEach((sourcePageNumber, index) => {
       remappedElements[index + 1] = clonePdfEditorValue(activeDoc.elements[sourcePageNumber] || []);
     });
+    if (activeDoc.activeTemplate?.slots) {
+      const remappedSlots = [];
+      pageOrder.forEach((sourcePageNumber, index) => {
+        activeDoc.activeTemplate.slots
+          .filter(slot => (slot.page || 1) === sourcePageNumber)
+          .forEach(slot => remappedSlots.push({ ...slot, page: index + 1 }));
+      });
+      activeDoc.activeTemplate = { ...activeDoc.activeTemplate, slots: remappedSlots };
+    }
 
     activeDoc.originalPdfBytes = bytes;
     activeDoc.pdfBytes = bytes.slice();
