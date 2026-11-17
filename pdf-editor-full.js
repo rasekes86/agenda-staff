@@ -707,6 +707,7 @@ async function restorePdfDraft(draftId) {
     documents.push(doc);
     createTab(doc);
     updateDocumentTabsVisibility();
+    updateTabModified(doc.id, true);
     switchToTab(documents.length - 1);
     $('draftRecoveryModal')?.classList.remove('show');
     updateUndoRedoUI();
@@ -4086,10 +4087,9 @@ function clearEditor() {
   // Clear ALL loaded PDFs and return to upload screen
   if (documents.length === 0) return;
   
-  const hasAnyElements = documents.some(doc => 
-    Object.values(doc.elements).some(arr => arr.length > 0)
-  );
-  if (hasAnyElements && !confirm('¿Limpiar todos los documentos? Se perderán los cambios no guardados.')) return;
+  const hasUnsavedChanges = documents.some(doc => doc.modified || docHasEditableContent(doc));
+  if (hasUnsavedChanges && !confirm('¿Limpiar todos los documentos y sus borradores guardados? Se perderán los cambios no guardados.')) return;
+  if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer = null; }
   
   // Remove recoverable drafts only after the user confirms clearing the workspace.
   documents.forEach(doc => { if (doc.draftId) void deletePdfDraftRecord(doc.draftId); });
