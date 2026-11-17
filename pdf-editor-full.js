@@ -123,15 +123,21 @@ async function undo() {
   const stack = undoStacks[activeDoc.id];
   if (!stack || stack.length === 0) { showStatus('Nada que deshacer', 'error'); return; }
   const action = stack.pop();
-  const redoAction = await executeUndoAction(action, activeDoc);
-  if (!redoStacks[activeDoc.id]) redoStacks[activeDoc.id] = [];
-  redoStacks[activeDoc.id].push(redoAction);
-  updateTabModified(activeDoc.id, true);
-  renderPage();
-  renderPageThumbnails();
-  updateUndoRedoUI();
-  await autoSave();
-  showStatus('Deshacer', 'success');
+  try {
+    const redoAction = await executeUndoAction(action, activeDoc);
+    if (!redoStacks[activeDoc.id]) redoStacks[activeDoc.id] = [];
+    redoStacks[activeDoc.id].push(redoAction);
+    updateTabModified(activeDoc.id, true);
+    renderPage();
+    renderPageThumbnails();
+    updateUndoRedoUI();
+    await autoSave();
+    showStatus('Deshacer', 'success');
+  } catch (error) {
+    stack.push(action);
+    console.error('Undo error:', error);
+    showStatus('No se pudo deshacer esta acción', 'error');
+  }
 }
 
 async function redo() {
@@ -140,15 +146,21 @@ async function redo() {
   const stack = redoStacks[activeDoc.id];
   if (!stack || stack.length === 0) { showStatus('Nada que rehacer', 'error'); return; }
   const action = stack.pop();
-  const undoAction = await executeUndoAction(action, activeDoc);
-  if (!undoStacks[activeDoc.id]) undoStacks[activeDoc.id] = [];
-  undoStacks[activeDoc.id].push(undoAction);
-  updateTabModified(activeDoc.id, true);
-  renderPage();
-  renderPageThumbnails();
-  updateUndoRedoUI();
-  await autoSave();
-  showStatus('Rehacer', 'success');
+  try {
+    const undoAction = await executeUndoAction(action, activeDoc);
+    if (!undoStacks[activeDoc.id]) undoStacks[activeDoc.id] = [];
+    undoStacks[activeDoc.id].push(undoAction);
+    updateTabModified(activeDoc.id, true);
+    renderPage();
+    renderPageThumbnails();
+    updateUndoRedoUI();
+    await autoSave();
+    showStatus('Rehacer', 'success');
+  } catch (error) {
+    stack.push(action);
+    console.error('Redo error:', error);
+    showStatus('No se pudo rehacer esta acción', 'error');
+  }
 }
 
 async function executeUndoAction(action, activeDoc) {
@@ -649,9 +661,13 @@ function renderDraftRecoveryList(drafts) {
   });
   list.querySelectorAll('[data-draft-delete]').forEach(button => {
     button.addEventListener('click', async () => {
-      await deletePdfDraftRecord(button.dataset.draftDelete);
-      renderDraftRecoveryList((await getPdfDraftRecords()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)));
-      await loadRecoverableDrafts();
+      const draftId = button.dataset.draftDelete;
+      const openDoc = documents.find(doc => doc.draftId === draftId);
+      if (openDoc) openDoc.draftId = null;
+      await deletePdfDraftRecord(draftId);
+      const drafts = (await getPdfDraftRecords()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      renderDraftRecoveryList(drafts);
+      updateDraftRecoveryButton(drafts);
     });
   });
 }
