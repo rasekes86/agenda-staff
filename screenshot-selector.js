@@ -133,7 +133,7 @@
   function extractTextWithinRect(rect) {
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
-        const text = String(node.nodeValue || '').replace(/\\s+/g, ' ').trim();
+        const text = String(node.nodeValue || '').replace(/\s+/g, ' ').trim();
         const parent = node.parentElement;
         if (!text || !parent || parent.closest('#__screenshot_overlay__')) return NodeFilter.FILTER_REJECT;
         const style = window.getComputedStyle(parent);
@@ -152,7 +152,7 @@
     const fragments = [];
     let node;
     while ((node = walker.nextNode()) && fragments.length < 1200) {
-      const text = String(node.nodeValue || '').replace(/\\s+/g, ' ').trim();
+      const text = String(node.nodeValue || '').replace(/\s+/g, ' ').trim();
       if (!text) continue;
       const range = document.createRange();
       range.selectNodeContents(node);
@@ -176,7 +176,7 @@
     }
     return rows
       .sort((a, b) => a.top - b.top)
-      .map(row => row.fragments.sort((a, b) => a.left - b.left).map(item => item.text).join(' ').replace(/\\s+/g, ' ').trim())
+      .map(row => row.fragments.sort((a, b) => a.left - b.left).map(item => item.text).join(' ').replace(/\s+/g, ' ').trim())
       .filter(Boolean)
       .join('\\n')
       .slice(0, 12000);
