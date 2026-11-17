@@ -87,25 +87,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   
+  if (message.type === 'AGENDA_START_SIGNER_REGION_CAPTURE') {
+    handleStartSignerRegionCapture(message)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+  
   if (message.type === 'CAPTURE_AREA') {
-    captureAndProcessArea(message.rect, sender.tab)
+    captureAndProcessArea(message.rect, sender.tab, message.selectedText)
       .then(result => sendResponse(result))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
   
   if (message.type === 'SCREENSHOT_CANCELLED') {
-    const requestId = screenshotRequestsByTab.get(sender.tab?.id);
+    const request = screenshotRequestsByTab.get(sender.tab?.id);
     screenshotRequestsByTab.delete(sender.tab?.id);
-    notifySidepanel({ type: 'SCREENSHOT_CANCELLED', requestId });
+    if (request?.purpose === 'signer-region') {
+      notifySidepanel({ type: 'SIGNER_REGION_TEXT_CAPTURE_CANCELLED', requestId: request.requestId });
+    } else {
+      notifySidepanel({ type: 'SCREENSHOT_CANCELLED', requestId: typeof request === 'string' ? request : request?.requestId });
+    }
     sendResponse({ success: true });
     return true;
   }
   
   if (message.type === 'SCREENSHOT_ERROR') {
-    const requestId = screenshotRequestsByTab.get(sender.tab?.id);
+    const request = screenshotRequestsByTab.get(sender.tab?.id);
     screenshotRequestsByTab.delete(sender.tab?.id);
-    notifySidepanel({ type: 'SCREENSHOT_ERROR', error: message.error, requestId });
+    if (request?.purpose === 'signer-region') {
+      notifySidepanel({ type: 'SIGNER_REGION_TEXT_CAPTURE_ERROR', error: message.error, requestId: request.requestId });
+    } else {
+      notifySidepanel({ type: 'SCREENSHOT_ERROR', error: message.error, requestId: typeof request === 'string' ? request : request?.requestId });
+    }
     sendResponse({ success: true });
     return true;
   }
@@ -522,9 +537,27 @@ async function handleStartScreenshot(requestId) {
   }
 }
 
-async function captureAndProcessArea(rect, senderTab) {
+async function handleStartSignerRegionCapture(message) {
+  const targetTabId = Number(message.tabId);
+  const requestId = String(message.requestId || '');
+  if (!targetTabId || !requestId) throw new Error('Solicitud de captura incompleta');
+  const targetTab = await chrome.tabs.get(targetTabId);
+  if (!/^(https?|file):/i.test(targetTab?.url || '')) throw new Error('Selecciona una pestaña web o un archivo abierto en Chrome');
+
+  screenshotRequestsByTab.set(targetTabId, { purpose: 'signer-region', requestId });
   try {
-    const requestId = screenshotRequestsByTab.get(senderTab?.id);
+    await chrome.scripting.executeScript({ target: { tabId: targetTabId }, files: ['screenshot-selector.js'] });
+    return { success: true };
+  } catch (error) {
+    screenshotRequestsByTab.delete(targetTabId);
+    throw new Error('No se pudo activar la selección en esa pestaña. Comprueba que sea una página web abierta en Chrome.');
+  }
+}
+
+async function captureAndProcessArea(rect, senderTab, selectedText = '') {
+  try {
+    const request = screenshotRequestsByTab.get(senderTab?.id);
+    const requestId = typeof request === 'string' ? request : request?.requestId;
     const dataUrl = await chrome.tabs.captureVisibleTab(senderTab?.windowId, { format: 'png' });
     
     if (!dataUrl) {
@@ -571,7 +604,16 @@ async function captureAndProcessArea(rect, senderTab) {
     });
     
     screenshotRequestsByTab.delete(senderTab?.id);
-    notifySidepanel({ type: 'SCREENSHOT_RESULT', dataUrl: base64, requestId });
+    if (request?.purpose === 'signer-region') {
+      notifySidepanel({
+        type: 'SIGNER_REGION_TEXT_CAPTURE_RESULT',
+        requestId,
+        selectedText: String(selectedText || ''),
+        dataUrl: base64
+      });
+    } else {
+      notifySidepanel({ type: 'SCREENSHOT_RESULT', dataUrl: base64, requestId });
+    }
     
     return { success: true };
     
