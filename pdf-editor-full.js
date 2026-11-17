@@ -4931,6 +4931,89 @@ async function chooseSignerCaptureTab() {
   }
 }
 
+function normalizeSignerCaptureText(rawText) {
+  const dniPattern = /(?:[0-9]{8}|[XYZ][0-9]{7})[A-Z]/i;
+  const lines = String(rawText || '').split(/\r?\n/).map(line =>
+    line.replace(/([XYZ]?\s*\d(?:[\s.-]*\d){6,7}[\s.-]*[A-Z])/gi, value => value.replace(/[\s.-]+/g, '')).replace(/\s+/g, ' ').trim()
+  ).filter(Boolean);
+
+  // Reunir los fragmentos del DNI que OCR haya separado en líneas distintas.
+  for (let i = 0; i < lines.length - 1;) {
+    const match = lines[i].match(/^(.*?)([XYZ]?\d[\d\s.-]{2,10})$/i);
+    if (!match) { i++; continue; }
+    let idPart = match[2].replace(/[\s.-]+/g, '');
+    let next = i + 1;
+    while (next < lines.length && /^[XYZ0-9]{1,9}$/i.test(lines[next].replace(/\s+/g, '')) && idPart.length < 10) {
+      idPart += lines[next].replace(/\s+/g, '');
+      if (dniPattern.test(idPart)) {
+        lines[i] = match[1].trim() + ' ' + idPart;
+        lines.splice(i + 1, next - i);
+        break;
+      }
+      next++;
+    }
+    if (next >= lines.length || !dniPattern.test(idPart)) i++;
+  }
+
+  // Si el nombre y el DNI ocupan dos líneas, presentarlos juntos.
+  const combined = [];
+  for (const line of lines) {
+    if (dniPattern.test(line)) {
+      const idMatch = line.match(/(?:[0-9]{8}|[XYZ][0-9]{7})[A-Z]/i);
+      const prefix = idMatch ? line.slice(0, idMatch.index).trim() : '';
+      if (!prefix && combined.length && /[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]{2,}/.test(combined[combined.length - 1]) && !dniPattern.test(combined[combined.length - 1])) {
+        combined[combined.length - 1] += ' ' + line;
+      } else {
+        combined.push(line);
+      }
+    } else {
+      combined.push(line);
+    }
+  }
+
+  // El cuadro de firmantes solo necesita las filas que contengan un DNI/NIE.
+  const signerRows = [];
+  for (let i = 0; i < combined.length; i++) {
+    if (!dniPattern.test(combined[i])) continue;
+    const idMatch = combined[i].match(/(?:[0-9]{8}|[XYZ][0-9]{7})[A-Z]/i);
+    const name = idMatch ? combined[i].slice(0, idMatch.index).trim() : '';
+    if (name) {
+      signerRows.push(combined[i]);
+    } else if (i > 0 && /[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]{2,}/.test(combined[i - 1]) && !dniPattern.test(combined[i - 1])) {
+      signerRows.push(combined[i - 1] + ' ' + combined[i]);
+    } else {
+      signerRows.push(combined[i]);
+    }
+  }
+  return [...new Set(signerRows)].join('\n').trim();
+}
+
+function groupOcrDetectionsByRow(detections) {
+  const fragments = detections.map((item, index) => {
+    const box = item.boundingBox || {};
+    const height = Number(box.height) || 12;
+    return {
+      text: String(item.rawValue || '').replace(/\s+/g, ' ').trim(),
+      top: Number.isFinite(Number(box.y)) ? Number(box.y) : index * 100,
+      left: Number(box.x) || 0,
+      height
+    };
+  }).filter(item => item.text).sort((a, b) => a.top - b.top || a.left - b.left);
+  const rows = [];
+  for (const fragment of fragments) {
+    let row = rows.find(item => Math.abs(item.top - fragment.top) <= Math.max(4, Math.min(item.height, fragment.height) * 0.6));
+    if (!row) {
+      row = { top: fragment.top, height: fragment.height, fragments: [] };
+      rows.push(row);
+    }
+    row.fragments.push(fragment);
+  }
+  return rows.sort((a, b) => a.top - b.top)
+    .map(row => row.fragments.sort((a, b) => a.left - b.left).map(item => item.text).join(' ').trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
 async function finishSignerRegionCapture(message) {
   const input = $('templatePeopleInput');
   if (!input) {
@@ -4944,17 +5027,17 @@ async function finishSignerRegionCapture(message) {
       const imageResponse = await fetch(message.dataUrl);
       const bitmap = await createImageBitmap(await imageResponse.blob());
       const detections = await new TextDetector().detect(bitmap);
-      text = detections.map(item => item.rawValue || '').filter(Boolean).join('\n').trim();
+      text = groupOcrDetectionsByRow(detections);
       bitmap.close?.();
     } catch (error) {
       console.warn('OCR del área seleccionada no disponible:', error);
     }
   }
+  text = normalizeSignerCaptureText(text);
   if (!text) {
-    showStatus('No se pudo reconocer texto en esa área. Prueba seleccionando texto del correo o un documento con texto legible.', 'error');
+    showStatus('No se detectaron filas completas con nombre y DNI/NIE. Ajusta el área para incluir ambos datos o revisa el texto manualmente.', 'error');
     return;
   }
-
   const existing = input.value.trimEnd();
   input.value = existing ? `${existing}\n${text}` : text;
   input.dispatchEvent(new Event('input', { bubbles: true }));

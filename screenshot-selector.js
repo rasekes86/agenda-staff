@@ -137,7 +137,7 @@
         const parent = node.parentElement;
         if (!text || !parent || parent.closest('#__screenshot_overlay__')) return NodeFilter.FILTER_REJECT;
         const style = window.getComputedStyle(parent);
-        if (style.display === 'none' || style.visibility === 'hidden') return NodeFilter.FILTER_REJECT;
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return NodeFilter.FILTER_REJECT;
         const range = document.createRange();
         range.selectNodeContents(node);
         const intersects = [...range.getClientRects()].some(item =>
@@ -148,13 +148,38 @@
         return intersects ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
       }
     });
-    const chunks = [];
+
+    const fragments = [];
     let node;
-    while ((node = walker.nextNode()) && chunks.join(' ').length < 12000) {
+    while ((node = walker.nextNode()) && fragments.length < 1200) {
       const text = String(node.nodeValue || '').replace(/\s+/g, ' ').trim();
-      if (text) chunks.push(text);
+      if (!text) continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const box = [...range.getClientRects()].find(item =>
+        item.width > 0 && item.height > 0 &&
+        item.right > rect.left && item.left < rect.right &&
+        item.bottom > rect.top && item.top < rect.bottom
+      );
+      if (box) fragments.push({ text, top: box.top, left: box.left, height: box.height });
     }
-    return [...new Set(chunks)].join('\n').slice(0, 12000);
+
+    fragments.sort((a, b) => a.top - b.top || a.left - b.left);
+    const rows = [];
+    for (const fragment of fragments) {
+      let row = rows.find(item => Math.abs(item.top - fragment.top) <= Math.max(4, Math.min(item.height, fragment.height) * 0.45));
+      if (!row) {
+        row = { top: fragment.top, height: fragment.height, fragments: [] };
+        rows.push(row);
+      }
+      row.fragments.push(fragment);
+    }
+    return rows
+      .sort((a, b) => a.top - b.top)
+      .map(row => row.fragments.sort((a, b) => a.left - b.left).map(item => item.text).join(' ').replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .join('\\n')
+      .slice(0, 12000);
   }
 
   function handleMouseUp(e) {
