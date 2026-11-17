@@ -4963,6 +4963,7 @@ function normalizeSignerCaptureText(rawText) {
       .replace(/\bFirma\b/gi, ' ')
       .replace(/\b\d+\b/g, ' ')
       .replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ,.'’\- ]/g, ' ')
+      .replace(/\s+n$/g, '')
       .replace(/\s+/g, ' ')
       .replace(/^[,.'’\- ]+|[,.'’\- ]+$/g, '')
       .trim();
@@ -5027,8 +5028,8 @@ async function finishSignerRegionCapture(message) {
     return;
   }
 
-  let text = String(message.selectedText || '').trim();
-  if (!text && message.dataUrl && typeof TextDetector === 'function') {
+  let text = '';
+  if (message.dataUrl && typeof TextDetector === 'function') {
     try {
       const imageResponse = await fetch(message.dataUrl);
       const bitmap = await createImageBitmap(await imageResponse.blob());
@@ -5039,16 +5040,49 @@ async function finishSignerRegionCapture(message) {
       console.warn('OCR del área seleccionada no disponible:', error);
     }
   }
+  if (!text) text = String(message.selectedText || '').trim();
   text = normalizeSignerCaptureText(text);
   if (!text) {
     showStatus('No se detectaron filas completas con nombre y DNI/NIE. Ajusta el área para incluir ambos datos o revisa el texto manualmente.', 'error');
     return;
   }
-  const existing = input.value.trimEnd();
-  input.value = existing ? `${existing}\n${text}` : text;
+  const rowKey = value => {
+    const raw = String(value || '');
+    const idMatch = raw.match(/(?:[0-9]{8}|[XYZ][0-9]{7})[A-Z]/i);
+    if (!idMatch) return '';
+    const name = raw.replace(idMatch[0], '')
+      .replace(/[✓✔☑☒]/g, ' ')
+      .replace(/\bFirma\b/gi, ' ')
+      .replace(/\b\d+\b/g, ' ')
+      .replace(/\s+n$/gi, '')
+      .replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ,.'’\- ]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleUpperCase();
+    return name ? name + '|' + idMatch[0].toUpperCase() : '';
+  };
+  const existingLines = input.value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const known = new Set();
+  const cleanExisting = [];
+  for (const line of existingLines) {
+    const key = rowKey(line);
+    if (key && known.has(key)) continue;
+    if (key) known.add(key);
+    cleanExisting.push(line);
+  }
+  const additions = [];
+  for (const line of text.split(/\r?\n/).map(value => value.trim()).filter(Boolean)) {
+    const key = rowKey(line);
+    if (key && known.has(key)) continue;
+    if (key) known.add(key);
+    additions.push(line);
+  }
+  input.value = cleanExisting.concat(additions).join('\n');
   input.dispatchEvent(new Event('input', { bubbles: true }));
   input.focus();
-  showStatus('Texto añadido al listado. Revísalo antes de rellenar la plantilla.', 'success');
+  showStatus(additions.length
+    ? additions.length + ' firmante(s) añadido(s). Revísalos antes de rellenar la plantilla.'
+    : 'Los firmantes capturados ya estaban en el listado.', 'success');
 }
 
 chrome.runtime.onMessage.addListener(message => {
