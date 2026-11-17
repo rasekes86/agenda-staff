@@ -130,8 +130,8 @@ async function undo() {
     if (!redoStacks[activeDoc.id]) redoStacks[activeDoc.id] = [];
     redoStacks[activeDoc.id].push(redoAction);
     updateTabModified(activeDoc.id, true);
-    renderPage();
-    renderPageThumbnails();
+    await renderPage();
+    await renderPageThumbnails();
     updateUndoRedoUI();
     await autoSave();
     showStatus('Deshacer', 'success');
@@ -7548,7 +7548,7 @@ async function applyPdfPageOrder(pageOrder, nextCurrentPage, statusMessage) {
     activeDoc.currentPage = Math.max(1, Math.min(nextCurrentPage || 1, activeDoc.totalPages));
     pushUndo(activeDoc.id, previous);
     updateTabModified(activeDoc.id, true);
-    renderPage();
+    await renderPage();
     await renderPageThumbnails();
     showStatus(statusMessage, 'success');
     scheduleAutoSave();
