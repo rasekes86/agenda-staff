@@ -21,6 +21,260 @@ let calDate = new Date();
 let viewStartDate = new Date();
 const VISIBLE_DAYS = 30;
 
+/* ============================================
+   VACATION LOOKUP
+   ============================================ */
+const VACATION_SHEET_ID = '1A6RVZZFeLsh-KAQzcmruwekxQH35JgUrhKz9JhtV7cs';
+const VACATION_SHEET_GID = '571118126';
+const VACATION_MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+let vacationSearchTimer = null;
+let vacationRequestController = null;
+let vacationSearchSequence = 0;
+
+function normalizeVacationName(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function vacationSearchTokens(value) {
+  return normalizeVacationName(value).split(/\s+/).filter(token => token.length >= 2);
+}
+
+function vacationTokenPattern(token) {
+  const variants = {
+    a: '[aáàâäãå]', e: '[eéèêë]', i: '[iíìîï]', o: '[oóòôöõ]', u: '[uúùûü]', n: '[nñ]'
+  };
+  return Array.from(token).map(char => variants[char] || char).join('');
+}
+
+function vacationWhereClause(value) {
+  const tokens = vacationSearchTokens(value);
+  if (!tokens.length) return '';
+  return tokens.map(token => `lower(C) matches '.*${vacationTokenPattern(token)}.*'`).join(' and ');
+}
+
+function vacationCellText(cell) {
+  if (cell === null || cell === undefined) return '';
+  if (typeof cell === 'object') return String(cell.f ?? cell.v ?? '');
+  return String(cell);
+}
+
+function parseVacationGviz(text) {
+  const open = text.indexOf('(');
+  const close = text.lastIndexOf(')');
+  if (open < 0 || close <= open) throw new Error('La respuesta de Google no es una tabla válida.');
+  const payload = JSON.parse(text.slice(open + 1, close));
+  if (payload.status === 'error' || payload.errors?.length) throw new Error('Google no pudo completar la consulta.');
+  return payload.table?.rows || [];
+}
+
+async function queryVacationSheet(query) {
+  if (vacationRequestController) vacationRequestController.abort();
+  const controller = new AbortController();
+  vacationRequestController = controller;
+  const url = new URL(`https://docs.google.com/spreadsheets/d/${VACATION_SHEET_ID}/gviz/tq`);
+  url.searchParams.set('gid', VACATION_SHEET_GID);
+  url.searchParams.set('tqx', 'out:json');
+  url.searchParams.set('tq', query);
+  let timeoutId;
+  try {
+    timeoutId = setTimeout(() => controller.abort(), 12000);
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      credentials: 'include',
+      cache: 'no-store',
+      signal: controller.signal,
+      headers: { 'Accept': 'application/json, text/javascript' }
+    });
+    if (!response.ok) throw new Error('No se pudo acceder a la hoja.');
+    const responseText = await response.text();
+    if (/^\s*<!doctype html|^\s*<html/i.test(responseText)) {
+      throw new Error('Google no autorizó la lectura. Inicia sesión con una cuenta que tenga acceso a la hoja.');
+    }
+    return parseVacationGviz(responseText);
+  } finally {
+    clearTimeout(timeoutId);
+    if (vacationRequestController === controller) vacationRequestController = null;
+  }
+}
+
+function setVacationFeedback(message, isError = false) {
+  const feedback = $('vacationFeedback');
+  feedback.textContent = message;
+  feedback.classList.toggle('is-error', isError);
+}
+
+function closeVacationModal() {
+  $('vacationModal').classList.remove('show');
+  $('vacationModal').setAttribute('aria-hidden', 'true');
+  clearTimeout(vacationSearchTimer);
+  vacationSearchSequence++;
+  if (vacationRequestController) vacationRequestController.abort();
+}
+
+function openVacationModal() {
+  clearTimeout(vacationSearchTimer);
+  vacationSearchSequence++;
+  if (vacationRequestController) vacationRequestController.abort();
+  const modal = $('vacationModal');
+  modal.classList.add('show');
+  modal.setAttribute('aria-hidden', 'false');
+  $('vacationSearch').value = '';
+  $('vacationSearchResults').replaceChildren();
+  $('vacationDetail').replaceChildren();
+  setVacationFeedback('Escribe al menos 3 letras para buscar.');
+  requestAnimationFrame(() => $('vacationSearch').focus());
+}
+
+function vacationCellValue(row, index) {
+  return row?.c?.[index]?.v ?? null;
+}
+
+function renderVacationPeople(rows, query, sequence) {
+  const resultBox = $('vacationSearchResults');
+  resultBox.replaceChildren();
+  const tokens = vacationSearchTokens(query);
+  const unique = new Map();
+  rows.forEach(row => {
+    const name = vacationCellText(vacationCellValue(row, 0)).trim();
+    const normalized = normalizeVacationName(name);
+    if (!name || !tokens.every(token => normalized.includes(token))) return;
+    if (!unique.has(normalized)) unique.set(normalized, name);
+  });
+  if (!unique.size) {
+    setVacationFeedback('No se encontraron coincidencias. Prueba con otro nombre o apellido.');
+    return;
+  }
+  const names = Array.from(unique.values());
+  setVacationFeedback(names.length >= 20 ? 'Hay varias coincidencias; añade otro apellido para precisar.' : 'Selecciona una persona para ver sus vacaciones.');
+  names.forEach(name => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'vacation-person-option';
+    button.textContent = name;
+    button.addEventListener('click', () => loadVacationDetails(name, sequence));
+    resultBox.appendChild(button);
+  });
+}
+
+function formatVacationDays(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return String(value || '');
+  return new Intl.NumberFormat('es-ES', { maximumFractionDigits: 2 }).format(numeric);
+}
+
+function renderVacationDetails(row, selectedName) {
+  const container = $('vacationDetail');
+  container.replaceChildren();
+  const months = row.c?.slice(1, 13) || [];
+  const taken = months
+    .map((cell, index) => ({ month: VACATION_MONTHS[index], value: cell?.v, formatted: vacationCellText(cell) }))
+    .filter(item => {
+      const value = Number(item.value ?? item.formatted.replace(',', '.'));
+      return Number.isFinite(value) && value > 0;
+    });
+  const totalCell = row.c?.[13];
+  const totalValue = totalCell?.v ?? vacationCellText(totalCell);
+  const totalNumber = totalValue === '' ? NaN : Number(String(totalValue).replace(',', '.'));
+  const total = Number.isFinite(totalNumber) ? totalNumber : taken.reduce((sum, item) => sum + Number(item.value ?? item.formatted.replace(',', '.')), 0);
+  const card = document.createElement('section');
+  card.className = 'vacation-detail-card';
+  const heading = document.createElement('h4');
+  heading.className = 'vacation-detail-name';
+  heading.textContent = selectedName;
+  card.appendChild(heading);
+  const summary = document.createElement('div');
+  summary.className = 'vacation-total';
+  const strong = document.createElement('strong');
+  strong.textContent = formatVacationDays(total);
+  const label = document.createElement('span');
+  label.textContent = 'días disfrutados en 2026';
+  summary.append(strong, label);
+  card.appendChild(summary);
+  if (taken.length) {
+    const monthList = document.createElement('div');
+    monthList.className = 'vacation-month-list';
+    taken.forEach(item => {
+      const pill = document.createElement('span');
+      pill.className = 'vacation-month-pill';
+      pill.textContent = `${item.month}: ${formatVacationDays(item.value ?? item.formatted)}`;
+      monthList.appendChild(pill);
+    });
+    card.appendChild(monthList);
+  } else {
+    const empty = document.createElement('p');
+    empty.className = 'vacation-feedback';
+    empty.textContent = 'No constan días disfrutados en esta hoja.';
+    card.appendChild(empty);
+  }
+  container.appendChild(card);
+}
+
+async function searchVacationPeople(query) {
+  const sequence = ++vacationSearchSequence;
+  const tokens = vacationSearchTokens(query);
+  $('vacationDetail').replaceChildren();
+  if (normalizeVacationName(query).replace(/\s/g, '').length < 3 || !tokens.length) {
+    $('vacationSearchResults').replaceChildren();
+    setVacationFeedback('Escribe al menos 3 letras para buscar.');
+    return;
+  }
+  const where = vacationWhereClause(query);
+  if (!where) return;
+  setVacationFeedback('Buscando en la hoja de vacaciones…');
+  try {
+    const rows = await queryVacationSheet(`select C where ${where} limit 20`);
+    if (sequence !== vacationSearchSequence) return;
+    renderVacationPeople(rows, query, sequence);
+  } catch (error) {
+    if (sequence !== vacationSearchSequence || error.name === 'AbortError') return;
+    $('vacationSearchResults').replaceChildren();
+    const message = error.message || 'No se pudo consultar la hoja.';
+    setVacationFeedback(message, true);
+  }
+}
+
+async function loadVacationDetails(name, searchSequence) {
+  const sequence = ++vacationSearchSequence;
+  const where = vacationWhereClause(name);
+  $('vacationDetail').replaceChildren();
+  setVacationFeedback('Consultando las vacaciones…');
+  try {
+    const rows = await queryVacationSheet(`select C,G,H,I,J,K,L,M,N,O,P,Q,R,S where ${where} limit 20`);
+    if (sequence !== vacationSearchSequence || searchSequence > sequence) return;
+    const normalized = normalizeVacationName(name);
+    const match = rows.find(row => normalizeVacationName(vacationCellText(vacationCellValue(row, 0))) === normalized);
+    if (!match) {
+      setVacationFeedback('No se encontraron los datos de esa persona. Prueba de nuevo.', true);
+      return;
+    }
+    setVacationFeedback('Datos actualizados desde la hoja.');
+    renderVacationDetails(match, vacationCellText(vacationCellValue(match, 0)));
+  } catch (error) {
+    if (sequence !== vacationSearchSequence || error.name === 'AbortError') return;
+    setVacationFeedback(error.message || 'No se pudieron consultar las vacaciones.', true);
+  }
+}
+
+function handleVacationSearchInput() {
+  clearTimeout(vacationSearchTimer);
+  vacationSearchSequence++;
+  if (vacationRequestController) vacationRequestController.abort();
+  $('vacationSearchResults').replaceChildren();
+  $('vacationDetail').replaceChildren();
+  const query = $('vacationSearch').value.trim();
+  if (normalizeVacationName(query).replace(/\s/g, '').length < 3) {
+    setVacationFeedback('Escribe al menos 3 letras para buscar.');
+    return;
+  }
+  vacationSearchTimer = setTimeout(() => searchVacationPeople(query), 350);
+}
+
+
 // Notification settings
 let notificationSettings = {
   enabled: true,
@@ -561,9 +815,15 @@ function setupListeners() {
   // Event delegation for days list (clicks)
   daysList.addEventListener('click', handleDaysClick);
   
-  // Notification settings
-  $('btnSettings').addEventListener('click', () => {
-    $('settingsModal').classList.toggle('show');
+  // Vacation lookup
+  $('btnVacations').addEventListener('click', openVacationModal);
+  $('closeVacationModal').addEventListener('click', closeVacationModal);
+  $('vacationModal').addEventListener('click', event => {
+    if (event.target === $('vacationModal')) closeVacationModal();
+  });
+  $('vacationSearch').addEventListener('input', handleVacationSearchInput);
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && $('vacationModal').classList.contains('show')) closeVacationModal();
   });
   
   $('closeSettings').addEventListener('click', () => {
