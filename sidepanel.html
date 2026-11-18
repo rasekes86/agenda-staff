@@ -111,10 +111,11 @@
             <line x1="3" y1="10" x2="21" y2="10"></line>
           </svg>
         </button>
-        <button class="btn-settings" id="btnSettings" title="Configuración de notificaciones">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
-            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+        <button class="btn-vacations" id="btnVacations" title="Consultar vacaciones (Madrid 2026)" aria-label="Consultar vacaciones">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="17" rx="2"></rect>
+            <path d="M16 2v4M8 2v4M3 10h18"></path>
+            <path d="m12 13 .9 1.8 2 .3-1.45 1.4.34 2-1.79-.95-1.79.95.34-2-1.45-1.4 2-.3z"></path>
           </svg>
         </button>
         <div class="header-spacer"></div>
@@ -228,6 +229,28 @@
             </div>
           </form>
         </div>
+      </div>
+
+      <!-- Vacation Lookup Modal -->
+      <div class="vacation-overlay" id="vacationModal" aria-hidden="true">
+        <section class="vacation-dialog" role="dialog" aria-modal="true" aria-labelledby="vacationTitle">
+          <header class="vacation-header">
+            <div>
+              <h3 id="vacationTitle">🌴 Consultar vacaciones</h3>
+              <p>Personal de Madrid · 2026</p>
+            </div>
+            <button class="vacation-close" id="closeVacationModal" type="button" aria-label="Cerrar">&times;</button>
+          </header>
+          <div class="vacation-content">
+            <label for="vacationSearch">Nombre de la persona</label>
+            <input id="vacationSearch" type="search" autocomplete="off" placeholder="Escribe un nombre o apellido">
+            <p class="vacation-feedback" id="vacationFeedback" role="status" aria-live="polite">Escribe al menos 3 letras para buscar.</p>
+            <div class="vacation-search-results" id="vacationSearchResults"></div>
+            <div class="vacation-detail" id="vacationDetail" aria-live="polite"></div>
+            <a class="vacation-source-link" href="https://docs.google.com/spreadsheets/d/1A6RVZZFeLsh-KAQzcmruwekxQH35JgUrhKz9JhtV7cs/edit?gid=571118126#gid=571118126" target="_blank" rel="noopener noreferrer">Abrir hoja de vacaciones</a>
+            <p class="vacation-note">Necesitas tener abierta en Google una cuenta con acceso a la hoja.</p>
+          </div>
+        </section>
       </div>
 
       <!-- Settings Modal -->
