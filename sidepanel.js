@@ -30,6 +30,10 @@ const VACATION_MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
 let vacationSearchTimer = null;
 let vacationRequestController = null;
 let vacationSearchSequence = 0;
+let vacationRowsCache = null;
+let vacationRowsCacheAt = 0;
+let vacationRowsPromise = null;
+const VACATION_ROWS_CACHE_MS = 2 * 60 * 1000;
 
 function normalizeVacationName(value) {
   return String(value || '')
@@ -77,7 +81,13 @@ function parseVacationGviz(text) {
   const close = text.lastIndexOf(')');
   if (open < 0 || close <= open) throw new Error('La respuesta de Google no es una tabla válida.');
   const payload = JSON.parse(text.slice(open + 1, close));
-  if (payload.status === 'error' || payload.errors?.length) throw new Error('Google no pudo completar la consulta.');
+  if (payload.status === 'error' || payload.errors?.length) {
+    const detail = (payload.errors || [])
+      .map(error => error.detailed_message || error.message)
+      .filter(Boolean)
+      .join(' ');
+    throw new Error(detail ? `Google no pudo completar la consulta: ${detail}` : 'Google no pudo completar la consulta.');
+  }
   return payload.table?.rows || [];
 }
 
@@ -200,6 +210,24 @@ function renderVacationDetails(row, selectedName) {
   container.appendChild(card);
 }
 
+async function loadVacationRows() {
+  if (vacationRowsCache && Date.now() - vacationRowsCacheAt < VACATION_ROWS_CACHE_MS) {
+    return vacationRowsCache;
+  }
+  if (vacationRowsPromise) return vacationRowsPromise;
+  const pending = queryVacationSheet('select C,T')
+    .then(rows => {
+      vacationRowsCache = rows;
+      vacationRowsCacheAt = Date.now();
+      return rows;
+    })
+    .finally(() => {
+      if (vacationRowsPromise === pending) vacationRowsPromise = null;
+    });
+  vacationRowsPromise = pending;
+  return pending;
+}
+
 async function searchVacationPeople(query) {
   const sequence = ++vacationSearchSequence;
   const tokens = vacationSearchTokens(query);
@@ -209,11 +237,9 @@ async function searchVacationPeople(query) {
     setVacationFeedback('Escribe al menos 3 letras para buscar.');
     return;
   }
-  const where = vacationWhereClause(query);
-  if (!where) return;
   setVacationFeedback('Buscando en la hoja de vacaciones…');
   try {
-    const rows = await queryVacationSheet(`select C where ${where} limit 20`);
+    const rows = await loadVacationRows();
     if (sequence !== vacationSearchSequence) return;
     renderVacationPeople(rows, query, sequence);
   } catch (error) {
@@ -226,11 +252,10 @@ async function searchVacationPeople(query) {
 
 async function loadVacationDetails(name, searchSequence) {
   const sequence = ++vacationSearchSequence;
-  const where = vacationWhereClause(name);
   $('vacationDetail').replaceChildren();
   setVacationFeedback('Consultando las vacaciones…');
   try {
-    const rows = await queryVacationSheet(`select C,T where ${where} limit 20`);
+    const rows = await loadVacationRows();
     if (sequence !== vacationSearchSequence || searchSequence > sequence) return;
     const normalized = normalizeVacationName(name);
     const match = rows.find(row => normalizeVacationName(vacationCellText(vacationCellValue(row, 0))) === normalized);
