@@ -76,45 +76,66 @@ function vacationCellText(cell) {
   return String(cell);
 }
 
-function parseVacationGviz(text) {
-  const open = text.indexOf('(');
-  const close = text.lastIndexOf(')');
-  if (open < 0 || close <= open) throw new Error('La respuesta de Google no es una tabla válida.');
-  const payload = JSON.parse(text.slice(open + 1, close));
-  if (payload.status === 'error' || payload.errors?.length) {
-    const detail = (payload.errors || [])
-      .map(error => error.detailed_message || error.message)
-      .filter(Boolean)
-      .join(' ');
-    throw new Error(detail ? `Google no pudo completar la consulta: ${detail}` : 'Google no pudo completar la consulta.');
+async function getVacationAccessToken(interactive = true) {
+  if (!chrome.identity?.getAuthToken) {
+    throw new Error('La autorización de Google no está disponible. Actualiza la extensión y vuelve a intentarlo.');
   }
-  return payload.table?.rows || [];
+  try {
+    const result = await chrome.identity.getAuthToken({ interactive });
+    const token = typeof result === 'string' ? result : result?.token;
+    if (!token) throw new Error('Google no devolvió una autorización válida.');
+    return token;
+  } catch (error) {
+    if (!interactive) throw error;
+    const detail = String(error?.message || '');
+    if (/access_denied|user.?denied|cancel/i.test(detail)) {
+      throw new Error('No se autorizó el acceso a la hoja de vacaciones.');
+    }
+    throw new Error('Google no pudo autorizar el acceso. Comprueba que has iniciado sesión con la cuenta que puede abrir la hoja y acepta el permiso de lectura.');
+  }
 }
 
-async function queryVacationSheet(query) {
+async function queryVacationSheet() {
   if (vacationRequestController) vacationRequestController.abort();
   const controller = new AbortController();
   vacationRequestController = controller;
-  const url = new URL(`https://docs.google.com/spreadsheets/d/${VACATION_SHEET_ID}/gviz/tq`);
-  url.searchParams.set('gid', VACATION_SHEET_GID);
-  url.searchParams.set('tqx', 'out:json');
-  url.searchParams.set('tq', query);
   let timeoutId;
   try {
-    timeoutId = setTimeout(() => controller.abort(), 12000);
+    timeoutId = setTimeout(() => controller.abort(), 20000);
+    const token = await getVacationAccessToken(true);
+    const url = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${VACATION_SHEET_ID}/values:batchGet`);
+    url.searchParams.append('ranges', "'VACACIONES MAD 2026'!C:C");
+    url.searchParams.append('ranges', "'VACACIONES MAD 2026'!T:T");
+    url.searchParams.set('majorDimension', 'ROWS');
     const response = await fetch(url.toString(), {
       method: 'GET',
-      credentials: 'include',
       cache: 'no-store',
       signal: controller.signal,
-      headers: { 'Accept': 'application/json, text/javascript' }
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': `Bearer ${token}`
+      }
     });
-    if (!response.ok) throw new Error('No se pudo acceder a la hoja.');
-    const responseText = await response.text();
-    if (/^\s*<!doctype html|^\s*<html/i.test(responseText)) {
-      throw new Error('Google no autorizó la lectura. Inicia sesión con una cuenta que tenga acceso a la hoja.');
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = payload.error?.message || '';
+      if (response.status === 401) {
+        await chrome.identity.removeCachedAuthToken?.({ token }).catch(() => {});
+      }
+      throw new Error(detail
+        ? `Google no pudo consultar la hoja: ${detail}`
+        : 'No se pudo acceder a la hoja. Comprueba el permiso de lectura y el acceso a la pestaña de vacaciones.');
     }
-    return parseVacationGviz(responseText);
+    const columns = payload.valueRanges || [];
+    const names = columns[0]?.values || [];
+    const totals = columns[1]?.values || [];
+    const length = Math.max(names.length, totals.length);
+    return Array.from({ length }, (_, index) => ({
+      c: [
+        { v: names[index]?.[0] ?? '' },
+        { v: totals[index]?.[0] ?? '' }
+      ]
+    }));
   } finally {
     clearTimeout(timeoutId);
     if (vacationRequestController === controller) vacationRequestController = null;
@@ -215,7 +236,7 @@ async function loadVacationRows() {
     return vacationRowsCache;
   }
   if (vacationRowsPromise) return vacationRowsPromise;
-  const pending = queryVacationSheet('select C,T')
+  const pending = queryVacationSheet()
     .then(rows => {
       vacationRowsCache = rows;
       vacationRowsCacheAt = Date.now();

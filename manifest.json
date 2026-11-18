@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "AGENDA STAFF",
-  "version": "5.16.2",
-  "version_name": "5.16.2",
+  "version": "5.16.3",
+  "version_name": "5.16.3",
   "description": "Agenda colaborativa con autenticación, notificaciones, herramientas PDF, firmas y consulta de vacaciones",
   "permissions": [
     "sidePanel",
@@ -11,7 +11,8 @@
     "activeTab",
     "scripting",
     "notifications",
-    "offscreen"
+    "offscreen",
+    "identity"
   ],
   "host_permissions": [
     "https://iugutcsukxkxlgpkmzxt.supabase.co/*",
@@ -78,5 +79,11 @@
         "<all_urls>"
       ]
     }
-  ]
+  ],
+  "oauth2": {
+    "client_id": "431761556522-cq9ojt2u45h23ik6ct0bsij7e2hkt5kk.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/spreadsheets.readonly"
+    ]
+  }
 }
