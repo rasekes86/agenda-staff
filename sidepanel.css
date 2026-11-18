@@ -4712,11 +4712,6 @@ body {
 .vacation-total { display: flex; align-items: baseline; gap: 6px; margin-bottom: 10px; }
 .vacation-total strong { color: var(--pri); font-size: 21px; }
 .vacation-total span { color: var(--txt2); font-size: 12px; }
-.vacation-month-list { display: flex; flex-wrap: wrap; gap: 6px; }
-.vacation-month-pill { padding: 5px 8px; border-radius: 999px; background: rgba(59, 130, 246, .12); color: var(--pri-h); font-size: 11px; }
-@media (prefers-color-scheme: dark) {
-  .vacation-month-pill { color: #93c5fd; }
-}
 .vacation-source-link { display: inline-block; margin-top: 15px; color: var(--pri); font-size: 12px; text-decoration: none; }
 .vacation-source-link:hover { text-decoration: underline; }
 .vacation-note { margin-top: 5px; color: var(--txt3); font-size: 11px; }
