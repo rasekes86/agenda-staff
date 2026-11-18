@@ -64,7 +64,7 @@ La extensión puede acceder a la imagen visible de una pestaña únicamente cuan
 
 ### 2.7. Consulta de vacaciones
 
-Cuando el usuario busca a una persona en la consulta de vacaciones, la extensión envía el nombre escrito a Google Sheets y solicita únicamente los nombres coincidentes. Los días disfrutados por mes se consultan cuando el usuario selecciona una persona.
+Cuando el usuario busca a una persona en la consulta de vacaciones, la extensión envía el nombre escrito a Google Sheets y solicita únicamente los nombres coincidentes. El valor de pendientes totales de la columna T se consulta cuando el usuario selecciona una persona.
 
 - La consulta se realiza bajo demanda desde el navegador y requiere una cuenta de Google con acceso a la hoja.
 - Los resultados se muestran en la extensión y no se guardan en el almacenamiento local ni se sincronizan con Supabase.
@@ -119,7 +119,7 @@ Determinados datos operativos, especialmente firmas y plantillas compartidas, pu
 
 ### 5.4. Google Sheets
 
-La consulta de vacaciones utiliza Google Sheets para buscar nombres y recuperar los datos mensuales de la persona seleccionada. La petición se realiza con la sesión de Google activa en el navegador. Google aplica los permisos que ya tenga esa cuenta sobre la hoja. La extensión no conserva una copia de la hoja ni almacena los resultados.
+La consulta de vacaciones utiliza Google Sheets para buscar nombres y recuperar el valor de pendientes totales de la columna T para la persona seleccionada. La petición se realiza con la sesión de Google activa en el navegador. Google aplica los permisos que ya tenga esa cuenta sobre la hoja. La extensión no conserva una copia de la hoja ni almacena los resultados.
 
 ## 6. Permisos del navegador
 
