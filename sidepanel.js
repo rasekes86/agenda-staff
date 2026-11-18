@@ -170,17 +170,10 @@ function formatVacationDays(value) {
 function renderVacationDetails(row, selectedName) {
   const container = $('vacationDetail');
   container.replaceChildren();
-  const months = row.c?.slice(1, 13) || [];
-  const taken = months
-    .map((cell, index) => ({ month: VACATION_MONTHS[index], value: cell?.v, formatted: vacationCellText(cell) }))
-    .filter(item => {
-      const value = Number(item.value ?? item.formatted.replace(',', '.'));
-      return Number.isFinite(value) && value > 0;
-    });
-  const totalCell = row.c?.[13];
-  const totalValue = totalCell?.v ?? vacationCellText(totalCell);
-  const totalNumber = totalValue === '' ? NaN : Number(String(totalValue).replace(',', '.'));
-  const total = Number.isFinite(totalNumber) ? totalNumber : taken.reduce((sum, item) => sum + Number(item.value ?? item.formatted.replace(',', '.')), 0);
+  const valueCell = row.c?.[1];
+  const rawValue = valueCell?.v ?? vacationCellText(valueCell);
+  const number = Number(String(rawValue).replace(',', '.'));
+  const displayValue = rawValue === '' ? '—' : (Number.isFinite(number) ? formatVacationDays(number) : String(rawValue));
   const card = document.createElement('section');
   card.className = 'vacation-detail-card';
   const heading = document.createElement('h4');
@@ -190,27 +183,11 @@ function renderVacationDetails(row, selectedName) {
   const summary = document.createElement('div');
   summary.className = 'vacation-total';
   const strong = document.createElement('strong');
-  strong.textContent = formatVacationDays(total);
+  strong.textContent = displayValue;
   const label = document.createElement('span');
-  label.textContent = 'días disfrutados en 2026';
+  label.textContent = 'días pendientes totales (2025 y 2026)';
   summary.append(strong, label);
   card.appendChild(summary);
-  if (taken.length) {
-    const monthList = document.createElement('div');
-    monthList.className = 'vacation-month-list';
-    taken.forEach(item => {
-      const pill = document.createElement('span');
-      pill.className = 'vacation-month-pill';
-      pill.textContent = `${item.month}: ${formatVacationDays(item.value ?? item.formatted)}`;
-      monthList.appendChild(pill);
-    });
-    card.appendChild(monthList);
-  } else {
-    const empty = document.createElement('p');
-    empty.className = 'vacation-feedback';
-    empty.textContent = 'No constan días disfrutados en esta hoja.';
-    card.appendChild(empty);
-  }
   container.appendChild(card);
 }
 
@@ -244,7 +221,7 @@ async function loadVacationDetails(name, searchSequence) {
   $('vacationDetail').replaceChildren();
   setVacationFeedback('Consultando las vacaciones…');
   try {
-    const rows = await queryVacationSheet(`select C,G,H,I,J,K,L,M,N,O,P,Q,R,S where ${where} limit 20`);
+    const rows = await queryVacationSheet(`select C,T where ${where} limit 20`);
     if (sequence !== vacationSearchSequence || searchSequence > sequence) return;
     const normalized = normalizeVacationName(name);
     const match = rows.find(row => normalizeVacationName(vacationCellText(vacationCellValue(row, 0))) === normalized);
