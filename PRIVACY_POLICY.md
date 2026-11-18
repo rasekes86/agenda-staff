@@ -1,6 +1,6 @@
 # Política de Privacidad de AGENDA STAFF
 
-**Última actualización:** 30 de septiembre de 2026
+**Última actualización:** 18 de noviembre de 2026
 
 AGENDA STAFF es una extensión de Chrome destinada a facilitar la gestión operativa de personal, la organización de eventos y recordatorios, la gestión de firmas autorizadas y la preparación, cumplimentación y exportación de documentos PDF.
 
@@ -62,6 +62,14 @@ Cuando el usuario utiliza Gmail, AGENDA STAFF puede analizar localmente el conte
 
 La extensión puede acceder a la imagen visible de una pestaña únicamente cuando el usuario inicia expresamente una captura o selecciona una pestaña para recortar una firma. La imagen seleccionada se utiliza para completar la acción solicitada y no para supervisar la navegación.
 
+### 2.7. Consulta de vacaciones
+
+Cuando el usuario busca a una persona en la consulta de vacaciones, la extensión envía el nombre escrito a Google Sheets y solicita únicamente los nombres coincidentes. El valor de pendientes totales de la columna T se consulta cuando el usuario selecciona una persona.
+
+- La consulta se realiza bajo demanda desde el navegador y requiere una cuenta de Google con acceso a la hoja.
+- Los resultados se muestran en la extensión y no se guardan en el almacenamiento local ni se sincronizan con Supabase.
+- La extensión consulta la pestaña de Madrid 2026 indicada en la interfaz.
+
 ## 3. Finalidades del tratamiento
 
 La información se utiliza exclusivamente para:
@@ -108,6 +116,10 @@ Supabase actúa como proveedor técnico de infraestructura. Sus prácticas de pr
 ### 5.3. Usuarios autorizados
 
 Determinados datos operativos, especialmente firmas y plantillas compartidas, pueden estar disponibles para otros usuarios autorizados de AGENDA STAFF dentro de la organización. Los usuarios deben disponer de autorización para incorporar y utilizar datos de terceros.
+
+### 5.4. Google Sheets
+
+La consulta de vacaciones utiliza Google Sheets para buscar nombres y recuperar el valor de pendientes totales de la columna T para la persona seleccionada. La petición se realiza con la sesión de Google activa en el navegador. Google aplica los permisos que ya tenga esa cuenta sobre la hoja. La extensión no conserva una copia de la hoja ni almacena los resultados.
 
 ## 6. Permisos del navegador
 
