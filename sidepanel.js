@@ -44,17 +44,26 @@ function vacationSearchTokens(value) {
   return normalizeVacationName(value).split(/\s+/).filter(token => token.length >= 2);
 }
 
-function vacationTokenPattern(token) {
-  const variants = {
-    a: '[aáàâäãå]', e: '[eéèêë]', i: '[iíìîï]', o: '[oóòôöõ]', u: '[uúùûü]', n: '[nñ]'
+function vacationTokenVariants(token) {
+  const variantsByCharacter = {
+    a: ['a', 'á'], e: ['e', 'é'], i: ['i', 'í'], o: ['o', 'ó'], u: ['u', 'ú'], n: ['n', 'ñ']
   };
-  return Array.from(token).map(char => variants[char] || char).join('');
+  let variants = [''];
+  for (const character of token) {
+    const choices = variantsByCharacter[character] || [character];
+    variants = variants.flatMap(prefix => choices.map(choice => prefix + choice)).slice(0, 32);
+  }
+  return variants;
 }
 
 function vacationWhereClause(value) {
   const tokens = vacationSearchTokens(value);
   if (!tokens.length) return '';
-  return tokens.map(token => `lower(C) matches '.*${vacationTokenPattern(token)}.*'`).join(' and ');
+  return tokens.map(token => {
+    const options = vacationTokenVariants(token)
+      .map(variant => `lower(C) contains '${variant}'`);
+    return options.length === 1 ? options[0] : `(${options.join(' or ')})`;
+  }).join(' and ');
 }
 
 function vacationCellText(cell) {
