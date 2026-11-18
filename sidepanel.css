@@ -4616,6 +4616,7 @@ body {
   color: var(--txt2);
   border-radius: 6px;
   cursor: pointer;
+  font-size: 17px;
 }
 
 .btn-vacations:hover,
