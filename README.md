@@ -9,6 +9,7 @@ Esta extensión de Chrome proporciona un calendario colaborativo que aparece com
 - **Barra lateral integrada**: El calendario aparece en el lado derecho del navegador
 - **Sincronización en tiempo real**: Todos los usuarios ven los mismos eventos
 - **Interfaz sencilla**: Fácil de usar para añadir y eliminar eventos
+- **Consulta de vacaciones**: Busca personal por nombre y consulta los días disfrutados por mes en la hoja de Madrid 2026
 - **Colores personalizables**: Cada evento puede tener un color diferente
 - **Indicador de conexión**: Muestra el estado de sincronización
 - **Modo oscuro**: Se adapta automáticamente al tema del sistema
