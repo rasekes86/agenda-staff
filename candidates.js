@@ -40,6 +40,7 @@ function paramsForExport() {
     job: $('job').value.trim(),
     province: $('provinceFilter').value,
     page: String(state.page),
+    excludeExported: $('excludeExported').checked ? '1' : '0',
   });
   return params;
 }
@@ -151,6 +152,8 @@ async function downloadExcel(event) {
       search: $('search').value.trim(),
       job: $('job').value.trim(),
       provinceFilter: $('provinceFilter').value,
+      excludeExported: $('excludeExported').checked,
+      sample: Number($('exportLimit').value),
       province,
       observations,
       tags,
@@ -188,5 +191,5 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('cancelExport').addEventListener('click', () => $('exportDialog').close());
   $('exportProvince').addEventListener('input', updateFilename);
   $('exportTags').addEventListener('input', updateFilename);
+  $('excludeExported').addEventListener('change', () => { state.page = 1; void searchCandidates(); });
 });
-
