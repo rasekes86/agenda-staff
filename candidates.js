@@ -169,6 +169,7 @@ async function downloadExcel(event) {
     setTimeout(() => URL.revokeObjectURL(href), 2000);
     $('exportDialog').close();
     setStatus(`${count.toLocaleString('es-ES')} candidatos exportados y marcados como utilizados.`, 'success');
+    state.busy = false;
     await searchCandidates();
   } catch (error) {
     setStatus(error instanceof Error ? error.message : 'No se pudo generar el Excel.', 'error');
@@ -193,3 +194,4 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('exportTags').addEventListener('input', updateFilename);
   $('excludeExported').addEventListener('change', () => { state.page = 1; void searchCandidates(); });
 });
+
