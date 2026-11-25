@@ -15,11 +15,12 @@
     </header>
 
     <section class="card search-card">
-      <div class="section-heading"><div><h2>Buscar</h2><p>Filtra la base de datos y exporta todos los resultados coincidentes.</p></div><span class="secure-badge">Acceso autorizado</span></div>
+      <div class="section-heading"><div><h2>Buscar</h2><p>Filtra la base de datos y exporta resultados que cumplan tus condiciones.</p></div><span class="secure-badge">Acceso autorizado</span></div>
       <form id="searchForm" class="filters">
         <label class="wide">Nombre, teléfono o email<input id="search" type="search" placeholder="Ej.: María García o 600 123 456"></label>
         <label>Oferta / puesto<input id="job" type="search" placeholder="Ej.: Promotor/a"></label>
         <label>Provincia de búsqueda<select id="provinceFilter"><option value="">Todas las provincias</option></select></label>
+        <label class="check-filter"><input id="excludeExported" type="checkbox"> Solo no exportados</label>
         <div class="actions"><button class="primary" id="searchButton" type="submit">Buscar</button><button class="secondary" id="clearButton" type="button">Limpiar</button></div>
       </form>
       <div id="status" class="status" role="status">Inicia sesión en Agenda Staff para buscar candidatos.</div>
@@ -38,10 +39,10 @@
       <label>Provincia<input id="exportProvince" required placeholder="Ej.: Zaragoza"></label>
       <label>Observaciones<textarea id="exportObservations" rows="3" placeholder="Observación común"></textarea></label>
       <label>Tags<input id="exportTags" placeholder="Ej.: IMAGEN"></label>
+      <label>Cantidad máxima de candidatos<input id="exportLimit" type="number" min="50" max="10000" step="50" value="50" required><small>Se eligen al azar en bloques de 50, respetando los filtros. Si hay menos, se exportan los disponibles.</small></label>
       <p class="filename" id="filenamePreview">Nombre: bbdd_provincia.xlsx</p>
       <div class="dialog-actions"><button class="secondary" id="cancelExport" type="button">Cancelar</button><button class="primary" id="confirmExport" type="submit">Descargar Excel</button></div>
     </form>
   </dialog>
 </body>
 </html>
-
