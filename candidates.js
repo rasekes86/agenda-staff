@@ -38,7 +38,7 @@ function fillProvinces() {
 function paramsForExport() {
   const params = new URLSearchParams({
     search: $('search').value.trim(),
-    job: $('job').value.trim(),
+    jobExperience: $('job').value.trim(),
     province: $('provinceFilter').value,
     page: String(state.page),
     excludeExported: $('excludeExported').checked ? '1' : '0',
