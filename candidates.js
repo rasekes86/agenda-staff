@@ -3,6 +3,7 @@ const PROVINCES = [
   ['01','Álava'],['02','Albacete'],['03','Alicante'],['04','Almería'],['05','Ávila'],['06','Badajoz'],['07','Illes Balears'],['08','Barcelona'],['09','Burgos'],['10','Cáceres'],['11','Cádiz'],['12','Castellón'],['13','Ciudad Real'],['14','Córdoba'],['15','A Coruña'],['16','Cuenca'],['17','Girona'],['18','Granada'],['19','Guadalajara'],['20','Gipuzkoa'],['21','Huelva'],['22','Huesca'],['23','Jaén'],['24','León'],['25','Lleida'],['26','La Rioja'],['27','Lugo'],['28','Madrid'],['29','Málaga'],['30','Murcia'],['31','Navarra'],['32','Ourense'],['33','Asturias'],['34','Palencia'],['35','Las Palmas'],['36','Pontevedra'],['37','Salamanca'],['38','Santa Cruz de Tenerife'],['39','Cantabria'],['40','Segovia'],['41','Sevilla'],['42','Soria'],['43','Tarragona'],['44','Teruel'],['45','Toledo'],['46','Valencia'],['47','Valladolid'],['48','Bizkaia'],['49','Zamora'],['50','Zaragoza'],['51','Ceuta'],['52','Melilla']
 ];
 const state = { token: null, page: 1, total: 0, pages: 1, candidates: [], busy: false };
+let activeCvObjectUrl = null;
 const $ = (id) => document.getElementById(id);
 
 function setStatus(message, kind = '') {
@@ -103,7 +104,7 @@ function renderResults() {
   if (!state.candidates.length) {
     const row = document.createElement('tr');
     const cell = document.createElement('td');
-    cell.colSpan = 5;
+    cell.colSpan = 6;
     cell.className = 'empty';
     cell.textContent = 'No hay candidatos en esta página.';
     row.append(cell);
@@ -121,9 +122,58 @@ function renderResults() {
       if (muted) cell.className = 'muted';
       row.append(cell);
     }
+    const cvCell = document.createElement('td');
+    if (candidate.cvPdfLink) {
+      const preview = document.createElement('button');
+      preview.type = 'button';
+      preview.className = 'preview-cv';
+      preview.textContent = 'Ver CV';
+      preview.addEventListener('click', () => { void previewCv(candidate); });
+      cvCell.append(preview);
+    } else {
+      cvCell.textContent = '—';
+      cvCell.className = 'muted';
+    }
+    row.append(cvCell);
     body.append(row);
   }
   $('pageLabel').textContent = `Página ${state.page} de ${state.pages}`;
+}
+
+async function previewCv(candidate) {
+  const dialog = $('cvDialog');
+  const frame = $('cvFrame');
+  const status = $('cvStatus');
+  const openLink = $('openCvTab');
+  $('cvDialogTitle').textContent = candidate.name ? `CV · ${candidate.name}` : 'Vista previa del CV';
+  status.hidden = false;
+  status.textContent = 'Cargando CV…';
+  status.className = 'cv-status';
+  frame.hidden = true;
+  frame.removeAttribute('src');
+  openLink.hidden = true;
+  dialog.showModal();
+  try {
+    const response = await fetch(`${API_BASE}/api/candidates/${encodeURIComponent(candidate.id)}/cv`, {
+      headers: { Authorization: `Bearer ${state.token}` },
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      if (response.status === 401) throw new Error('Tu sesión no está autorizada para abrir este CV.');
+      throw new Error(payload.error || 'No se pudo cargar el CV.');
+    }
+    const blob = await response.blob();
+    if (activeCvObjectUrl) URL.revokeObjectURL(activeCvObjectUrl);
+    activeCvObjectUrl = URL.createObjectURL(blob);
+    frame.src = activeCvObjectUrl;
+    frame.hidden = false;
+    openLink.href = activeCvObjectUrl;
+    openLink.hidden = false;
+    status.hidden = true;
+  } catch (error) {
+    status.textContent = error instanceof Error ? error.message : 'No se pudo cargar el CV.';
+    status.className = 'cv-status error';
+  }
 }
 
 function filenamePart(value) {
@@ -193,5 +243,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('exportProvince').addEventListener('input', updateFilename);
   $('exportTags').addEventListener('input', updateFilename);
   $('excludeExported').addEventListener('change', () => { state.page = 1; void searchCandidates(); });
+  $('closeCv').addEventListener('click', () => $('cvDialog').close());
+  $('cvDialog').addEventListener('close', () => {
+    $('cvFrame').src = 'about:blank';
+    $('cvFrame').hidden = true;
+    $('openCvTab').hidden = true;
+    if (activeCvObjectUrl) URL.revokeObjectURL(activeCvObjectUrl);
+    activeCvObjectUrl = null;
+  });
 });
 
