@@ -28,7 +28,7 @@
 
     <section class="card results-card">
       <div class="results-heading"><div><h2>Resultados</h2><p id="resultCount">Todavía no se ha realizado una búsqueda.</p></div><button class="primary" id="exportButton" type="button" disabled>Exportar Excel</button></div>
-      <div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Teléfono</th><th>Email</th><th>Última oferta</th><th>Exportado</th></tr></thead><tbody id="results"><tr><td class="empty" colspan="5">Configura los filtros y pulsa Buscar.</td></tr></tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Teléfono</th><th>Email</th><th>Última oferta</th><th>Exportado</th><th>CV</th></tr></thead><tbody id="results"><tr><td class="empty" colspan="6">Configura los filtros y pulsa Buscar.</td></tr></tbody></table></div>
       <div class="pagination"><button class="secondary" id="previousPage" type="button" disabled>Anterior</button><span id="pageLabel">Página 1</span><button class="secondary" id="nextPage" type="button" disabled>Siguiente</button></div>
     </section>
   </main>
@@ -44,5 +44,15 @@
       <div class="dialog-actions"><button class="secondary" id="cancelExport" type="button">Cancelar</button><button class="primary" id="confirmExport" type="submit">Descargar Excel</button></div>
     </form>
   </dialog>
+
+  <dialog id="cvDialog" class="cv-dialog" aria-labelledby="cvDialogTitle">
+    <div class="cv-dialog-content">
+      <header class="cv-dialog-header"><div><p class="eyebrow">CURRÍCULUM</p><h2 id="cvDialogTitle">Vista previa del CV</h2></div><button class="secondary" id="closeCv" type="button">Cerrar</button></header>
+      <p class="cv-status" id="cvStatus" role="status">Cargando CV…</p>
+      <iframe id="cvFrame" title="Vista previa del currículum" hidden></iframe>
+      <a id="openCvTab" class="secondary cv-open-link" href="#" target="_blank" rel="noopener" hidden>Abrir en otra pestaña</a>
+    </div>
+  </dialog>
 </body>
 </html>
+
