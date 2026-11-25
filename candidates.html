@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Candidatos · AGENDA STAFF</title>
+  <link rel="stylesheet" href="candidates.css">
+  <script defer src="candidates.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-icon">👥</span><div><p class="eyebrow">AGENDA STAFF</p><h1>Buscador de candidatos</h1></div></div>
+      <div class="account" id="account">Comprobando sesión…</div>
+    </header>
+
+    <section class="card search-card">
+      <div class="section-heading"><div><h2>Buscar</h2><p>Filtra la base de datos y exporta todos los resultados coincidentes.</p></div><span class="secure-badge">Acceso autorizado</span></div>
+      <form id="searchForm" class="filters">
+        <label class="wide">Nombre, teléfono o email<input id="search" type="search" placeholder="Ej.: María García o 600 123 456"></label>
+        <label>Oferta / puesto<input id="job" type="search" placeholder="Ej.: Promotor/a"></label>
+        <label>Provincia de búsqueda<select id="provinceFilter"><option value="">Todas las provincias</option></select></label>
+        <div class="actions"><button class="primary" id="searchButton" type="submit">Buscar</button><button class="secondary" id="clearButton" type="button">Limpiar</button></div>
+      </form>
+      <div id="status" class="status" role="status">Inicia sesión en Agenda Staff para buscar candidatos.</div>
+    </section>
+
+    <section class="card results-card">
+      <div class="results-heading"><div><h2>Resultados</h2><p id="resultCount">Todavía no se ha realizado una búsqueda.</p></div><button class="primary" id="exportButton" type="button" disabled>Exportar Excel</button></div>
+      <div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Teléfono</th><th>Email</th><th>Última oferta</th><th>Exportado</th></tr></thead><tbody id="results"><tr><td class="empty" colspan="5">Configura los filtros y pulsa Buscar.</td></tr></tbody></table></div>
+      <div class="pagination"><button class="secondary" id="previousPage" type="button" disabled>Anterior</button><span id="pageLabel">Página 1</span><button class="secondary" id="nextPage" type="button" disabled>Siguiente</button></div>
+    </section>
+  </main>
+
+  <dialog id="exportDialog">
+    <form id="exportForm" class="dialog-form">
+      <div><p class="eyebrow">EXCEL DE CANDIDATOS</p><h2>Datos comunes de exportación</h2><p class="dialog-help">Se añadirán a todas las filas del archivo.</p></div>
+      <label>Provincia<input id="exportProvince" required placeholder="Ej.: Zaragoza"></label>
+      <label>Observaciones<textarea id="exportObservations" rows="3" placeholder="Observación común"></textarea></label>
+      <label>Tags<input id="exportTags" placeholder="Ej.: IMAGEN"></label>
+      <p class="filename" id="filenamePreview">Nombre: bbdd_provincia.xlsx</p>
+      <div class="dialog-actions"><button class="secondary" id="cancelExport" type="button">Cancelar</button><button class="primary" id="confirmExport" type="submit">Descargar Excel</button></div>
+    </form>
+  </dialog>
+</body>
+</html>
+
