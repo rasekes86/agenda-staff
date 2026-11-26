@@ -94,12 +94,12 @@ function parseVacationRequestDates(detail, year, monthContext = -1) {
   const monthPattern = '(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre|\\d{1,2})';
   const rangeRegex = new RegExp('(?:del?\\s*)?(\\d{1,2})\\s*(?:al|a|hasta|[-–])\\s*(\\d{1,2})\\s*(?:de\\s*)?(?:[/.-]\\s*)?' + monthPattern + '(?:\\s*(?:de\\s*)?(\\d{2,4}))?', 'gi');
   for (const m of text.matchAll(rangeRegex)) {
-    const monthToken = m[3], month = /^\\d+$/.test(monthToken) ? Number(monthToken) - 1 : VACATION_MONTHS.indexOf(monthToken);
+    const monthToken = m[3], month = /^\d+$/.test(monthToken) ? Number(monthToken) - 1 : VACATION_MONTHS.indexOf(monthToken);
     appendVacationDates(dates, Number(m[1]), Number(m[2]), month, resolveVacationYear(m[4], year));
   }
   const monthList = new RegExp('((?:\\d{1,2}\\s*(?:(?:,|y|e)\\s*|\\s+)\\d{1,2})*)\\s*(?:de\\s*)?(' + monthPattern + ')', 'gi');
   for (const m of text.matchAll(monthList)) {
-    const monthToken = m[3], month = /^\\d+$/.test(monthToken) ? Number(monthToken) - 1 : VACATION_MONTHS.indexOf(monthToken);
+    const monthToken = m[3], month = /^\d+$/.test(monthToken) ? Number(monthToken) - 1 : VACATION_MONTHS.indexOf(monthToken);
     for (const day of (m[1].match(/\\d{1,2}/g) || [])) appendVacationDates(dates, Number(day), Number(day), month, year);
   }
   const numericList = /((?:\d{1,2}\s*(?:(?:,|y|e)\s*|\s+)\d{1,2})*)\s*[/. -]\s*(\d{1,2})(?:\s*[/. -]\s*(\d{2,4}))?/g;
