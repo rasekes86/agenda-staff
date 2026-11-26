@@ -113,7 +113,7 @@ async function queryVacationSheets() {
     timeoutId = setTimeout(() => controller.abort(), 25000);
     const token = await getVacationAccessToken(true);
     const url = new URL('https://sheets.googleapis.com/v4/spreadsheets/' + VACATION_SHEET_ID + '/values:batchGet');
-    VACATION_SHEETS.forEach(sheet => url.searchParams.append('ranges', "'" + sheet.title + "'!D:H"));
+    VACATION_SHEETS.forEach(sheet => url.searchParams.append('ranges', "'" + sheet.title + "'!A:H"));
     url.searchParams.set('majorDimension', 'ROWS');
     const response = await fetch(url.toString(), { method: 'GET', cache: 'no-store', signal: controller.signal,
       headers: { Accept: 'application/json', Authorization: 'Bearer ' + token } });
@@ -131,14 +131,14 @@ async function queryVacationSheets() {
         const cells = (sourceRow || []).map(vacationCellText);
         const foundMonth = vacationMonthInText(cells.join(' '));
         if (foundMonth >= 0) monthContext = foundMonth;
-        const name = (cells[0] || '').trim(), normalized = normalizeVacationName(name);
+        const name = (cells[3] || '').trim(), normalized = normalizeVacationName(name);
         if (!name || ['nombre', 'nombre trabajador', 'trabajador'].includes(normalized)) return;
-        const detail = (cells[3] || '').trim();
+        const detail = (cells[6] || '').trim();
         if (!detail) return;
         const upcomingDates = getUpcomingVacationDates(detail, sheet.year, monthContext);
         if (!upcomingDates.length) return;
-        requests.push({ year: sheet.year, name, days: (cells[2] || '').trim(), detail,
-          approver: (cells[4] || '').trim(), upcomingDates });
+        requests.push({ year: sheet.year, name, days: (cells[5] || '').trim(), detail,
+          approver: (cells[7] || '').trim(), upcomingDates });
       });
       return requests;
     });
