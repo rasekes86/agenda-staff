@@ -4718,3 +4718,15 @@ body {
 .vacation-note { margin-top: 5px; color: var(--txt3); font-size: 11px; }
 
 .vacation-feedback.is-error { color: var(--danger); }
+
+
+/* Upcoming vacation request cards */
+.vacation-source-links { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 13px; }
+.vacation-source-links .vacation-source-link { margin-top: 0; }
+.vacation-request-card { margin-bottom: 8px; }
+.vacation-request-title { margin: 0 0 8px; color: var(--pri); font-size: 13px; }
+.vacation-request-field { margin: 5px 0 0; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.vacation-request-field strong { color: var(--txt); }
+.vacation-request-field span { color: var(--txt2); }
+.vacation-request-dates span { color: var(--pri); font-weight: 600; }
+.vacation-empty { padding: 12px; border: 1px solid var(--bor); border-radius: 10px; color: var(--txt2); background: var(--bg2); font-size: 12px; }

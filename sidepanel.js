@@ -22,64 +22,29 @@ let viewStartDate = new Date();
 const VISIBLE_DAYS = 30;
 
 /* ============================================
-   VACATION LOOKUP
+   UPCOMING VACATION REQUESTS
    ============================================ */
 const VACATION_SHEET_ID = '1A6RVZZFeLsh-KAQzcmruwekxQH35JgUrhKz9JhtV7cs';
-const VACATION_SHEET_GID = '571118126';
-const VACATION_MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-let vacationSearchTimer = null;
-let vacationRequestController = null;
-let vacationSearchSequence = 0;
-let vacationRowsCache = null;
-let vacationRowsCacheAt = 0;
-let vacationRowsPromise = null;
+const VACATION_SHEETS = [
+  { year: 2026, title: 'SOLICITUD DE VACACIONES 2026', gid: '387505224' },
+  { year: 2027, title: 'SOLICITUD DE VACACIONES 2027', gid: '2046650432' }
+];
+const VACATION_MONTHS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+let vacationSearchTimer = null, vacationRequestController = null, vacationSearchSequence = 0;
+let vacationRowsCache = null, vacationRowsCacheAt = 0, vacationRowsPromise = null;
 const VACATION_ROWS_CACHE_MS = 2 * 60 * 1000;
 
 function normalizeVacationName(value) {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
-
-function vacationSearchTokens(value) {
-  return normalizeVacationName(value).split(/\s+/).filter(token => token.length >= 2);
-}
-
-function vacationTokenVariants(token) {
-  const variantsByCharacter = {
-    a: ['a', 'á'], e: ['e', 'é'], i: ['i', 'í'], o: ['o', 'ó'], u: ['u', 'ú'], n: ['n', 'ñ']
-  };
-  let variants = [''];
-  for (const character of token) {
-    const choices = variantsByCharacter[character] || [character];
-    variants = variants.flatMap(prefix => choices.map(choice => prefix + choice)).slice(0, 32);
-  }
-  return variants;
-}
-
-function vacationWhereClause(value) {
-  const tokens = vacationSearchTokens(value);
-  if (!tokens.length) return '';
-  return tokens.map(token => {
-    const options = vacationTokenVariants(token)
-      .map(variant => `lower(C) contains '${variant}'`);
-    return options.length === 1 ? options[0] : `(${options.join(' or ')})`;
-  }).join(' and ');
-}
-
+function vacationSearchTokens(value) { return normalizeVacationName(value).split(/\s+/).filter(token => token.length >= 2); }
 function vacationCellText(cell) {
   if (cell === null || cell === undefined) return '';
   if (typeof cell === 'object') return String(cell.f ?? cell.v ?? '');
   return String(cell);
 }
-
 async function getVacationAccessToken(interactive = true) {
-  if (!chrome.identity?.getAuthToken) {
-    throw new Error('La autorización de Google no está disponible. Actualiza la extensión y vuelve a intentarlo.');
-  }
+  if (!chrome.identity?.getAuthToken) throw new Error('La autorización de Google no está disponible. Actualiza la extensión y vuelve a intentarlo.');
   try {
     const result = await chrome.identity.getAuthToken({ interactive });
     const token = typeof result === 'string' ? result : result?.token;
@@ -88,221 +53,219 @@ async function getVacationAccessToken(interactive = true) {
   } catch (error) {
     if (!interactive) throw error;
     const detail = String(error?.message || '');
-    if (/access_denied|user.?denied|cancel/i.test(detail)) {
-      throw new Error('No se autorizó el acceso a la hoja de vacaciones.');
-    }
-    throw new Error('Google no pudo autorizar el acceso. Comprueba que has iniciado sesión con la cuenta que puede abrir la hoja y acepta el permiso de lectura.');
+    if (/access_denied|user.?denied|cancel/i.test(detail)) throw new Error('No se autorizó el acceso a las hojas de solicitudes.');
+    throw new Error('Google no pudo autorizar el acceso. Inicia sesión con una cuenta que pueda abrir las hojas y acepta el permiso de lectura.');
   }
 }
-
-async function queryVacationSheet() {
+function vacationMonthInText(value) {
+  const text = normalizeVacationName(value);
+  return VACATION_MONTHS.findIndex(month => text.includes(month));
+}
+function appendVacationDates(target, firstDay, lastDay, month, year) {
+  if (!Number.isInteger(month) || month < 0 || month > 11 || firstDay < 1 || lastDay > 31 || lastDay < firstDay) return;
+  for (let day = firstDay; day <= lastDay; day++) {
+    const date = new Date(year, month, day);
+    if (date.getFullYear() === year && date.getMonth() === month && date.getDate() === day) target.push(date);
+  }
+}
+function resolveVacationYear(value, fallbackYear) {
+  const year = Number(value);
+  return Number.isInteger(year) ? (year < 100 ? 2000 + year : year) : fallbackYear;
+}
+function parseVacationRequestDates(detail, year, monthContext = -1) {
+  const text = String(detail || '').toLowerCase(), dates = [];
+  const monthPattern = '(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre|\\d{1,2})';
+  const rangeRegex = new RegExp('(?:del?\\s*)?(\\d{1,2})\\s*(?:al|a|hasta|[-–])\\s*(\\d{1,2})\\s*(?:de\\s*)?(?:[/.-]\\s*)?' + monthPattern + '(?:\\s*(?:de\\s*)?(\\d{2,4}))?', 'gi');
+  for (const m of text.matchAll(rangeRegex)) {
+    const monthToken = m[3], month = /^\\d+$/.test(monthToken) ? Number(monthToken) - 1 : VACATION_MONTHS.indexOf(monthToken);
+    appendVacationDates(dates, Number(m[1]), Number(m[2]), month, resolveVacationYear(m[4], year));
+  }
+  const monthList = new RegExp('((?:\\d{1,2}\\s*(?:(?:,|y|e)\\s*|\\s+)\\d{1,2})*)\\s*(?:de\\s*)?(' + monthPattern + ')', 'gi');
+  for (const m of text.matchAll(monthList)) {
+    const monthToken = m[3], month = /^\\d+$/.test(monthToken) ? Number(monthToken) - 1 : VACATION_MONTHS.indexOf(monthToken);
+    for (const day of (m[1].match(/\\d{1,2}/g) || [])) appendVacationDates(dates, Number(day), Number(day), month, year);
+  }
+  const numericList = /((?:\d{1,2}\s*(?:(?:,|y|e)\s*|\s+)\d{1,2})*)\s*[/. -]\s*(\d{1,2})(?:\s*[/. -]\s*(\d{2,4}))?/g;
+  for (const m of text.matchAll(numericList)) {
+    const month = Number(m[2]) - 1, requestYear = resolveVacationYear(m[3], year);
+    for (const day of (m[1].match(/\d{1,2}/g) || [])) appendVacationDates(dates, Number(day), Number(day), month, requestYear);
+  }
+  const singleDate = /(\d{1,2})\s*[/. -]\s*(\d{1,2})(?:\s*[/. -]\s*(\d{2,4}))?/g;
+  for (const m of text.matchAll(singleDate)) appendVacationDates(dates, Number(m[1]), Number(m[1]), Number(m[2]) - 1, resolveVacationYear(m[3], year));
+  if (monthContext >= 0) {
+    const contextualList = /(?:d[ií]as?\s*)?(\d{1,2}(?:\s*(?:,|y|e)\s*\d{1,2})+)/g;
+    for (const m of text.matchAll(contextualList))
+      for (const day of (m[1].match(/\d{1,2}/g) || [])) appendVacationDates(dates, Number(day), Number(day), monthContext, year);
+    const contextualRange = /(?:del?\s*)?(\d{1,2})\s*(?:al|a|hasta|[-–])\s*(\d{1,2})(?!\s*[/. -]\s*\d{1,2})/g;
+    for (const m of text.matchAll(contextualRange)) appendVacationDates(dates, Number(m[1]), Number(m[2]), monthContext, year);
+  }
+  return Array.from(new Map(dates.map(date => [date.getTime(), date])).values()).sort((x, y) => x - y);
+}
+function getUpcomingVacationDates(detail, year, monthContext) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return parseVacationRequestDates(detail, year, monthContext).filter(date => date >= today);
+}
+async function queryVacationSheets() {
   if (vacationRequestController) vacationRequestController.abort();
-  const controller = new AbortController();
-  vacationRequestController = controller;
+  const controller = new AbortController(); vacationRequestController = controller;
   let timeoutId;
   try {
-    timeoutId = setTimeout(() => controller.abort(), 20000);
+    timeoutId = setTimeout(() => controller.abort(), 25000);
     const token = await getVacationAccessToken(true);
-    const url = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${VACATION_SHEET_ID}/values:batchGet`);
-    url.searchParams.append('ranges', "'VACACIONES MAD 2026'!C:C");
-    url.searchParams.append('ranges', "'VACACIONES MAD 2026'!T:T");
+    const url = new URL('https://sheets.googleapis.com/v4/spreadsheets/' + VACATION_SHEET_ID + '/values:batchGet');
+    VACATION_SHEETS.forEach(sheet => url.searchParams.append('ranges', "'" + sheet.title + "'!A:H"));
     url.searchParams.set('majorDimension', 'ROWS');
-    const response = await fetch(url.toString(), {
-      method: 'GET',
-      cache: 'no-store',
-      signal: controller.signal,
-      headers: {
-        'Accept': 'application/json',
-        'Authorization': `Bearer ${token}`
-      }
-    });
+    const response = await fetch(url.toString(), { method: 'GET', cache: 'no-store', signal: controller.signal,
+      headers: { Accept: 'application/json', Authorization: 'Bearer ' + token } });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       const detail = payload.error?.message || '';
-      if (response.status === 401) {
-        await chrome.identity.removeCachedAuthToken?.({ token }).catch(() => {});
-      }
-      throw new Error(detail
-        ? `Google no pudo consultar la hoja: ${detail}`
-        : 'No se pudo acceder a la hoja. Comprueba el permiso de lectura y el acceso a la pestaña de vacaciones.');
+      if (response.status === 401) await chrome.identity.removeCachedAuthToken?.({ token }).catch(() => {});
+      throw new Error(detail ? 'Google no pudo consultar las hojas: ' + detail : 'No se pudo acceder a las hojas. Comprueba el permiso de lectura.');
     }
-    const columns = payload.valueRanges || [];
-    const names = columns[0]?.values || [];
-    const totals = columns[1]?.values || [];
-    const length = Math.max(names.length, totals.length);
-    return Array.from({ length }, (_, index) => ({
-      c: [
-        { v: names[index]?.[0] ?? '' },
-        { v: totals[index]?.[0] ?? '' }
-      ]
-    }));
+    const ranges = payload.valueRanges || [];
+    return VACATION_SHEETS.flatMap((sheet, index) => {
+      let monthContext = -1;
+      const requests = [];
+      (ranges[index]?.values || []).forEach(sourceRow => {
+        const cells = (sourceRow || []).map(vacationCellText);
+        const foundMonth = vacationMonthInText(cells.join(' '));
+        if (foundMonth >= 0) monthContext = foundMonth;
+        const name = (cells[3] || '').trim(), normalized = normalizeVacationName(name);
+        if (!name || ['nombre', 'nombre trabajador', 'trabajador'].includes(normalized)) return;
+        const detail = (cells[6] || '').trim();
+        if (!detail) return;
+        const upcomingDates = getUpcomingVacationDates(detail, sheet.year, monthContext);
+        if (!upcomingDates.length) return;
+        requests.push({ year: sheet.year, name, days: (cells[5] || '').trim(), detail,
+          approver: (cells[7] || '').trim(), upcomingDates });
+      });
+      return requests;
+    });
   } finally {
     clearTimeout(timeoutId);
     if (vacationRequestController === controller) vacationRequestController = null;
   }
 }
-
 function setVacationFeedback(message, isError = false) {
-  const feedback = $('vacationFeedback');
-  feedback.textContent = message;
-  feedback.classList.toggle('is-error', isError);
+  const feedback = $('vacationFeedback'); feedback.textContent = message; feedback.classList.toggle('is-error', isError);
 }
-
 function closeVacationModal() {
-  $('vacationModal').classList.remove('show');
-  $('vacationModal').setAttribute('aria-hidden', 'true');
-  clearTimeout(vacationSearchTimer);
-  vacationSearchSequence++;
+  $('vacationModal').classList.remove('show'); $('vacationModal').setAttribute('aria-hidden', 'true');
+  clearTimeout(vacationSearchTimer); vacationSearchSequence++;
   if (vacationRequestController) vacationRequestController.abort();
 }
-
 function openVacationModal() {
-  clearTimeout(vacationSearchTimer);
-  vacationSearchSequence++;
+  clearTimeout(vacationSearchTimer); vacationSearchSequence++;
   if (vacationRequestController) vacationRequestController.abort();
-  const modal = $('vacationModal');
-  modal.classList.add('show');
-  modal.setAttribute('aria-hidden', 'false');
-  $('vacationSearch').value = '';
-  $('vacationSearchResults').replaceChildren();
-  $('vacationDetail').replaceChildren();
+  const modal = $('vacationModal'); modal.classList.add('show'); modal.setAttribute('aria-hidden', 'false');
+  $('vacationSearch').value = ''; $('vacationSearchResults').replaceChildren(); $('vacationDetail').replaceChildren();
   setVacationFeedback('Escribe al menos 3 letras para buscar.');
   requestAnimationFrame(() => $('vacationSearch').focus());
 }
-
-function vacationCellValue(row, index) {
-  return row?.c?.[index]?.v ?? null;
-}
-
 function renderVacationPeople(rows, query, sequence) {
-  const resultBox = $('vacationSearchResults');
-  resultBox.replaceChildren();
-  const tokens = vacationSearchTokens(query);
-  const unique = new Map();
+  const resultBox = $('vacationSearchResults'); resultBox.replaceChildren();
+  const tokens = vacationSearchTokens(query), unique = new Map();
   rows.forEach(row => {
-    const name = vacationCellText(vacationCellValue(row, 0)).trim();
-    const normalized = normalizeVacationName(name);
-    if (!name || !tokens.every(token => normalized.includes(token))) return;
-    if (!unique.has(normalized)) unique.set(normalized, name);
+    const normalized = normalizeVacationName(row.name);
+    if (tokens.every(token => normalized.includes(token)) && !unique.has(normalized)) unique.set(normalized, row.name);
   });
-  if (!unique.size) {
-    setVacationFeedback('No se encontraron coincidencias. Prueba con otro nombre o apellido.');
-    return;
-  }
-  const names = Array.from(unique.values());
-  setVacationFeedback(names.length >= 20 ? 'Hay varias coincidencias; añade otro apellido para precisar.' : 'Selecciona una persona para ver sus vacaciones.');
+  if (!unique.size) { setVacationFeedback('No se encontraron coincidencias con solicitudes desde hoy.'); return; }
+  const names = Array.from(unique.values()).sort((x, y) => x.localeCompare(y, 'es'));
+  setVacationFeedback(names.length >= 20 ? 'Hay varias coincidencias; añade otro apellido para precisar.' : 'Selecciona una persona para ver sus solicitudes vigentes.');
   names.forEach(name => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'vacation-person-option';
-    button.textContent = name;
-    button.addEventListener('click', () => loadVacationDetails(name, sequence));
-    resultBox.appendChild(button);
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'vacation-person-option'; button.textContent = name;
+    button.addEventListener('click', () => loadVacationDetails(name, sequence)); resultBox.appendChild(button);
   });
 }
-
 function formatVacationDays(value) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return String(value || '');
-  return new Intl.NumberFormat('es-ES', { maximumFractionDigits: 2 }).format(numeric);
+  const text = String(value || '').trim(); if (!text) return '—';
+  const numeric = Number(text.replace(',', '.'));
+  return Number.isFinite(numeric) ? new Intl.NumberFormat('es-ES', { maximumFractionDigits: 2 }).format(numeric) : text;
 }
-
-function renderVacationDetails(row, selectedName) {
-  const container = $('vacationDetail');
-  container.replaceChildren();
-  const valueCell = row.c?.[1];
-  const rawValue = valueCell?.v ?? vacationCellText(valueCell);
-  const number = Number(String(rawValue).replace(',', '.'));
-  const displayValue = rawValue === '' ? '—' : (Number.isFinite(number) ? formatVacationDays(number) : String(rawValue));
-  const card = document.createElement('section');
-  card.className = 'vacation-detail-card';
-  const heading = document.createElement('h4');
-  heading.className = 'vacation-detail-name';
-  heading.textContent = selectedName;
-  card.appendChild(heading);
-  const summary = document.createElement('div');
-  summary.className = 'vacation-total';
-  const strong = document.createElement('strong');
-  strong.textContent = displayValue;
-  const label = document.createElement('span');
-  label.textContent = 'días pendientes totales (2025 y 2026)';
-  summary.append(strong, label);
-  card.appendChild(summary);
-  container.appendChild(card);
+function formatVacationDate(date) {
+  return new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }).format(date).replace(/\./g, '');
 }
-
-async function loadVacationRows() {
-  if (vacationRowsCache && Date.now() - vacationRowsCacheAt < VACATION_ROWS_CACHE_MS) {
-    return vacationRowsCache;
+function formatUpcomingVacationDates(dates) {
+  const ranges = []; let first = null, previous = null;
+  const flush = () => {
+    if (!first) return;
+    ranges.push(first.getTime() === previous.getTime() ? formatVacationDate(first) : 'del ' + formatVacationDate(first) + ' al ' + formatVacationDate(previous));
+  };
+  dates.forEach(date => {
+    if (!first) { first = previous = date; return; }
+    const next = new Date(previous); next.setDate(next.getDate() + 1);
+    if (date.getTime() === next.getTime()) { previous = date; return; }
+    flush(); first = previous = date;
+  });
+  flush(); return ranges.join(' · ');
+}
+function appendVacationField(card, labelText, valueText, className = '') {
+  const field = document.createElement('p'); field.className = 'vacation-request-field' + (className ? ' ' + className : '');
+  const label = document.createElement('strong'); label.textContent = labelText + ': ';
+  const value = document.createElement('span'); value.textContent = valueText || '—';
+  field.append(label, value); card.appendChild(field);
+}
+function renderVacationDetails(requests, selectedName) {
+  const container = $('vacationDetail'); container.replaceChildren();
+  const heading = document.createElement('h4'); heading.className = 'vacation-detail-name'; heading.textContent = selectedName; container.appendChild(heading);
+  if (!requests.length) {
+    const empty = document.createElement('p'); empty.className = 'vacation-empty'; empty.textContent = 'No hay solicitudes con fechas desde hoy en adelante.';
+    container.appendChild(empty); return;
   }
-  if (vacationRowsPromise) return vacationRowsPromise;
-  const pending = queryVacationSheet()
-    .then(rows => {
-      vacationRowsCache = rows;
-      vacationRowsCacheAt = Date.now();
-      return rows;
-    })
-    .finally(() => {
-      if (vacationRowsPromise === pending) vacationRowsPromise = null;
-    });
-  vacationRowsPromise = pending;
-  return pending;
+  requests.forEach(request => {
+    const card = document.createElement('section'); card.className = 'vacation-detail-card vacation-request-card';
+    const title = document.createElement('h5'); title.className = 'vacation-request-title'; title.textContent = 'Solicitud ' + request.year; card.appendChild(title);
+    appendVacationField(card, 'Fechas desde hoy', formatUpcomingVacationDates(request.upcomingDates), 'vacation-request-dates');
+    appendVacationField(card, 'Días solicitados', formatVacationDays(request.days));
+    appendVacationField(card, 'Detalle de la solicitud', request.detail);
+    appendVacationField(card, 'Autoriza / observaciones', request.approver);
+    container.appendChild(card);
+  });
 }
-
+async function loadVacationRows() {
+  if (vacationRowsCache && Date.now() - vacationRowsCacheAt < VACATION_ROWS_CACHE_MS) return vacationRowsCache;
+  if (vacationRowsPromise) return vacationRowsPromise;
+  const pending = queryVacationSheets().then(rows => { vacationRowsCache = rows; vacationRowsCacheAt = Date.now(); return rows; })
+    .finally(() => { if (vacationRowsPromise === pending) vacationRowsPromise = null; });
+  vacationRowsPromise = pending; return pending;
+}
 async function searchVacationPeople(query) {
-  const sequence = ++vacationSearchSequence;
-  const tokens = vacationSearchTokens(query);
+  const sequence = ++vacationSearchSequence, tokens = vacationSearchTokens(query);
   $('vacationDetail').replaceChildren();
   if (normalizeVacationName(query).replace(/\s/g, '').length < 3 || !tokens.length) {
-    $('vacationSearchResults').replaceChildren();
-    setVacationFeedback('Escribe al menos 3 letras para buscar.');
-    return;
+    $('vacationSearchResults').replaceChildren(); setVacationFeedback('Escribe al menos 3 letras para buscar.'); return;
   }
-  setVacationFeedback('Buscando en la hoja de vacaciones…');
+  setVacationFeedback('Buscando solicitudes de 2026 y 2027…');
   try {
     const rows = await loadVacationRows();
     if (sequence !== vacationSearchSequence) return;
     renderVacationPeople(rows, query, sequence);
   } catch (error) {
     if (sequence !== vacationSearchSequence || error.name === 'AbortError') return;
-    $('vacationSearchResults').replaceChildren();
-    const message = error.message || 'No se pudo consultar la hoja.';
-    setVacationFeedback(message, true);
+    $('vacationSearchResults').replaceChildren(); setVacationFeedback(error.message || 'No se pudieron consultar las hojas.', true);
   }
 }
-
 async function loadVacationDetails(name, searchSequence) {
-  const sequence = ++vacationSearchSequence;
-  $('vacationDetail').replaceChildren();
-  setVacationFeedback('Consultando las vacaciones…');
+  const sequence = ++vacationSearchSequence; $('vacationDetail').replaceChildren(); setVacationFeedback('Consultando las solicitudes…');
   try {
     const rows = await loadVacationRows();
     if (sequence !== vacationSearchSequence || searchSequence > sequence) return;
     const normalized = normalizeVacationName(name);
-    const match = rows.find(row => normalizeVacationName(vacationCellText(vacationCellValue(row, 0))) === normalized);
-    if (!match) {
-      setVacationFeedback('No se encontraron los datos de esa persona. Prueba de nuevo.', true);
-      return;
-    }
-    setVacationFeedback('Datos actualizados desde la hoja.');
-    renderVacationDetails(match, vacationCellText(vacationCellValue(match, 0)));
+    const matches = rows.filter(row => normalizeVacationName(row.name) === normalized).sort((x, y) => x.upcomingDates[0] - y.upcomingDates[0]);
+    setVacationFeedback(matches.length ? 'Datos actualizados desde las hojas.' : 'No hay solicitudes vigentes.');
+    renderVacationDetails(matches, name);
   } catch (error) {
     if (sequence !== vacationSearchSequence || error.name === 'AbortError') return;
-    setVacationFeedback(error.message || 'No se pudieron consultar las vacaciones.', true);
+    setVacationFeedback(error.message || 'No se pudieron consultar las solicitudes.', true);
   }
 }
-
 function handleVacationSearchInput() {
-  clearTimeout(vacationSearchTimer);
-  vacationSearchSequence++;
+  clearTimeout(vacationSearchTimer); vacationSearchSequence++;
   if (vacationRequestController) vacationRequestController.abort();
-  $('vacationSearchResults').replaceChildren();
-  $('vacationDetail').replaceChildren();
+  $('vacationSearchResults').replaceChildren(); $('vacationDetail').replaceChildren();
   const query = $('vacationSearch').value.trim();
-  if (normalizeVacationName(query).replace(/\s/g, '').length < 3) {
-    setVacationFeedback('Escribe al menos 3 letras para buscar.');
-    return;
-  }
+  if (normalizeVacationName(query).replace(/\s/g, '').length < 3) { setVacationFeedback('Escribe al menos 3 letras para buscar.'); return; }
   vacationSearchTimer = setTimeout(() => searchVacationPeople(query), 350);
 }
 
