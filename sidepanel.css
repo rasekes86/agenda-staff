@@ -4730,3 +4730,8 @@ body {
 .vacation-request-field span { color: var(--txt2); }
 .vacation-request-dates span { color: var(--pri); font-weight: 600; }
 .vacation-empty { padding: 12px; border: 1px solid var(--bor); border-radius: 10px; color: var(--txt2); background: var(--bg2); font-size: 12px; }
+
+
+/* Google authorization button for per-user access */
+.vacation-connect { width: 100%; min-height: 38px; margin: 0 0 13px; padding: 8px 12px; border: 0; border-radius: 8px; background: var(--pri); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+.vacation-connect:hover { filter: brightness(.95); }
