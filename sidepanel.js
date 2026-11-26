@@ -74,7 +74,7 @@ async function authorizeVacationAccess() {
   }
 }
 
-function vacationMonthInTextfunction vacationMonthInText(value) {
+function vacationMonthInText(value) {
   const text = normalizeVacationName(value);
   return VACATION_MONTHS.findIndex(month => text.includes(month));
 }
@@ -180,7 +180,7 @@ async function queryVacationSheets() {
   }
 }
 
-function setVacationFeedbackfunction setVacationFeedback(message, isError = false) {
+function setVacationFeedback(message, isError = false) {
   const feedback = $('vacationFeedback'); feedback.textContent = message; feedback.classList.toggle('is-error', isError);
 }
 function closeVacationModal() {
@@ -211,7 +211,7 @@ function renderVacationPeople(data, query, sequence) {
     button.addEventListener('click', () => loadVacationDetails(name, sequence)); resultBox.appendChild(button);
   });
 }
-function formatVacationDaysfunction formatVacationDays(value) {
+function formatVacationDays(value) {
   const text = String(value || '').trim(); if (!text) return '—';
   const numeric = Number(text.replace(',', '.'));
   return Number.isFinite(numeric) ? new Intl.NumberFormat('es-ES', { maximumFractionDigits: 2 }).format(numeric) : text;
@@ -263,7 +263,7 @@ function renderVacationDetails(requests, selectedName, balance) {
     container.appendChild(card);
   });
 }
-async function loadVacationRowsasync function loadVacationRows() {
+async function loadVacationRows() {
   if (vacationRowsCache && Date.now() - vacationRowsCacheAt < VACATION_ROWS_CACHE_MS) return vacationRowsCache;
   if (vacationRowsPromise) return vacationRowsPromise;
   const pending = queryVacationSheets().then(rows => { vacationRowsCache = rows; vacationRowsCacheAt = Date.now(); return rows; })
@@ -302,7 +302,7 @@ async function loadVacationDetails(name, searchSequence) {
     setVacationFeedback(error.message || 'No se pudieron consultar las solicitudes.', true);
   }
 }
-function handleVacationSearchInputfunction handleVacationSearchInput() {
+function handleVacationSearchInput() {
   clearTimeout(vacationSearchTimer); vacationSearchSequence++;
   if (vacationRequestController) vacationRequestController.abort();
   $('vacationSearchResults').replaceChildren(); $('vacationDetail').replaceChildren();
